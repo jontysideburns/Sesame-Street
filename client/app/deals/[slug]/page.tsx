@@ -1,0 +1,676 @@
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { getDeal, getDealFinancialPeriod } from "../../../api/deals";
+import { getDealAssessment } from "../../../api/assessment";
+import { captureDealSnapshot } from "../actions";
+
+function formatMoney(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0
+  }).format(value);
+}
+
+function formatNumber(value: number, digits = 2) {
+  return new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: digits
+  }).format(value);
+}
+
+function toneForStatus(status: string) {
+  if (
+    status.includes("trigger") ||
+    status === "overdue" ||
+    status === "high" ||
+    status === "oppose"
+  ) {
+    return "critical";
+  }
+  if (
+    status.includes("lock") ||
+    status.includes("watch") ||
+    status.includes("concern") ||
+    status.includes("enhanced") ||
+    status === "medium" ||
+    status === "under_review" ||
+    status === "open" ||
+    status === "support_with_conditions"
+  ) {
+    return "warning";
+  }
+  return "good";
+}
+
+function distributionTone(status: string) {
+  if (status === "blocked") return "critical";
+  if (status === "restricted" || status === "review_required") return "warning";
+  return "good";
+}
+
+function metricValue(value?: number, suffix = "") {
+  if (value === undefined || value === null || Number.isNaN(value)) {
+    return "—";
+  }
+
+  return `${formatNumber(value)}${suffix}`;
+}
+
+function firstSentence(value: string) {
+  const trimmed = value.trim();
+  const match = trimmed.match(/^.*?[.!?](?:\s|$)/);
+  return match ? match[0].trim() : trimmed;
+}
+
+export default async function DealPage({
+  params
+}: {
+  params: Promise<{ slug: string }>;
+}) {
+  const { slug } = await params;
+
+  try {
+    const [deal, assessment, latestPeriod] = await Promise.all([
+      getDeal(slug),
+      getDealAssessment(slug),
+      getDealFinancialPeriod(slug, "latest")
+    ]);
+
+    const overdueCount = deal.obligations.filter((item) => item.status === "overdue").length;
+    const latestDocument = deal.documents[0];
+    const dscrHistoryPoint = deal.history[deal.history.length - 1];
+    const distribution = deal.distributionAssessment;
+    const latestAmendment = deal.amendmentHistory[0] ?? null;
+    const activeAmendmentCount = deal.amendmentHistory.filter(
+      (item) => item.amendmentStatus === "active"
+    ).length;
+    const currentPeriodRows = [
+      {
+        label: "Senior DSCR",
+        actual: metricValue(deal.covenant.currentValue, "x"),
+        baseCase: metricValue(dscrHistoryPoint?.expectedDscr, "x"),
+        lockup: metricValue(deal.covenant.thresholdLockup, "x"),
+        defaultLevel: metricValue(deal.covenant.thresholdTrigger, "x"),
+        tone: toneForStatus(deal.covenant.status)
+      },
+      {
+        label: "Revenue",
+        actual: metricValue(latestPeriod.reportedMetrics.revenue),
+        baseCase: metricValue(latestPeriod.expectedMetrics.revenue),
+        lockup: "—",
+        defaultLevel: "—",
+        tone: "neutral"
+      },
+      {
+        label: "EBITDA",
+        actual: metricValue(latestPeriod.reportedMetrics.ebitda),
+        baseCase: metricValue(latestPeriod.expectedMetrics.ebitda),
+        lockup: "—",
+        defaultLevel: "—",
+        tone: "neutral"
+      },
+      {
+        label: "CFADS",
+        actual: metricValue(latestPeriod.reportedMetrics.cfads),
+        baseCase: metricValue(latestPeriod.expectedMetrics.cfads),
+        lockup: "—",
+        defaultLevel: "—",
+        tone: "neutral"
+      },
+      {
+        label: "Leased Capacity",
+        actual: metricValue(latestPeriod.reportedMetrics.leasedCapacityPct, "%"),
+        baseCase: metricValue(latestPeriod.expectedMetrics.leasedCapacityPct, "%"),
+        lockup: "—",
+        defaultLevel: "—",
+        tone: "neutral"
+      },
+      {
+        label: "Construction Completion",
+        actual: metricValue(
+          latestPeriod.reportedMetrics.constructionCompletionPct,
+          "%"
+        ),
+        baseCase: metricValue(
+          latestPeriod.expectedMetrics.constructionCompletionPct,
+          "%"
+        ),
+        lockup: "—",
+        defaultLevel: "—",
+        tone: "neutral"
+      }
+    ];
+
+    return (
+      <main className="shell">
+        <section className="topsheet">
+          <div className="topsheet-header">
+            <div>
+              <p className="eyebrow">Deal Summary</p>
+              <h1>{deal.name}</h1>
+              <p className="topsheet-subtitle">
+                {deal.borrower} · {deal.dealType} · {deal.region}
+              </p>
+              <p className="meta-note">
+                Viewer: {deal.viewer.displayName} · {deal.viewer.teamName}
+              </p>
+            </div>
+            <div className="topsheet-actions">
+              <Link className="button secondary" href="/portfolio">
+                Back to Portfolio
+              </Link>
+              <Link className="button secondary" href={`/deals/${deal.slug}/periods/latest`}>
+                Period View
+              </Link>
+              <Link
+                className="button secondary"
+                href={`/deals/${deal.slug}/covenants/${deal.covenant.id}`}
+              >
+                Covenant Detail
+              </Link>
+              <Link className="button secondary" href={`/deals/${deal.slug}/distribution`}>
+                Distribution
+              </Link>
+              <Link className="button secondary" href={`/deals/${deal.slug}/forecasts`}>
+                Forecasts
+              </Link>
+              <Link className="button secondary" href={`/deals/${deal.slug}/amendments`}>
+                Amendments
+              </Link>
+              <Link className="button secondary" href={`/deals/${deal.slug}/assessment`}>
+                Assessment
+              </Link>
+              <Link className="button secondary" href={`/deals/${deal.slug}/calendar`}>
+                Calendar
+              </Link>
+              <Link className="button secondary" href={`/deals/${deal.slug}/activity`}>
+                Activity Timeline
+              </Link>
+              <Link className="button secondary" href={`/deals/${deal.slug}/reports`}>
+                Reports
+              </Link>
+              <Link className="button secondary" href={`/deals/${deal.slug}/risk`}>
+                Risk Register
+              </Link>
+              <Link className="button secondary" href={`/deals/${deal.slug}/requests`}>
+                Borrower Requests
+              </Link>
+              <Link className="button secondary" href={`/deals/${deal.slug}/packs`}>
+                Memo Packs
+              </Link>
+              <Link className="button secondary" href={`/deals/${deal.slug}/snapshots`}>
+                Snapshot History
+              </Link>
+            </div>
+          </div>
+
+          <section className="panel topsheet-panel">
+            <div className="topsheet-block">
+              <div className="topsheet-block-heading">
+                <p className="eyebrow">Deal Overview</p>
+                <span className="meta-note">Investment: {deal.slug}</span>
+              </div>
+              <h2>{deal.name}</h2>
+              <p className="detail-copy">{deal.summary}</p>
+            </div>
+
+            <div className="topsheet-description">
+              <strong>Deal Description</strong>
+              <p>{deal.dealOverview}</p>
+            </div>
+
+            <div className="topsheet-status-grid">
+              <article className="topsheet-note topsheet-note-critical">
+                <strong>Compliance Update</strong>
+                <p>
+                  {overdueCount > 0
+                    ? `${overdueCount} overdue deliverable${
+                        overdueCount > 1 ? "s" : ""
+                      } requiring action.`
+                    : "All currently scheduled deliverables are up to date."}
+                </p>
+                <span>
+                  Latest package: {deal.latestPeriodLabel} · reported{" "}
+                  {deal.latestReportedAt.slice(0, 10)}
+                </span>
+              </article>
+
+              <article className="topsheet-note topsheet-note-info">
+                <strong>Investment Update</strong>
+                <p>{firstSentence(assessment.assessment.summary)}</p>
+                <span>
+                  Active trends: {assessment.activeTrends.length} · next test{" "}
+                  {deal.nextTestDate}
+                </span>
+              </article>
+
+              <article className="topsheet-note">
+                <strong>Key Metrics</strong>
+                <dl className="topsheet-key-metrics">
+                  <div>
+                    <dt>Exposure</dt>
+                    <dd>{formatMoney(deal.exposure)}</dd>
+                  </div>
+                  <div>
+                    <dt>Facility amount</dt>
+                    <dd>{formatMoney(deal.facilityAmount)}</dd>
+                  </div>
+                  <div>
+                    <dt>Current grade</dt>
+                    <dd>{deal.grade}</dd>
+                  </div>
+                  <div>
+                    <dt>Revenue risk</dt>
+                    <dd>{deal.revenueRisk}</dd>
+                  </div>
+                </dl>
+              </article>
+            </div>
+
+            <div className="topsheet-two-column">
+              <article className="topsheet-card">
+                <div className="status-row">
+                  <strong>Distribution Assessment</strong>
+                  {distribution ? (
+                    <span className={`badge ${distributionTone(distribution.status)}`}>
+                      {distribution.status.replaceAll("_", " ")}
+                    </span>
+                  ) : null}
+                </div>
+                {distribution ? (
+                  <>
+                    <p>{distribution.summary}</p>
+                    <dl className="topsheet-definition-grid">
+                      <div>
+                        <dt>Assessment period</dt>
+                        <dd>{distribution.periodLabel}</dd>
+                      </div>
+                      <div>
+                        <dt>Lock-up state</dt>
+                        <dd>{distribution.lockupState.replaceAll("_", " ")}</dd>
+                      </div>
+                      <div>
+                        <dt>Blockers</dt>
+                        <dd>{distribution.blockerCount}</dd>
+                      </div>
+                      <div>
+                        <dt>Permitted capacity</dt>
+                        <dd>
+                          {distribution.distributionCapacity !== null
+                            ? formatMoney(distribution.distributionCapacity)
+                            : "—"}
+                        </dd>
+                      </div>
+                    </dl>
+                    {distribution.failedConditions[0] ? (
+                      <p className="meta-note">
+                        Primary blocker: {distribution.failedConditions[0].label}
+                      </p>
+                    ) : null}
+                  </>
+                ) : (
+                  <p>No distribution assessment is available for this deal.</p>
+                )}
+              </article>
+
+              <article className="topsheet-card">
+                <strong>Credit Metrics</strong>
+                <table className="topsheet-table">
+                  <thead>
+                    <tr>
+                      <th>Metric</th>
+                      <th>Actual</th>
+                      <th>Base Case</th>
+                      <th>Lock-Up</th>
+                      <th>Default</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {currentPeriodRows.map((row) => (
+                      <tr key={row.label}>
+                        <th>
+                          <div className="topsheet-table-label">
+                            <span>{row.label}</span>
+                            {row.label === "Senior DSCR" ? (
+                              <span className={`badge ${row.tone}`}>
+                                {deal.covenant.status.replaceAll("_", " ")}
+                              </span>
+                            ) : null}
+                          </div>
+                        </th>
+                        <td>{row.actual}</td>
+                        <td>{row.baseCase}</td>
+                        <td>{row.lockup}</td>
+                        <td>{row.defaultLevel}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <p className="meta-note">
+                  Latest period: {latestPeriod.periodLabel}. Values are sourced from
+                  the most recent approved period and covenant test.
+                </p>
+              </article>
+            </div>
+
+            <div className="topsheet-snapshot-grid">
+              <article className="topsheet-card">
+                <strong>Deal Snapshot</strong>
+                <dl className="topsheet-definition-grid">
+                  <div>
+                    <dt>Borrower</dt>
+                    <dd>{deal.borrower}</dd>
+                  </div>
+                  <div>
+                    <dt>Sector</dt>
+                    <dd>{deal.sector}</dd>
+                  </div>
+                  <div>
+                    <dt>Region</dt>
+                    <dd>{deal.region}</dd>
+                  </div>
+                  <div>
+                    <dt>Currency</dt>
+                    <dd>{deal.currency}</dd>
+                  </div>
+                  <div>
+                    <dt>Project phase</dt>
+                    <dd>{deal.phase}</dd>
+                  </div>
+                  <div>
+                    <dt>Latest period</dt>
+                    <dd>{deal.latestPeriodLabel}</dd>
+                  </div>
+                  <div>
+                    <dt>Next test date</dt>
+                    <dd>{deal.nextTestDate}</dd>
+                  </div>
+                  <div>
+                    <dt>Primary covenant</dt>
+                    <dd>{deal.covenant.name}</dd>
+                  </div>
+                  <div>
+                    <dt>Distribution status</dt>
+                    <dd>
+                      {distribution
+                        ? distribution.status.replaceAll("_", " ")
+                        : "not assessed"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Distribution period</dt>
+                    <dd>{distribution ? distribution.periodLabel : "—"}</dd>
+                  </div>
+                  <div>
+                    <dt>Active amendments</dt>
+                    <dd>{activeAmendmentCount}</dd>
+                  </div>
+                  <div>
+                    <dt>Monitoring case</dt>
+                    <dd>{deal.forecastSummary?.activeMonitoringCaseName ?? "—"}</dd>
+                  </div>
+                </dl>
+              </article>
+
+              <article className="topsheet-card">
+                <strong>Risk Snapshot</strong>
+                <dl className="topsheet-definition-grid">
+                  <div>
+                    <dt>Deal status</dt>
+                    <dd>{deal.status}</dd>
+                  </div>
+                  <div>
+                    <dt>Watchlist</dt>
+                    <dd>{deal.watchlist ? "Active" : "Standard"}</dd>
+                  </div>
+                  <div>
+                    <dt>Open risks</dt>
+                    <dd>{deal.riskSnapshot.openCount}</dd>
+                  </div>
+                  <div>
+                    <dt>High severity risks</dt>
+                    <dd>{deal.riskSnapshot.highSeverityCount}</dd>
+                  </div>
+                  <div>
+                    <dt>Overall score</dt>
+                    <dd>{assessment.assessment.overallScore}</dd>
+                  </div>
+                  <div>
+                    <dt>Escalation level</dt>
+                    <dd>{assessment.assessment.escalationLevel}</dd>
+                  </div>
+                  <div>
+                    <dt>Recommendation</dt>
+                    <dd>
+                      {assessment.assessment.watchlistRecommendation.replaceAll("_", " ")}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Grade override</dt>
+                    <dd>
+                      {deal.activeGradeOverride
+                        ? `${deal.activeGradeOverride.overrideGrade} until ${deal.activeGradeOverride.expiresOn}`
+                        : "None"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Active trends</dt>
+                    <dd>{assessment.activeTrends.length}</dd>
+                  </div>
+                  <div>
+                    <dt>Latest document</dt>
+                    <dd>{latestDocument ? latestDocument.documentName : "—"}</dd>
+                  </div>
+                  <div>
+                    <dt>Evidence page</dt>
+                    <dd>{latestDocument ? latestDocument.evidencePage : "—"}</dd>
+                  </div>
+                </dl>
+              </article>
+            </div>
+
+            <div className="topsheet-two-column">
+              <article className="topsheet-card">
+                <div className="status-row">
+                  <strong>Forecast / Scenario view</strong>
+                  <span className="badge neutral">
+                    {deal.forecastSummary?.scenarioCount ?? 0} scenarios
+                  </span>
+                </div>
+                {deal.forecastSummary ? (
+                  <div className="stack compact-stack">
+                    <div className="mini-card">
+                      <strong>
+                        {deal.forecastSummary.activeMonitoringCaseName} ·{" "}
+                        {deal.forecastSummary.activeMonitoringVersionLabel}
+                      </strong>
+                      <p>
+                        Latest refresh{" "}
+                        {deal.forecastSummary.latestRefreshAt
+                          ? deal.forecastSummary.latestRefreshAt.slice(0, 10)
+                          : "not yet refreshed"}
+                      </p>
+                    </div>
+                    {deal.forecastSummary.scenarios.slice(0, 3).map((scenario) => (
+                      <div key={`${scenario.caseType}-${scenario.versionLabel}`} className="mini-card">
+                        <div className="status-row">
+                          <strong>{scenario.caseName}</strong>
+                          <span className={`badge ${scenario.isMonitoring ? "good" : "neutral"}`}>
+                            {scenario.caseType}
+                          </span>
+                        </div>
+                        <p>{scenario.scenarioSummary}</p>
+                        <p className="meta-note">
+                          Revenue delta {metricValue(scenario.deltaToMonitoring.revenue)} · DSCR delta{" "}
+                          {metricValue(scenario.deltaToMonitoring.seniorDscr, "x")}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p>No forecast cases are linked to this deal yet.</p>
+                )}
+              </article>
+
+              <article className="topsheet-card">
+                <div className="status-row">
+                  <strong>Risk Register</strong>
+                  <span className="badge neutral">
+                    {deal.riskSnapshot.openCount} open
+                  </span>
+                </div>
+                <div className="stack compact-stack">
+                  {deal.riskSnapshot.entries.slice(0, 3).map((entry) => (
+                    <div key={entry.id} className="mini-card">
+                      <div className="status-row">
+                        <strong>{entry.title}</strong>
+                        <span className={`badge ${toneForStatus(entry.severity)}`}>
+                          {entry.severity}
+                        </span>
+                      </div>
+                      <p>{entry.summary}</p>
+                      <p className="meta-note">
+                        {entry.ownerName} · next review {entry.nextReviewDate}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </article>
+
+              <article className="topsheet-card">
+                <div className="status-row">
+                  <strong>Borrower Requests</strong>
+                  <span className="badge neutral">
+                    {deal.borrowerRequests.length} active
+                  </span>
+                </div>
+                {deal.borrowerRequests.length > 0 ? (
+                  <div className="stack compact-stack">
+                    {deal.borrowerRequests.map((request) => (
+                      <div key={request.id} className="mini-card">
+                        <div className="status-row">
+                          <strong>{request.title}</strong>
+                          <span className={`badge ${toneForStatus(request.priority)}`}>
+                            {request.priority}
+                          </span>
+                        </div>
+                        <p>{request.summary}</p>
+                        <p className="meta-note">
+                          Due {request.dueDate} · votes {request.voteSummary.total} · oppose{" "}
+                          {request.voteSummary.oppose}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p>No borrower requests are currently open for this deal.</p>
+                )}
+              </article>
+            </div>
+
+            <div className="topsheet-two-column">
+              <article className="topsheet-card">
+                <div className="status-row">
+                  <strong>TopSheet snapshot history</strong>
+                  <span className="badge neutral">{deal.snapshotHistory.length} stored</span>
+                </div>
+                <div className="stack compact-stack">
+                  {deal.snapshotHistory.slice(0, 3).map((snapshot) => (
+                    <div key={snapshot.id} className="mini-card">
+                      <div className="status-row">
+                        <strong>{snapshot.snapshotLabel}</strong>
+                        <span className="badge neutral">
+                          {snapshot.snapshotType.replaceAll("_", " ")}
+                        </span>
+                      </div>
+                      <p>{snapshot.summary}</p>
+                      <p className="meta-note">
+                        {snapshot.capturedBy} · {snapshot.capturedAt.slice(0, 10)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </article>
+
+              <article className="topsheet-card">
+                <div className="status-row">
+                  <strong>Term change management</strong>
+                  <span className="badge neutral">{deal.amendmentHistory.length} recorded</span>
+                </div>
+                {latestAmendment ? (
+                  <div className="stack compact-stack">
+                    {deal.amendmentHistory.slice(0, 2).map((amendment) => (
+                      <div key={amendment.id} className="mini-card">
+                        <div className="status-row">
+                          <strong>{amendment.title}</strong>
+                          <span className={`badge ${toneForStatus(amendment.amendmentStatus)}`}>
+                            {amendment.amendmentStatus.replaceAll("_", " ")}
+                          </span>
+                        </div>
+                        <p>{amendment.summary}</p>
+                        <p className="meta-note">
+                          Effective {amendment.effectiveFrom}
+                          {amendment.effectiveTo ? ` to ${amendment.effectiveTo}` : ""}
+                          {" · "}
+                          rule versions {amendment.ruleVersions.length}
+                        </p>
+                      </div>
+                    ))}
+                    {deal.viewer.permissions.canCaptureSnapshots ? (
+                      <form action={captureDealSnapshot} className="stack compact-stack">
+                        <input type="hidden" name="dealSlug" value={deal.slug} />
+                        <input
+                          type="hidden"
+                          name="snapshotLabel"
+                          value={`${deal.name} manual TopSheet snapshot`}
+                        />
+                        <input type="hidden" name="snapshotType" value="manual" />
+                        <input type="hidden" name="capturedBy" value="Deal workspace" />
+                        <input
+                          type="hidden"
+                          name="summary"
+                          value="Manual TopSheet snapshot captured from the deal workspace."
+                        />
+                        <button className="button secondary" type="submit">
+                          Capture current TopSheet
+                        </button>
+                      </form>
+                    ) : null}
+                  </div>
+                ) : (
+                  <>
+                    <p>No amendments have been activated or declined for this deal.</p>
+                    {deal.viewer.permissions.canCaptureSnapshots ? (
+                      <form action={captureDealSnapshot} className="stack compact-stack">
+                        <input type="hidden" name="dealSlug" value={deal.slug} />
+                        <input
+                          type="hidden"
+                          name="snapshotLabel"
+                          value={`${deal.name} manual TopSheet snapshot`}
+                        />
+                        <input type="hidden" name="snapshotType" value="manual" />
+                        <input type="hidden" name="capturedBy" value="Deal workspace" />
+                        <input
+                          type="hidden"
+                          name="summary"
+                          value="Manual TopSheet snapshot captured from the deal workspace."
+                        />
+                        <button className="button secondary" type="submit">
+                          Capture current TopSheet
+                        </button>
+                      </form>
+                    ) : null}
+                  </>
+                )}
+              </article>
+            </div>
+
+          </section>
+        </section>
+      </main>
+    );
+  } catch {
+    notFound();
+  }
+}

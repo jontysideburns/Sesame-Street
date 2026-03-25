@@ -1,0 +1,51 @@
+services:
+  postgres:
+    image: sesamestreet-postgres:latest
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: sesamestreet
+      POSTGRES_USER: sesame
+      POSTGRES_PASSWORD: sesame
+    volumes:
+      - ${PROJECT_DIR}/data/postgres:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sesame -d sesamestreet"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  server:
+    image: sesamestreet-server:latest
+    restart: unless-stopped
+    environment:
+      PORT: 4000
+      DATABASE_URL: postgresql://sesame:sesame@postgres:5432/sesamestreet
+      CORS_ORIGIN: http://localhost:3000
+      INTAKE_DIRECTORY: /data/intake
+      INTAKE_POLL_SECONDS: 5
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ${PROJECT_DIR}/data/intake:/data/intake
+    ports:
+      - "4000:4000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:4000/health')\""]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  client:
+    image: sesamestreet-client:latest
+    restart: unless-stopped
+    environment:
+      PORT: 3000
+      API_URL: http://server:4000
+    depends_on:
+      server:
+        condition: service_healthy
+    ports:
+      - "3000:3000"

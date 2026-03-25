@@ -1,0 +1,13 @@
+{
+  "name": "sesamestreet-demo",
+  "private": true,
+  "scripts": {
+    "docker:up": "docker compose -f docker/docker-compose.yml up",
+    "docker:down": "docker compose -f docker/docker-compose.yml down",
+    "docker:up:detached": "docker compose -f docker/docker-compose.yml up -d",
+    "build:postgres-image": "./bin/build-postgres-image.sh",
+    "build:server-image": "./bin/build-server-image.sh",
+    "build:client-image": "./bin/build-client-image.sh",
+    "build:images": "./bin/build-all-images.sh"
+  }
+}
