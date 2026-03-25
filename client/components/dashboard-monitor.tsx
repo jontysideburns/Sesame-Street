@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState, type MouseEvent as ReactMouseEvent } from "react";
 import type { PortfolioCalendarResponse } from "../api/calendar";
 import type { PortfolioResponse } from "../api/portfolio";
+import type { PortfolioDealDrawerResponse } from "../lib/portfolio-deal-drawer";
 
 type ViewMode = "hierarchy" | "deals";
 type DashboardHoldingRow = PortfolioResponse["holdings"][number];
@@ -29,6 +30,7 @@ type HierarchyRow = RowAggregate & {
   label: string;
   secondary: string;
   href?: string;
+  dealSlug?: string;
   watchlist: boolean;
   children: HierarchyRow[];
 };
@@ -42,6 +44,7 @@ type KeyMetric = {
   definition: string;
   healthSummary?: string;
   href?: string;
+  onClick?: () => void;
 };
 
 function formatMoney(value: number) {
@@ -75,6 +78,14 @@ function formatDateLabel(value: string) {
     month: "short",
     day: "numeric"
   }).format(new Date(`${value}T00:00:00`));
+}
+
+function formatDateTimeLabel(value: string) {
+  return new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric"
+  }).format(new Date(value));
 }
 
 function buildPortfolioHref(
@@ -254,42 +265,15 @@ function isUnderperformingGrade(grade: string | null) {
   return grade.startsWith("3") || grade.startsWith("4");
 }
 
-function statusTone(status: string) {
-  if (status.includes("trigger")) return "critical";
-  if (status.includes("lock")) return "warning";
-  return "good";
-}
-
-function attentionTone(value: string) {
-  if (
-    ["alert", "watchlist", "escalate_to_pm", "pm", "high", "open", "under_review"].includes(
-      value
-    )
-  ) {
-    return "critical";
-  }
-  if (
-    [
-      "concern",
-      "watch",
-      "enhanced_monitoring",
-      "ham",
-      "monitor",
-      "medium",
-      "monitoring",
-      "support_with_conditions"
-    ].includes(value)
-  ) {
-    return "warning";
-  }
-  if (
-    ["stable", "standard", "deescalate", "no_change", "none", "low", "resolved"].includes(
-      value
-    )
-  ) {
-    return "good";
-  }
-  return "neutral";
+function shouldOpenDrawer(event: ReactMouseEvent<HTMLAnchorElement>) {
+  return !(
+    event.defaultPrevented ||
+    event.button !== 0 ||
+    event.metaKey ||
+    event.ctrlKey ||
+    event.shiftKey ||
+    event.altKey
+  );
 }
 
 function distributionTone(status: string | null) {
@@ -468,6 +452,7 @@ function buildHierarchyRows(holdings: DashboardHoldingRow[]): HierarchyRow[] {
                   label: holding.dealName,
                   secondary: `${holding.borrower} · ${holding.accountName}`,
                   href: `/deals/${holding.dealSlug}`,
+                  dealSlug: holding.dealSlug,
                   watchlist: holding.watchlist,
                   children: [],
                   exposure: holding.exposure,
@@ -555,7 +540,8 @@ function flattenHierarchyRows(
 function renderRowLabel(
   row: HierarchyRow & { depth: number },
   expandedRows: Set<string>,
-  onToggle: (rowId: string) => void
+  onToggle: (rowId: string) => void,
+  onOpenDeal: (slug: string, event: ReactMouseEvent<HTMLAnchorElement>) => void
 ) {
   const isExpanded = expandedRows.has(row.id);
 
@@ -580,7 +566,15 @@ function renderRowLabel(
       )}
       <div className="dashboard-row-copy">
         <div className="dashboard-row-title">
-          {row.href ? <Link href={row.href}>{row.label}</Link> : <span>{row.label}</span>}
+          {row.href && row.dealSlug ? (
+            <Link href={row.href} onClick={(event) => onOpenDeal(row.dealSlug!, event)}>
+              {row.label}
+            </Link>
+          ) : row.href ? (
+            <Link href={row.href}>{row.label}</Link>
+          ) : (
+            <span>{row.label}</span>
+          )}
           <span className={`badge ${badgeTone(row.watchlist ? "watchlist" : "clear")}`}>
             {row.level}
           </span>
@@ -592,11 +586,16 @@ function renderRowLabel(
   );
 }
 
-function renderDealsRow(deal: DashboardDealRow) {
+function renderDealsRow(
+  deal: DashboardDealRow,
+  onOpenDeal: (slug: string, event: ReactMouseEvent<HTMLAnchorElement>) => void
+) {
   return (
     <div className="dashboard-row-copy">
       <div className="dashboard-row-title">
-        <Link href={`/deals/${deal.dealSlug}`}>{deal.dealName}</Link>
+        <Link href={`/deals/${deal.dealSlug}`} onClick={(event) => onOpenDeal(deal.dealSlug, event)}>
+          {deal.dealName}
+        </Link>
         {deal.watchlist ? <span className="badge critical">watchlist</span> : null}
       </div>
       <span className="dashboard-row-secondary">
@@ -615,6 +614,11 @@ export function DashboardMonitor({
 }) {
   const [viewMode, setViewMode] = useState<ViewMode>("hierarchy");
   const [expandedRowIds, setExpandedRowIds] = useState<string[]>([]);
+  const [selectedInsightPanel, setSelectedInsightPanel] = useState<"adverse-covenant-exposure" | null>(null);
+  const [selectedDealSlug, setSelectedDealSlug] = useState<string | null>(null);
+  const [drawerCache, setDrawerCache] = useState<Record<string, PortfolioDealDrawerResponse>>({});
+  const [drawerError, setDrawerError] = useState<string | null>(null);
+  const [loadingDealSlug, setLoadingDealSlug] = useState<string | null>(null);
 
   const expandedRows = new Set(expandedRowIds);
   const hierarchyRows = buildHierarchyRows(portfolio.holdings);
@@ -677,6 +681,12 @@ export function DashboardMonitor({
     "recent alerts",
     "The portfolio has low current alert pressure.",
     2
+  );
+  const blockedCycleStatus = queueHealth(
+    calendar.summary.blockedCycles,
+    "blocked cycles",
+    "No monitoring cycles are blocked in the current calendar view.",
+    1
   );
   const dealHeadroomMap = new Map<string, { exposure: number; headroomPct: number | null }>();
   for (const holding of portfolio.holdings) {
@@ -754,7 +764,8 @@ export function DashboardMonitor({
       tone: adverseStatus.tone,
       definition:
         "Scoped exposure and deal count currently in lock-up, trigger, breach, or default-style covenant states.",
-      healthSummary: adverseStatus.summary
+      healthSummary: adverseStatus.summary,
+      onClick: openAdverseCovenantDrawer
     },
     {
       label: "Near-threshold exposure",
@@ -763,14 +774,6 @@ export function DashboardMonitor({
       definition:
         "Scoped exposure and deal count with less than 5% covenant headroom to the nearest adverse threshold.",
       healthSummary: nearThresholdStatus.summary
-    },
-    {
-      label: "Overdue obligations",
-      value: String(portfolio.overdueObligations),
-      tone: overdueStatus.tone,
-      definition:
-        "Count of compliance or reporting obligations that are currently overdue in the selected slice.",
-      healthSummary: overdueStatus.summary
     },
     {
       label: "Watchlist / weak-grade exposure",
@@ -790,22 +793,6 @@ export function DashboardMonitor({
       definition:
         "Trailing 12-month rate of obligations fulfilled on time across the current portfolio slice.",
       healthSummary: fulfilmentStatus.summary
-    },
-    {
-      label: "High / critical risks",
-      value: String(portfolio.healthInputs.highCriticalRiskCount),
-      tone: riskStatus.tone,
-      definition:
-        "Count of open risk register items with high or critical severity in the selected slice.",
-      healthSummary: riskStatus.summary
-    },
-    {
-      label: "Deteriorating deals",
-      value: String(portfolio.healthInputs.deterioratingDealCount),
-      tone: deteriorationStatus.tone,
-      definition:
-        "Count of deals with active downward trend records as of the selected date.",
-      healthSummary: deteriorationStatus.summary
     }
   ];
 
@@ -839,14 +826,6 @@ export function DashboardMonitor({
       definition:
         "Exposure-weighted average covenant headroom across the deals in the current view.",
       healthSummary: headroomStatus.summary
-    },
-    {
-      label: "Pending reviews",
-      value: String(portfolio.pendingReviews),
-      tone: reviewStatus.tone,
-      definition:
-        "Count of review items still awaiting human review or approval in the selected slice.",
-      healthSummary: reviewStatus.summary
     }
   ];
 
@@ -865,13 +844,56 @@ export function DashboardMonitor({
         "Scoped exposure and deal count currently subject to restricted, review-required, or blocked distributions."
     },
     {
+      label: "Watchlist deals",
+      value: String(portfolio.watchlistCount),
+      tone: portfolio.watchlistCount > 0 ? "warning" : "neutral",
+      definition:
+        "Number of deals currently flagged on watchlist in the selected scope."
+    },
+    {
+      label: "Ready for release",
+      value: String(calendar.summary.readyForRelease),
+      tone: calendar.summary.readyForRelease > 0 ? "good" : "neutral",
+      definition:
+        "Number of monitoring cycles currently complete enough to move toward release."
+    }
+  ];
+
+  const actionMetrics: KeyMetric[] = [
+    {
+      label: "Overdue obligations",
+      value: String(portfolio.overdueObligations),
+      tone: overdueStatus.tone,
+      definition:
+        "Count of compliance or reporting obligations that are currently overdue in the selected slice.",
+      healthSummary: overdueStatus.summary,
+      href: "/compliance"
+    },
+    {
+      label: "Pending reviews",
+      value: String(portfolio.pendingReviews),
+      tone: reviewStatus.tone,
+      definition:
+        "Count of review items still awaiting human review or approval in the selected slice.",
+      healthSummary: reviewStatus.summary,
+      href: "/review"
+    },
+    {
+      label: "High / critical risks",
+      value: String(portfolio.healthInputs.highCriticalRiskCount),
+      tone: riskStatus.tone,
+      definition:
+        "Count of open risk register items with high or critical severity in the selected slice.",
+      healthSummary: riskStatus.summary
+    },
+    {
       label: "Recent alerts",
       value: String(portfolio.recentAlerts.length),
       tone: alertStatus.tone,
       definition:
         "Number of recent portfolio alerts surfaced for the current scope and date context.",
       healthSummary: alertStatus.summary,
-      href: "#portfolio-alerts"
+      href: "/notifications"
     },
     {
       label: "Open requests",
@@ -881,11 +903,21 @@ export function DashboardMonitor({
         "Number of open borrower requests, consents, or waiver items in the current slice."
     },
     {
-      label: "Watchlist deals",
-      value: String(portfolio.watchlistCount),
-      tone: portfolio.watchlistCount > 0 ? "warning" : "neutral",
+      label: "Deteriorating deals",
+      value: String(portfolio.healthInputs.deterioratingDealCount),
+      tone: deteriorationStatus.tone,
       definition:
-        "Number of deals currently flagged on watchlist in the selected scope."
+        "Count of deals with active downward trend records as of the selected date.",
+      healthSummary: deteriorationStatus.summary
+    },
+    {
+      label: "Blocked cycles",
+      value: String(calendar.summary.blockedCycles),
+      tone: blockedCycleStatus.tone,
+      definition:
+        "Number of monitoring cycles currently blocked from progressing or releasing.",
+      healthSummary: blockedCycleStatus.summary,
+      href: portfolioCalendarHref
     }
   ];
 
@@ -896,6 +928,161 @@ export function DashboardMonitor({
         : [...current, rowId]
     );
   }
+
+  function readDrawerSlugFromUrl() {
+    if (typeof window === "undefined") return null;
+    return new URL(window.location.href).searchParams.get("deal");
+  }
+
+  function writeDrawerSlugToUrl(slug: string | null, mode: "push" | "replace") {
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    if (slug) {
+      url.searchParams.set("deal", slug);
+    } else {
+      url.searchParams.delete("deal");
+    }
+    const nextHref = `${url.pathname}${url.search}${url.hash}`;
+    const state = {
+      ...(window.history.state ?? {}),
+      portfolioDealOverlay: Boolean(slug),
+      portfolioDealSlug: slug
+    };
+
+    if (mode === "push") {
+      window.history.pushState(state, "", nextHref);
+      return;
+    }
+    window.history.replaceState(state, "", nextHref);
+  }
+
+  function openDealDrawer(slug: string) {
+    setSelectedInsightPanel(null);
+    setDrawerError(null);
+    setSelectedDealSlug(slug);
+    if (readDrawerSlugFromUrl() !== slug) {
+      writeDrawerSlugToUrl(slug, "push");
+    }
+  }
+
+  function closeDealDrawer() {
+    if (typeof window === "undefined") {
+      setSelectedDealSlug(null);
+      return;
+    }
+    if (window.history.state?.portfolioDealOverlay && readDrawerSlugFromUrl() === selectedDealSlug) {
+      window.history.back();
+      return;
+    }
+    setSelectedDealSlug(null);
+    setDrawerError(null);
+    writeDrawerSlugToUrl(null, "replace");
+  }
+
+  function handleDealLinkClick(
+    slug: string,
+    event: ReactMouseEvent<HTMLAnchorElement>
+  ) {
+    if (!shouldOpenDrawer(event)) {
+      return;
+    }
+    event.preventDefault();
+    openDealDrawer(slug);
+  }
+
+  function openAdverseCovenantDrawer() {
+    setDrawerError(null);
+    setSelectedDealSlug(null);
+    writeDrawerSlugToUrl(null, "replace");
+    setSelectedInsightPanel("adverse-covenant-exposure");
+  }
+
+  function closeInsightPanel() {
+    setSelectedInsightPanel(null);
+  }
+
+  useEffect(() => {
+    const syncDrawerFromUrl = () => {
+      setDrawerError(null);
+      setSelectedDealSlug(readDrawerSlugFromUrl());
+    };
+
+    syncDrawerFromUrl();
+    window.addEventListener("popstate", syncDrawerFromUrl);
+    return () => window.removeEventListener("popstate", syncDrawerFromUrl);
+  }, []);
+
+  useEffect(() => {
+    if (!selectedDealSlug) {
+      setLoadingDealSlug(null);
+      return;
+    }
+    if (drawerCache[selectedDealSlug]) {
+      setLoadingDealSlug(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    setLoadingDealSlug(selectedDealSlug);
+    setDrawerError(null);
+
+    fetch(`/api/portfolio-deals/${selectedDealSlug}`, {
+      cache: "no-store",
+      signal: controller.signal
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          const errorBody = await response.json().catch(() => ({ error: "Request failed" }));
+          throw new Error(errorBody.error ?? `Request failed: ${response.status}`);
+        }
+        return response.json() as Promise<PortfolioDealDrawerResponse>;
+      })
+      .then((payload) => {
+        setDrawerCache((current) => ({ ...current, [payload.slug]: payload }));
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+        setDrawerError(error instanceof Error ? error.message : "Unable to load deal detail.");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setLoadingDealSlug((current) => (current === selectedDealSlug ? null : current));
+        }
+      });
+
+    return () => controller.abort();
+  }, [drawerCache, selectedDealSlug]);
+
+  useEffect(() => {
+    if (!selectedDealSlug && !selectedInsightPanel) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [selectedDealSlug, selectedInsightPanel]);
+
+  const selectedDeal = selectedDealSlug ? drawerCache[selectedDealSlug] ?? null : null;
+  const adverseDealsByStatus = Array.from(
+    adverseDeals.reduce((groups, deal) => {
+      const key = deal.covenantStatus;
+      const existing = groups.get(key) ?? { status: key, exposure: 0, count: 0 };
+      existing.exposure += deal.exposure;
+      existing.count += 1;
+      groups.set(key, existing);
+      return groups;
+    }, new Map<string, { status: string; exposure: number; count: number }>())
+      .values()
+  ).sort((left, right) => right.exposure - left.exposure);
+  const adverseRestrictedDeals = adverseDeals.filter((deal) =>
+    ["restricted", "review_required", "blocked"].includes(deal.distributionStatus ?? "")
+  );
+  const adverseOverdueCount = adverseDeals.reduce((sum, deal) => sum + deal.overdueObligations, 0);
+  const adversePendingReviews = adverseDeals.reduce((sum, deal) => sum + deal.pendingReviews, 0);
+  const adverseOpenRequests = adverseDeals.reduce((sum, deal) => sum + deal.openRequests, 0);
+  const adverseWatchlistDeals = adverseDeals.filter((deal) => deal.watchlist).length;
 
   return (
     <main className="shell">
@@ -1141,6 +1328,17 @@ export function DashboardMonitor({
                     <span>{metric.label}</span>
                     <strong>{metric.value}</strong>
                   </Link>
+                ) : metric.onClick ? (
+                  <button
+                    key={metric.label}
+                    className={`key-metric-card ${metric.tone}`}
+                    title={metricTooltip(metric)}
+                    type="button"
+                    onClick={metric.onClick}
+                  >
+                    <span>{metric.label}</span>
+                    <strong>{metric.value}</strong>
+                  </button>
                 ) : (
                   <article
                     key={metric.label}
@@ -1187,6 +1385,57 @@ export function DashboardMonitor({
                     <span>{metric.label}</span>
                     <strong>{metric.value}</strong>
                   </Link>
+                ) : metric.onClick ? (
+                  <button
+                    key={metric.label}
+                    className={`key-metric-card ${metric.tone}`}
+                    title={metricTooltip(metric)}
+                    type="button"
+                    onClick={metric.onClick}
+                  >
+                    <span>{metric.label}</span>
+                    <strong>{metric.value}</strong>
+                  </button>
+                ) : (
+                  <article
+                    key={metric.label}
+                    className={`key-metric-card ${metric.tone}`}
+                    title={metricTooltip(metric)}
+                  >
+                    <span>{metric.label}</span>
+                    <strong>{metric.value}</strong>
+                  </article>
+                )
+              )}
+            </div>
+          </section>
+          <section className="metric-group">
+            <div className="metric-group-heading">
+              <p className="eyebrow">Actions</p>
+            </div>
+            <div className="metric-group-grid">
+              {actionMetrics.map((metric) =>
+                metric.href ? (
+                  <Link
+                    key={metric.label}
+                    className={`key-metric-card ${metric.tone}`}
+                    href={metric.href}
+                    title={metricTooltip(metric)}
+                  >
+                    <span>{metric.label}</span>
+                    <strong>{metric.value}</strong>
+                  </Link>
+                ) : metric.onClick ? (
+                  <button
+                    key={metric.label}
+                    className={`key-metric-card ${metric.tone}`}
+                    title={metricTooltip(metric)}
+                    type="button"
+                    onClick={metric.onClick}
+                  >
+                    <span>{metric.label}</span>
+                    <strong>{metric.value}</strong>
+                  </button>
                 ) : (
                   <article
                     key={metric.label}
@@ -1249,7 +1498,7 @@ export function DashboardMonitor({
               {viewMode === "hierarchy"
                 ? flattenedHierarchy.map((row) => (
                     <tr key={row.id}>
-                      <th>{renderRowLabel(row, expandedRows, toggleRow)}</th>
+                      <th>{renderRowLabel(row, expandedRows, toggleRow, handleDealLinkClick)}</th>
                       <td>{row.grade}</td>
                       <td>{formatMoney(row.exposure)}</td>
                       <td>{row.deliverablesText}</td>
@@ -1264,7 +1513,7 @@ export function DashboardMonitor({
                   ))
                 : portfolio.deals.map((deal) => (
                     <tr key={deal.dealSlug}>
-                      <th>{renderDealsRow(deal)}</th>
+                      <th>{renderDealsRow(deal, handleDealLinkClick)}</th>
                       <td>{deal.grade}</td>
                       <td>{formatMoney(deal.exposure)}</td>
                       <td>
@@ -1298,262 +1547,412 @@ export function DashboardMonitor({
         </div>
       </section>
 
-      <section className="panel section-panel">
-        <div className="panel-heading">
-          <div>
-            <p className="eyebrow">Operating calendar</p>
-            <h2>
-              {calendar.demoClock.currentDemoDate} · {calendar.demoClock.clockLabel}
-            </h2>
-          </div>
-          <Link className="text-link" href={portfolioCalendarHref}>
-            Open full calendar
-          </Link>
-        </div>
-        <div className="calendar-grid">
-          <article className="mini-card">
-            <strong>Cycle posture</strong>
-            <p>
-              {calendar.summary.activeCycles} active · {calendar.summary.blockedCycles} blocked ·{" "}
-              {calendar.summary.readyForRelease} ready for release
-            </p>
-          </article>
-          <article className="mini-card">
-            <strong>Portfolio scope</strong>
-            <p>
-              {portfolio.summary.organisationCount} organisations · {portfolio.summary.ownerCount}{" "}
-              owners · {portfolio.summary.accountCount} accounts
-            </p>
-          </article>
-          <div className="stack compact-stack">
-            {calendar.cycleAlerts.slice(0, 3).map((alert) => (
-              <Link
-                key={alert.id}
-                className="mini-card"
-                href={`/deals/${alert.dealSlug}/calendar`}
-              >
+      {selectedInsightPanel === "adverse-covenant-exposure" ? (
+        <div className="portfolio-deal-overlay" onClick={closeInsightPanel}>
+          <aside
+            aria-labelledby="portfolio-insight-drawer-title"
+            aria-modal="true"
+            className="portfolio-deal-drawer"
+            role="dialog"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="portfolio-deal-drawer-header">
+              <div>
+                <p className="eyebrow">Portfolio Insight</p>
+                <h2 id="portfolio-insight-drawer-title">Adverse covenant exposure</h2>
+                <p className="detail-copy">
+                  Deals currently in lock-up, trigger, breach, or default-style covenant states for
+                  the active portfolio scope.
+                </p>
+              </div>
+              <div className="portfolio-deal-drawer-actions">
+                <button className="button secondary" type="button" onClick={closeInsightPanel}>
+                  Close
+                </button>
+              </div>
+            </div>
+            <div className="portfolio-deal-drawer-body">
+              <section className="panel portfolio-deal-summary-panel">
+                <div className="portfolio-deal-stat-grid">
+                  <div className="mini-card">
+                    <strong>Scoped exposure</strong>
+                    <p>{formatMoney(adverseCovenantExposure)}</p>
+                  </div>
+                  <div className="mini-card">
+                    <strong>Affected deals</strong>
+                    <p>{adverseDeals.length}</p>
+                  </div>
+                  <div className="mini-card">
+                    <strong>Share of scope</strong>
+                    <p>{formatPct(portfolio.totalAum > 0 ? (adverseCovenantExposure / portfolio.totalAum) * 100 : 0)}</p>
+                  </div>
+                  <div className="mini-card">
+                    <strong>Watchlist deals</strong>
+                    <p>{adverseWatchlistDeals}</p>
+                  </div>
+                  <div className="mini-card">
+                    <strong>Overdue obligations</strong>
+                    <p>{adverseOverdueCount}</p>
+                  </div>
+                  <div className="mini-card">
+                    <strong>Pending reviews</strong>
+                    <p>{adversePendingReviews}</p>
+                  </div>
+                  <div className="mini-card">
+                    <strong>Open requests</strong>
+                    <p>{adverseOpenRequests}</p>
+                  </div>
+                  <div className="mini-card">
+                    <strong>Restricted / blocked</strong>
+                    <p>{adverseRestrictedDeals.length}</p>
+                  </div>
+                </div>
+              </section>
+
+              <section className="portfolio-deal-grid">
+                <article className="panel">
+                  <strong>Status concentration</strong>
+                  <div className="stack compact-stack">
+                    {adverseDealsByStatus.map((item) => (
+                      <div key={item.status} className="mini-card">
+                        <div className="status-row">
+                          <strong>{titleize(item.status)}</strong>
+                          <span className={`badge ${badgeTone(item.status)}`}>{item.count} deals</span>
+                        </div>
+                        <p>{formatMoney(item.exposure)}</p>
+                      </div>
+                    ))}
+                  </div>
+                </article>
+
+                <article className="panel">
+                  <strong>What this panel shows</strong>
+                  <div className="stack compact-stack">
+                    <div className="mini-card">
+                      <p>
+                        This drawer isolates the deals driving the adverse covenant metric so you
+                        can assess severity, operational pressure, and deal-specific follow-up
+                        without leaving the portfolio screen.
+                      </p>
+                    </div>
+                    <div className="mini-card">
+                      <p>
+                        Click any affected deal below to open its deal summary drawer, or use
+                        `Open full page` from there if you need the full deal workspace.
+                      </p>
+                    </div>
+                  </div>
+                </article>
+              </section>
+
+              <section className="panel">
                 <div className="status-row">
-                  <strong>{alert.dealName}</strong>
-                  <span className={`badge ${alert.priority === "high" ? "critical" : "warning"}`}>
-                    {alert.status.replaceAll("_", " ")}
-                  </span>
+                  <strong>Affected deals</strong>
+                  <span className="badge critical">{adverseDeals.length}</span>
                 </div>
-                <p>{alert.title}</p>
-              </Link>
-            ))}
-          </div>
+                {adverseDeals.length ? (
+                  <div className="stack compact-stack">
+                    {adverseDeals.map((deal) => (
+                      <button
+                        key={deal.dealSlug}
+                        type="button"
+                        className="portfolio-insight-row"
+                        onClick={() => openDealDrawer(deal.dealSlug)}
+                      >
+                        <div className="portfolio-insight-row-copy">
+                          <div className="status-row">
+                            <strong>{deal.dealName}</strong>
+                            <span className={`badge ${badgeTone(deal.covenantStatus)}`}>
+                              {titleize(deal.covenantStatus)}
+                            </span>
+                            {deal.watchlist ? <span className="badge critical">watchlist</span> : null}
+                          </div>
+                          <p>
+                            {deal.borrower} · {deal.grade} · {titleize(deal.distributionStatus)}
+                          </p>
+                          <p className="meta-note">
+                            DSCR {formatRatio(deal.reportedDscr)} · overdue {deal.overdueObligations} ·
+                            reviews {deal.pendingReviews} · requests {deal.openRequests}
+                          </p>
+                        </div>
+                        <div className="portfolio-insight-row-metrics">
+                          <strong>{formatMoney(deal.exposure)}</strong>
+                          <span>
+                            {deal.forecastedDscr !== null
+                              ? `Forecast ${formatRatio(deal.forecastedDscr)}`
+                              : "No forecast"}
+                          </span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p>No deals are currently in an adverse covenant state for this portfolio view.</p>
+                )}
+              </section>
+            </div>
+          </aside>
         </div>
-      </section>
+      ) : null}
 
-      <section className="content-grid">
-        <article className="panel">
-          <div className="panel-heading">
-            <div>
-              <p className="eyebrow">Performance</p>
-              <h2>Grade mix</h2>
-            </div>
-          </div>
-          <div className="distribution-list">
-            {portfolio.gradeDistribution.map((bucket) => (
-              <div key={bucket.grade} className="distribution-row">
-                <div>
-                  <strong>{bucket.grade}</strong>
-                  <p>{bucket.count} deals</p>
-                </div>
-                <span>{formatMoney(bucket.exposure)}</span>
+      {selectedDealSlug ? (
+        <div className="portfolio-deal-overlay" onClick={closeDealDrawer}>
+          <aside
+            aria-labelledby="portfolio-deal-drawer-title"
+            aria-modal="true"
+            className="portfolio-deal-drawer"
+            role="dialog"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="portfolio-deal-drawer-header">
+              <div>
+                <p className="eyebrow">Deal Summary</p>
+                <h2 id="portfolio-deal-drawer-title">
+                  {selectedDeal?.name ?? loadingDealSlug ?? "Loading deal"}
+                </h2>
+                {selectedDeal ? (
+                  <p className="detail-copy">
+                    {selectedDeal.borrower} · {selectedDeal.dealType} · {selectedDeal.region}
+                  </p>
+                ) : null}
               </div>
-            ))}
-          </div>
-        </article>
-
-        <article className="panel">
-          <div className="panel-heading">
-            <div>
-              <p className="eyebrow">Cash movement</p>
-              <h2>Distribution posture</h2>
-            </div>
-          </div>
-          <div className="distribution-list">
-            {portfolio.distributionSummary.map((bucket) => (
-              <div key={bucket.status} className="distribution-row">
-                <div>
-                  <strong>{bucket.status.replaceAll("_", " ")}</strong>
-                  <p>{bucket.count} deals</p>
-                </div>
-                <span>{formatMoney(bucket.exposure)}</span>
+              <div className="portfolio-deal-drawer-actions">
+                {selectedDealSlug ? (
+                  <Link className="button secondary" href={`/deals/${selectedDealSlug}`}>
+                    Open full page
+                  </Link>
+                ) : null}
+                <button className="button secondary" type="button" onClick={closeDealDrawer}>
+                  Close
+                </button>
               </div>
-            ))}
-          </div>
-        </article>
-      </section>
-
-      <section className="content-grid">
-        <article className="panel">
-          <div className="panel-heading">
-            <div>
-              <p className="eyebrow">Portfolio map</p>
-              <h2>Covenant heatmap</h2>
             </div>
-            <Link className="text-link" href="/evidence">
-              Evidence view
-            </Link>
-          </div>
-          <div className="heatmap">
-            {portfolio.covenantHeatmap.map((item) => (
-              <Link
-                key={`${item.slug}-${item.covenantCode}`}
-                className={`heatmap-cell ${statusTone(item.status)}`}
-                href={`/deals/${item.slug}`}
-              >
-                <span>{item.name}</span>
-                <strong>{item.headroomPct.toFixed(1)}%</strong>
-                <small>{item.covenantName}</small>
-              </Link>
-            ))}
-          </div>
-        </article>
+            <div className="portfolio-deal-drawer-body">
+              {loadingDealSlug === selectedDealSlug && !selectedDeal ? (
+                <section className="panel">
+                  <p>Loading deal detail…</p>
+                </section>
+              ) : null}
+              {drawerError ? (
+                <section className="panel">
+                  <p>{drawerError}</p>
+                </section>
+              ) : null}
+              {selectedDeal ? (
+                <>
+                  <section className="panel portfolio-deal-summary-panel">
+                    <div className="portfolio-deal-badges">
+                      <span className="badge neutral">{selectedDeal.grade}</span>
+                      <span className={`badge ${badgeTone(selectedDeal.status)}`}>
+                        {titleize(selectedDeal.status)}
+                      </span>
+                      <span className="badge neutral">{selectedDeal.revenueRisk}</span>
+                      {selectedDeal.watchlist ? <span className="badge critical">watchlist</span> : null}
+                    </div>
+                    <p className="detail-copy">{selectedDeal.summary}</p>
+                    <div className="portfolio-deal-stat-grid">
+                      <div className="mini-card">
+                        <strong>Exposure</strong>
+                        <p>{formatMoney(selectedDeal.exposure)}</p>
+                      </div>
+                      <div className="mini-card">
+                        <strong>Facility</strong>
+                        <p>{formatMoney(selectedDeal.facilityAmount)}</p>
+                      </div>
+                      <div className="mini-card">
+                        <strong>Senior DSCR</strong>
+                        <p>{formatRatio(selectedDeal.covenant.currentValue)}</p>
+                      </div>
+                      <div className="mini-card">
+                        <strong>Headroom</strong>
+                        <p>{formatPct(selectedDeal.covenant.headroomPct)}</p>
+                      </div>
+                      <div className="mini-card">
+                        <strong>Latest period</strong>
+                        <p>{selectedDeal.latestPeriodLabel}</p>
+                      </div>
+                      <div className="mini-card">
+                        <strong>Next test</strong>
+                        <p>{selectedDeal.nextTestDate}</p>
+                      </div>
+                    </div>
+                  </section>
 
-        <article className="panel" id="portfolio-alerts">
-          <div className="panel-heading">
-            <div>
-              <p className="eyebrow">Attention</p>
-              <h2>Recent alerts</h2>
-            </div>
-          </div>
-          <div className="stack">
-            {portfolio.recentAlerts.map((alert) => (
-              <Link key={alert.id} className="alert-card" href={`/deals/${alert.dealSlug}`}>
-                <span className="badge critical">{alert.priority}</span>
-                <strong>{alert.title}</strong>
-                <p>{alert.description}</p>
-              </Link>
-            ))}
-          </div>
-        </article>
-      </section>
+                  <section className="portfolio-deal-grid">
+                    <article className="panel">
+                      <div className="status-row">
+                        <strong>Assessment</strong>
+                        <span className={`badge ${badgeTone(selectedDeal.assessment.escalationLevel)}`}>
+                          {titleize(selectedDeal.assessment.escalationLevel)}
+                        </span>
+                      </div>
+                      <p>{selectedDeal.assessment.summary}</p>
+                      <p className="meta-note">
+                        Score {selectedDeal.assessment.overallScore.toFixed(1)} · recommendation{" "}
+                        {titleize(selectedDeal.assessment.watchlistRecommendation)}
+                      </p>
+                    </article>
+                    <article className="panel">
+                      <div className="status-row">
+                        <strong>Distribution</strong>
+                        {selectedDeal.distributionAssessment ? (
+                          <span
+                            className={`badge ${distributionTone(selectedDeal.distributionAssessment.status)}`}
+                          >
+                            {titleize(selectedDeal.distributionAssessment.status)}
+                          </span>
+                        ) : (
+                          <span className="badge neutral">not assessed</span>
+                        )}
+                      </div>
+                      <p>
+                        {selectedDeal.distributionAssessment?.summary ??
+                          "No distribution assessment is currently available for this deal."}
+                      </p>
+                      <p className="meta-note">
+                        {selectedDeal.distributionAssessment
+                          ? `${selectedDeal.distributionAssessment.periodLabel} · blockers ${selectedDeal.distributionAssessment.blockerCount}`
+                          : `Last reported ${formatDateTimeLabel(selectedDeal.latestReportedAt)}`}
+                      </p>
+                    </article>
+                  </section>
 
-      <section className="content-grid">
-        <article className="panel">
-          <div className="panel-heading">
-            <div>
-              <p className="eyebrow">Compliance</p>
-              <h2>Overdue obligations</h2>
-            </div>
-            <Link className="text-link" href="/compliance">
-              Open compliance
-            </Link>
-          </div>
-          <div className="stack">
-            {portfolio.overdueItems.map((item) => (
-              <Link key={item.id} className="obligation-row" href={`/deals/${item.dealSlug}`}>
-                <div>
-                  <strong>{item.dealName}</strong>
-                  <p>{item.title}</p>
-                </div>
-                <div className="obligation-meta">
-                  <span>{item.daysOverdue} days overdue</span>
-                  <small>{item.dueDate}</small>
-                </div>
-              </Link>
-            ))}
-          </div>
-        </article>
+                  <section className="portfolio-deal-grid">
+                    <article className="panel">
+                      <div className="status-row">
+                        <strong>Overdue obligations</strong>
+                        <span
+                          className={`badge ${badgeTone(
+                            selectedDeal.overdueObligations.length ? "overdue" : "clear"
+                          )}`}
+                        >
+                          {selectedDeal.overdueObligations.length}
+                        </span>
+                      </div>
+                      {selectedDeal.overdueObligations.length ? (
+                        <div className="stack compact-stack">
+                          {selectedDeal.overdueObligations.map((item) => (
+                            <div key={item.id} className="mini-card">
+                              <strong>{item.title}</strong>
+                              <p>{item.daysOverdue} days overdue</p>
+                              <p className="meta-note">Due {item.dueDate}</p>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p>All currently scheduled obligations are up to date.</p>
+                      )}
+                    </article>
+                    <article className="panel">
+                      <div className="status-row">
+                        <strong>Open risks</strong>
+                        <span
+                          className={`badge ${badgeTone(
+                            selectedDeal.riskSnapshot.highSeverityCount ? "high" : "clear"
+                          )}`}
+                        >
+                          {selectedDeal.riskSnapshot.openCount} open
+                        </span>
+                      </div>
+                      {selectedDeal.riskSnapshot.entries.length ? (
+                        <div className="stack compact-stack">
+                          {selectedDeal.riskSnapshot.entries.map((entry) => (
+                            <div key={entry.id} className="mini-card">
+                              <div className="status-row">
+                                <strong>{entry.title}</strong>
+                                <span className={`badge ${badgeTone(entry.severity)}`}>
+                                  {entry.severity}
+                                </span>
+                              </div>
+                              <p>{entry.summary}</p>
+                              <p className="meta-note">
+                                {entry.ownerName} · review {entry.nextReviewDate}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p>No open risks are currently recorded.</p>
+                      )}
+                    </article>
+                  </section>
 
-        <article className="panel">
-          <div className="panel-heading">
-            <div>
-              <p className="eyebrow">Risk register</p>
-              <h2>Top risks in scope</h2>
-            </div>
-          </div>
-          <div className="stack">
-            {portfolio.topRisks.map((item) => (
-              <Link key={item.id} className="document-card" href={`/deals/${item.dealSlug}/risk`}>
-                <div className="tag-row">
-                  <span className={`badge ${attentionTone(item.severity)}`}>
-                    {item.severity}
-                  </span>
-                  <span className={`badge ${attentionTone(item.status)}`}>
-                    {item.status.replaceAll("_", " ")}
-                  </span>
-                </div>
-                <strong>{item.dealName}</strong>
-                <p>{item.title}</p>
-                <p>{item.summary}</p>
-                <p className="meta-note">
-                  Review {item.nextReviewDate} · {formatMoney(item.scopedExposure)}
-                </p>
-              </Link>
-            ))}
-          </div>
-        </article>
-      </section>
+                  <section className="portfolio-deal-grid">
+                    <article className="panel">
+                      <div className="status-row">
+                        <strong>Borrower requests</strong>
+                        <span
+                          className={`badge ${badgeTone(
+                            selectedDeal.borrowerRequests.length ? "open" : "clear"
+                          )}`}
+                        >
+                          {selectedDeal.borrowerRequests.length}
+                        </span>
+                      </div>
+                      {selectedDeal.borrowerRequests.length ? (
+                        <div className="stack compact-stack">
+                          {selectedDeal.borrowerRequests.map((request) => (
+                            <div key={request.id} className="mini-card">
+                              <div className="status-row">
+                                <strong>{request.title}</strong>
+                                <span className={`badge ${badgeTone(request.priority)}`}>
+                                  {request.priority}
+                                </span>
+                              </div>
+                              <p>{request.summary}</p>
+                              <p className="meta-note">
+                                Due {request.dueDate} · votes {request.totalVotes} · oppose{" "}
+                                {request.opposeVotes}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p>No borrower requests are currently open.</p>
+                      )}
+                    </article>
+                    <article className="panel">
+                      <div className="status-row">
+                        <strong>Trend detection</strong>
+                        <span
+                          className={`badge ${badgeTone(
+                            selectedDeal.activeTrends.length ? "watchlist" : "clear"
+                          )}`}
+                        >
+                          {selectedDeal.activeTrends.length}
+                        </span>
+                      </div>
+                      {selectedDeal.activeTrends.length ? (
+                        <div className="stack compact-stack">
+                          {selectedDeal.activeTrends.map((trend) => (
+                            <div key={trend.id} className="mini-card">
+                              <div className="status-row">
+                                <strong>{trend.metricLabel}</strong>
+                                <span className={`badge ${badgeTone(trend.severity)}`}>
+                                  {trend.severity}
+                                </span>
+                              </div>
+                              <p>{trend.summary}</p>
+                              <p className="meta-note">{trend.periodsObserved} periods observed</p>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p>No active deterioration trends are currently flagged.</p>
+                      )}
+                    </article>
+                  </section>
 
-      <section className="content-grid">
-        <article className="panel">
-          <div className="panel-heading">
-            <div>
-              <p className="eyebrow">Borrower requests</p>
-              <h2>Consents and waivers</h2>
+                  <section className="panel">
+                    <strong>Latest period summary</strong>
+                    <p>{selectedDeal.latestPeriodSummary}</p>
+                  </section>
+                </>
+              ) : null}
             </div>
-          </div>
-          <div className="stack">
-            {portfolio.borrowerRequests.map((item) => (
-              <Link
-                key={item.id}
-                className="document-card"
-                href={`/deals/${item.dealSlug}/requests`}
-              >
-                <div className="tag-row">
-                  <span className={`badge ${attentionTone(item.priority)}`}>
-                    {item.priority}
-                  </span>
-                  <span className={`badge ${attentionTone(item.requestStatus)}`}>
-                    {item.requestStatus.replaceAll("_", " ")}
-                  </span>
-                </div>
-                <strong>{item.dealName}</strong>
-                <p>{item.title}</p>
-                <p>{item.summary}</p>
-                <p className="meta-note">
-                  Due {item.dueDate} · votes {item.totalVotes} · oppose {item.opposeVotes}
-                </p>
-              </Link>
-            ))}
-          </div>
-        </article>
-
-        <article className="panel">
-          <div className="panel-heading">
-            <div>
-              <p className="eyebrow">Trend detection</p>
-              <h2>Deteriorating deals</h2>
-            </div>
-          </div>
-          <div className="stack">
-            {portfolio.deterioratingTrends.map((item) => (
-              <Link
-                key={item.id}
-                className="document-card"
-                href={`/deals/${item.dealSlug}/assessment`}
-              >
-                <div className="tag-row">
-                  <span className={`badge ${attentionTone(item.severity)}`}>
-                    {item.severity}
-                  </span>
-                  <span className="badge neutral">{item.metricLabel}</span>
-                </div>
-                <strong>{item.dealName}</strong>
-                <p>
-                  {item.grade} · {item.periodsObserved} periods ·{" "}
-                  {item.watchlist ? "watchlist" : "standard"}
-                </p>
-                <p>{item.summary}</p>
-              </Link>
-            ))}
-          </div>
-        </article>
-      </section>
+          </aside>
+        </div>
+      ) : null}
 
     </main>
   );

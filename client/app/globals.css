@@ -1881,6 +1881,15 @@ select {
     transform 160ms ease,
     border-color 160ms ease,
     background-color 160ms ease;
+  text-align: left;
+}
+
+button.key-metric-card {
+  width: 100%;
+  appearance: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
 }
 
 .key-metric-card:hover {
@@ -2027,6 +2036,113 @@ select {
   line-height: 1.5;
 }
 
+.portfolio-deal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  justify-content: flex-end;
+  padding: 18px;
+  background: color-mix(in srgb, var(--ink) 22%, transparent);
+  backdrop-filter: blur(10px);
+}
+
+.portfolio-deal-drawer {
+  width: min(720px, 100%);
+  height: 100%;
+  overflow-y: auto;
+  border: 1px solid var(--line-strong);
+  border-radius: 28px;
+  background: color-mix(in srgb, var(--panel-strong) 94%, white);
+  box-shadow: 0 30px 80px rgba(15, 23, 42, 0.22);
+}
+
+.portfolio-deal-drawer-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 22px;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel-strong) 92%, white);
+}
+
+.portfolio-deal-drawer-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.portfolio-deal-drawer-body {
+  display: grid;
+  gap: 16px;
+  padding: 20px 22px 24px;
+}
+
+.portfolio-deal-summary-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.portfolio-deal-badges {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.portfolio-deal-stat-grid,
+.portfolio-deal-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.portfolio-insight-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--panel-strong) 94%, white);
+  text-align: left;
+  appearance: none;
+  cursor: pointer;
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    background-color 160ms ease;
+}
+
+.portfolio-insight-row:hover {
+  transform: translateY(-1px);
+  border-color: var(--line-strong);
+}
+
+.portfolio-insight-row-copy {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.portfolio-insight-row-copy p {
+  margin: 0;
+}
+
+.portfolio-insight-row-metrics {
+  display: grid;
+  gap: 6px;
+  justify-items: end;
+  text-align: right;
+  white-space: nowrap;
+}
+
 [data-theme="dark"] .dashboard-view-toggle {
   background: rgba(255, 255, 255, 0.05);
   border-color: var(--line-strong);
@@ -2052,6 +2168,14 @@ select {
 [data-theme="dark"] .dashboard-row-toggle {
   background: rgba(255, 255, 255, 0.08);
   border-color: var(--line-strong);
+}
+
+[data-theme="dark"] .portfolio-deal-drawer {
+  background: color-mix(in srgb, var(--panel-strong) 90%, #10151d);
+}
+
+[data-theme="dark"] .portfolio-deal-drawer-header {
+  background: color-mix(in srgb, var(--panel-strong) 90%, #10151d);
 }
 
 .review-source,
@@ -3060,6 +3184,24 @@ blockquote {
     grid-template-columns: 1fr;
   }
 
+  .portfolio-deal-stat-grid,
+  .portfolio-deal-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .portfolio-deal-drawer-header {
+    flex-direction: column;
+  }
+
+  .portfolio-insight-row {
+    flex-direction: column;
+  }
+
+  .portfolio-insight-row-metrics {
+    justify-items: start;
+    text-align: left;
+  }
+
   .holding-list {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -3133,6 +3275,35 @@ blockquote {
 
   .metric-group-grid {
     grid-template-columns: 1fr;
+  }
+
+  .portfolio-deal-overlay {
+    padding: 0;
+  }
+
+  .portfolio-deal-drawer {
+    width: 100%;
+    border-radius: 0;
+  }
+
+  .portfolio-deal-drawer-body,
+  .portfolio-deal-stat-grid,
+  .portfolio-deal-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .portfolio-deal-drawer-header {
+    flex-direction: column;
+  }
+
+  .portfolio-insight-row {
+    flex-direction: column;
+  }
+
+  .portfolio-insight-row-metrics {
+    justify-items: start;
+    text-align: left;
+    white-space: normal;
   }
 
   .portfolio-toolbar-actions {
