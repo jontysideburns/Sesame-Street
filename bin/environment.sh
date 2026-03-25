@@ -13,7 +13,7 @@
 
 
 export ROOT_DIR="$HOME_DIR"
-export PROJECT="sesamestreet"
+export PROJECT="xsesamestreet"
 export PROJECT_DIR="$ROOT_DIR/$PROJECT"
 
 

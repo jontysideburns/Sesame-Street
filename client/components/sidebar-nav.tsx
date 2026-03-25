@@ -150,13 +150,6 @@ function DotsIcon(className?: string) {
 
 const primaryNavItems: NavItem[] = [
   {
-    href: "/dashboard",
-    label: "Dashboard",
-    matches: (pathname) => pathname.startsWith("/dashboard"),
-    icon: GridIcon,
-    requiredPermission: "canViewPortfolio"
-  },
-  {
     href: "/portfolio",
     label: "Portfolio",
     matches: (pathname) => pathname.startsWith("/portfolio"),

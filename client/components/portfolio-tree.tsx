@@ -319,10 +319,9 @@ export function PortfolioTree({
                                                                       {holding.grade}
                                                                     </span>
                                                                     <span className="tree-metric">
-                                                                      {holding.headroomPct.toFixed(
-                                                                        1
-                                                                      )}
-                                                                      % headroom
+                                                                      {holding.headroomPct === null
+                                                                        ? "Headroom pending"
+                                                                        : `${holding.headroomPct.toFixed(1)}% headroom`}
                                                                     </span>
                                                                     <span className="tree-metric">
                                                                       {holding.covenantStatus.replaceAll(

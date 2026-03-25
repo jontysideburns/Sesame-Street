@@ -1,5 +1,86 @@
 import { fetchJson } from "./http";
 
+type PortfolioHolding = {
+  id: number;
+  organisationId: number;
+  organisationName: string;
+  ownerId: number;
+  ownerName: string;
+  accountId: number;
+  accountName: string;
+  benchmark: string | null;
+  currentAmount: number;
+  acquisitionDate: string;
+  status: string;
+  dealId: number;
+  dealSlug: string;
+  dealName: string;
+  borrower: string;
+  sector: string;
+  dealType: string;
+  revenueRisk: string;
+  grade: string;
+  watchlist: boolean;
+  phase: string;
+  region: string;
+  exposure: number;
+  reportedDscr: number | null;
+  covenantStatus: string;
+  headroomPct: number | null;
+  distributionStatus: string | null;
+  distributionBlockerCount: number;
+  overdueObligations: number;
+  deliverablesUpToDate: boolean;
+  pendingReviews: number;
+  reviewStatus: string;
+  performanceScore: number | null;
+  performanceSummary: string | null;
+  watchlistRecommendation: string | null;
+  escalationLevel: string | null;
+  forecastedDscr: number | null;
+  forecastCaseCount: number;
+  forecastSummary: string | null;
+  openRequests: number;
+  highPriorityRequests: number;
+  requestsWithOpposition: number;
+  governanceSummary: string;
+};
+
+type PortfolioDeal = {
+  dealId: number;
+  dealSlug: string;
+  dealName: string;
+  borrower: string;
+  sector: string;
+  dealType: string;
+  revenueRisk: string;
+  grade: string;
+  watchlist: boolean;
+  exposure: number;
+  reportedDscr: number | null;
+  covenantStatus: string;
+  distributionStatus: string | null;
+  distributionBlockerCount: number;
+  overdueObligations: number;
+  deliverablesUpToDate: boolean;
+  pendingReviews: number;
+  reviewStatus: string;
+  performanceScore: number | null;
+  performanceSummary: string | null;
+  watchlistRecommendation: string | null;
+  escalationLevel: string | null;
+  forecastedDscr: number | null;
+  forecastCaseCount: number;
+  forecastSummary: string | null;
+  openRequests: number;
+  highPriorityRequests: number;
+  requestsWithOpposition: number;
+  governanceSummary: string;
+  organisations: string[];
+  owners: string[];
+  accounts: string[];
+};
+
 export type PortfolioResponse = {
   viewer: {
     displayName: string;
@@ -24,6 +105,13 @@ export type PortfolioResponse = {
     id: number;
     name: string;
     clientType: string;
+  };
+  asOf: {
+    requested: string | null;
+    effective: string;
+    default: string;
+    clockLabel: string;
+    isHistorical: boolean;
   };
   currentScope: {
     level: string;
@@ -75,29 +163,48 @@ export type PortfolioResponse = {
       href: string;
     }>;
   };
-  holdings: Array<{
-    id: number;
-    organisationId: number;
-    organisationName: string;
-    ownerId: number;
-    ownerName: string;
-    accountId: number;
-    accountName: string;
-    benchmark: string;
-    currentAmount: number;
-    acquisitionDate: string;
-    status: string;
-    dealSlug: string;
-    dealName: string;
-    grade: string;
-    watchlist: boolean;
-    phase: string;
-    region: string;
-    covenantStatus: string;
-    headroomPct: number;
-    distributionStatus: string | null;
-    distributionBlockerCount: number;
-  }>;
+  scopeFilters: {
+    organisation?: string | null;
+    owner?: string | null;
+    account?: string | null;
+  };
+  selectedFilters: {
+    organisation?: string | null;
+    owner?: string | null;
+    account?: string | null;
+    asAt: string;
+    sector?: string | null;
+    region?: string | null;
+    dealType?: string | null;
+    phase?: string | null;
+    grade?: string | null;
+    watchlist?: string | null;
+    revenueRisk?: string | null;
+  };
+  availableFilters: {
+    sectors: string[];
+    regions: string[];
+    dealTypes: string[];
+    phases: string[];
+    grades: string[];
+    revenueRisks: string[];
+    watchlistStates: string[];
+  };
+  summary: {
+    totalExposure: number;
+    dealCount: number;
+    organisationCount: number;
+    ownerCount: number;
+    accountCount: number;
+    pendingReviews: number;
+    overdueObligations: number;
+    openRequests: number;
+    watchlistCount: number;
+    restrictedDealCount: number;
+    blockedDealCount: number;
+  };
+  holdings: PortfolioHolding[];
+  deals: PortfolioDeal[];
   totalAum: number;
   dealCount: number;
   weightedAvgDscr: number;
@@ -105,6 +212,11 @@ export type PortfolioResponse = {
   overdueObligations: number;
   pendingReviews: number;
   watchlistCount: number;
+  healthInputs: {
+    fulfilmentRatePct: number;
+    highCriticalRiskCount: number;
+    deterioratingDealCount: number;
+  };
   gradeDistribution: Array<{ grade: string; count: number; exposure: number }>;
   distributionSummary: Array<{ status: string; count: number; exposure: number }>;
   covenantHeatmap: Array<{
@@ -185,12 +297,28 @@ export async function getPortfolio(scope?: {
   organisation?: string;
   owner?: string;
   account?: string;
+  asAt?: string;
+  sector?: string;
+  region?: string;
+  dealType?: string;
+  phase?: string;
+  grade?: string;
+  watchlist?: string;
+  revenueRisk?: string;
 }) {
   const params = new URLSearchParams();
 
   if (scope?.organisation) params.set("organisation", scope.organisation);
   if (scope?.owner) params.set("owner", scope.owner);
   if (scope?.account) params.set("account", scope.account);
+  if (scope?.asAt) params.set("as_at", scope.asAt);
+  if (scope?.sector) params.set("sector", scope.sector);
+  if (scope?.region) params.set("region", scope.region);
+  if (scope?.dealType) params.set("deal_type", scope.dealType);
+  if (scope?.phase) params.set("phase", scope.phase);
+  if (scope?.grade) params.set("grade", scope.grade);
+  if (scope?.watchlist) params.set("watchlist", scope.watchlist);
+  if (scope?.revenueRisk) params.set("revenue_risk", scope.revenueRisk);
 
   const suffix = params.size > 0 ? `?${params.toString()}` : "";
   return fetchJson<PortfolioResponse>(`/api/portfolio${suffix}`);

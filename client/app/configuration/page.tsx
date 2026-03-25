@@ -24,6 +24,8 @@ export default async function ConfigurationPage() {
       accounts={portfolio.hierarchy.accounts}
       holdings={portfolio.holdings.map((holding) => ({
         ...holding,
+        benchmark: holding.benchmark ?? "",
+        headroomPct: holding.headroomPct ?? 0,
         dealId: dealReferenceBySlug.get(holding.dealSlug) ?? null
       }))}
       deals={sequencerDeals}

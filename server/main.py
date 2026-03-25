@@ -130,6 +130,38 @@ def iso_now():
     return datetime.now(timezone.utc).isoformat()
 
 
+def parse_optional_date(value: str | None, *, field_name: str = "date"):
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid {field_name}. Expected YYYY-MM-DD.",
+        ) from exc
+
+
+def portfolio_covenant_status(
+    current_value: float | None,
+    threshold_lockup: float | None,
+    threshold_trigger: float | None,
+):
+    if current_value is None:
+        return "not_assessed"
+    if threshold_trigger is not None and current_value < threshold_trigger:
+        return "trigger_event"
+    if threshold_lockup is not None and current_value < threshold_lockup:
+        return "lock_up_risk"
+    return "performing"
+
+
+def portfolio_headroom_pct(current_value: float | None, threshold_lockup: float | None):
+    if current_value is None or threshold_lockup in (None, 0):
+        return None
+    return round(((current_value - threshold_lockup) / threshold_lockup) * 100, 1)
+
+
 PERMISSION_LABELS = {
     "view_portfolio": "View portfolio",
     "view_deal": "View deal",
@@ -7928,6 +7960,7 @@ def portfolio_href(
     owner_id: int | None = None,
     account_id: int | None = None,
     viewer_name: str | None = None,
+    extra_params: dict[str, str | None] | None = None,
 ):
     params = []
     if organisation_id is not None:
@@ -7938,6 +7971,10 @@ def portfolio_href(
         params.append(f"account={account_id}")
     if viewer_name:
         params.append(f"viewer={viewer_name}")
+    if extra_params:
+        for key, value in extra_params.items():
+            if value:
+                params.append(f"{key}={value}")
     if not params:
         return "/portfolio"
     return f"/portfolio?{'&'.join(params)}"
@@ -7949,6 +7986,7 @@ def resolve_portfolio_scope(
     owner_id: int | None,
     account_id: int | None,
     viewer_name: str | None = None,
+    extra_params: dict[str, str | None] | None = None,
 ):
     platform_client = conn.execute(
         """
@@ -8005,7 +8043,9 @@ def resolve_portfolio_scope(
             "breadcrumb": [
                 {
                     "label": scope_row["platform_client_name"],
-                    "href": portfolio_href(viewer_name=viewer_name),
+                    "href": portfolio_href(
+                        viewer_name=viewer_name, extra_params=extra_params
+                    ),
                     "active": False,
                 },
                 {
@@ -8013,6 +8053,7 @@ def resolve_portfolio_scope(
                     "href": portfolio_href(
                         organisation_id=int(scope_row["organisation_id"]),
                         viewer_name=viewer_name,
+                        extra_params=extra_params,
                     ),
                     "active": False,
                 },
@@ -8021,6 +8062,7 @@ def resolve_portfolio_scope(
                     "href": portfolio_href(
                         owner_id=int(scope_row["owner_id"]),
                         viewer_name=viewer_name,
+                        extra_params=extra_params,
                     ),
                     "active": False,
                 },
@@ -8029,6 +8071,7 @@ def resolve_portfolio_scope(
                     "href": portfolio_href(
                         account_id=int(scope_row["account_id"]),
                         viewer_name=viewer_name,
+                        extra_params=extra_params,
                     ),
                     "active": True,
                 },
@@ -8074,7 +8117,9 @@ def resolve_portfolio_scope(
             "breadcrumb": [
                 {
                     "label": scope_row["platform_client_name"],
-                    "href": portfolio_href(viewer_name=viewer_name),
+                    "href": portfolio_href(
+                        viewer_name=viewer_name, extra_params=extra_params
+                    ),
                     "active": False,
                 },
                 {
@@ -8082,6 +8127,7 @@ def resolve_portfolio_scope(
                     "href": portfolio_href(
                         organisation_id=int(scope_row["organisation_id"]),
                         viewer_name=viewer_name,
+                        extra_params=extra_params,
                     ),
                     "active": False,
                 },
@@ -8090,6 +8136,7 @@ def resolve_portfolio_scope(
                     "href": portfolio_href(
                         owner_id=int(scope_row["owner_id"]),
                         viewer_name=viewer_name,
+                        extra_params=extra_params,
                     ),
                     "active": True,
                 },
@@ -8132,7 +8179,9 @@ def resolve_portfolio_scope(
             "breadcrumb": [
                 {
                     "label": scope_row["platform_client_name"],
-                    "href": portfolio_href(viewer_name=viewer_name),
+                    "href": portfolio_href(
+                        viewer_name=viewer_name, extra_params=extra_params
+                    ),
                     "active": False,
                 },
                 {
@@ -8140,6 +8189,7 @@ def resolve_portfolio_scope(
                     "href": portfolio_href(
                         organisation_id=int(scope_row["organisation_id"]),
                         viewer_name=viewer_name,
+                        extra_params=extra_params,
                     ),
                     "active": True,
                 },
@@ -8163,7 +8213,9 @@ def resolve_portfolio_scope(
         "breadcrumb": [
             {
                 "label": platform_client["name"],
-                "href": portfolio_href(viewer_name=viewer_name),
+                "href": portfolio_href(
+                    viewer_name=viewer_name, extra_params=extra_params
+                ),
                 "active": True,
             }
         ],
@@ -9121,9 +9173,30 @@ def get_portfolio(
     organisation: int | None = None,
     owner: int | None = None,
     account: int | None = None,
+    as_at: str | None = None,
+    sector: str | None = None,
+    region: str | None = None,
+    deal_type: str | None = None,
+    phase: str | None = None,
+    grade: str | None = None,
+    watchlist: str | None = None,
+    revenue_risk: str | None = None,
     viewer: str | None = None,
 ):
     with get_connection() as conn:
+        demo_clock = load_demo_clock(conn)
+        requested_as_at = parse_optional_date(as_at, field_name="as_at")
+        effective_as_at = requested_as_at or demo_clock["_date"]
+        selected_filters = {
+            "asAt": effective_as_at.isoformat(),
+            "sector": sector,
+            "region": region,
+            "dealType": deal_type,
+            "phase": phase,
+            "grade": grade,
+            "watchlist": watchlist,
+            "revenueRisk": revenue_risk,
+        }
         viewer_context = load_viewer_context(conn, viewer)
         ensure_permission(
             conn,
@@ -9147,6 +9220,16 @@ def get_portfolio(
             owner,
             account,
             viewer_context["displayName"],
+            extra_params={
+                "asAt": effective_as_at.isoformat(),
+                "sector": sector,
+                "region": region,
+                "dealType": deal_type,
+                "phase": phase,
+                "grade": grade,
+                "watchlist": watchlist,
+                "revenueRisk": revenue_risk,
+            },
         )
 
         organisation_id = scope["organisationId"]
@@ -9388,17 +9471,32 @@ def get_portfolio(
               h.current_amount,
               h.acquisition_date::text AS acquisition_date,
               h.status,
+              d.id AS deal_id,
               d.slug AS deal_slug,
               d.name AS deal_name,
+              d.borrower,
+              d.sector,
+              d.deal_type,
+              d.revenue_risk,
               COALESCE(go.override_grade, d.grade) AS effective_grade,
               d.watchlist,
               d.phase,
               d.region,
               c.code AS covenant_code,
               c.name AS covenant_name,
-              c.current_value,
-              c.status AS covenant_status,
-              c.headroom_pct,
+              COALESCE(ch.dscr, c.current_value) AS current_value,
+              CASE
+                WHEN COALESCE(ch.dscr, c.current_value) < c.threshold_trigger THEN 'trigger_event'
+                WHEN COALESCE(ch.dscr, c.current_value) < c.threshold_lockup THEN 'lock_up_risk'
+                ELSE 'performing'
+              END AS covenant_status,
+              ROUND(
+                ((COALESCE(ch.dscr, c.current_value) - c.threshold_lockup) / NULLIF(c.threshold_lockup, 0)) * 100,
+                1
+              ) AS headroom_pct,
+              latest_period.period_key,
+              latest_period.period_label,
+              latest_period.period_end,
               dist.distribution_status,
               dist.blocker_count
             FROM holdings h
@@ -9408,11 +9506,28 @@ def get_portfolio(
             JOIN deals d ON d.id = h.deal_id
             JOIN covenants c ON c.deal_id = d.id
             LEFT JOIN LATERAL (
+              SELECT fp.id, fp.period_key, fp.period_label, fp.period_end
+              FROM financial_periods fp
+              WHERE fp.deal_id = d.id
+                AND fp.period_end <= %s::date
+              ORDER BY fp.period_end DESC, fp.id DESC
+              LIMIT 1
+            ) latest_period ON TRUE
+            LEFT JOIN LATERAL (
+              SELECT ch.dscr
+              FROM covenant_history ch
+              WHERE ch.covenant_id = c.id
+                AND latest_period.period_label IS NOT NULL
+                AND ch.period_label = latest_period.period_label
+              LIMIT 1
+            ) ch ON TRUE
+            LEFT JOIN LATERAL (
               SELECT override_grade
               FROM grade_overrides go
               WHERE go.deal_id = d.id
                 AND go.override_status = 'active'
-                AND go.expires_on >= CURRENT_DATE
+                AND go.decided_at::date <= %s::date
+                AND go.expires_on >= %s::date
               ORDER BY go.decided_at DESC, go.id DESC
               LIMIT 1
             ) go ON TRUE
@@ -9420,6 +9535,7 @@ def get_portfolio(
               SELECT distribution_status, blocker_count
               FROM distribution_assessments da
               WHERE da.deal_id = d.id
+                AND da.assessed_at::date <= %s::date
               ORDER BY da.assessed_at DESC, da.id DESC
               LIMIT 1
             ) dist ON TRUE
@@ -9430,6 +9546,10 @@ def get_portfolio(
             ORDER BY o.name, po.name, a.name, h.current_amount DESC
             """,
             (
+                effective_as_at,
+                effective_as_at,
+                effective_as_at,
+                effective_as_at,
                 organisation_id,
                 organisation_id,
                 owner_id,
@@ -9519,6 +9639,7 @@ def get_portfolio(
             JOIN deals d ON d.id = o.deal_id
             JOIN scoped_holdings sh ON sh.deal_id = o.deal_id
             WHERE o.status = 'overdue'
+              AND o.due_date <= %s::date
             ORDER BY o.days_overdue DESC
             """,
             (
@@ -9528,6 +9649,7 @@ def get_portfolio(
                 owner_id,
                 account_id,
                 account_id,
+                effective_as_at,
             ),
         ).fetchall()
 
@@ -9559,6 +9681,7 @@ def get_portfolio(
                 da.assessed_at
               FROM distribution_assessments da
               JOIN scoped_exposure se ON se.deal_id = da.deal_id
+              WHERE da.assessed_at::date <= %s::date
               ORDER BY da.deal_id, da.assessed_at DESC, da.id DESC
             )
             SELECT
@@ -9591,6 +9714,7 @@ def get_portfolio(
                 owner_id,
                 account_id,
                 account_id,
+                effective_as_at,
             ),
         ).fetchall()
 
@@ -9625,7 +9749,9 @@ def get_portfolio(
             FROM trend_records t
             JOIN deals d ON d.id = t.deal_id
             JOIN scoped_exposure se ON se.deal_id = t.deal_id
+            JOIN financial_periods fp ON fp.id = t.financial_period_id
             WHERE t.status = 'active' AND t.direction = 'down'
+              AND fp.period_end <= %s::date
             ORDER BY
               CASE t.severity
                 WHEN 'alert' THEN 0
@@ -9644,6 +9770,7 @@ def get_portfolio(
                 owner_id,
                 account_id,
                 account_id,
+                effective_as_at,
             ),
         ).fetchall()
 
@@ -9678,6 +9805,7 @@ def get_portfolio(
             FROM watchlist_events w
             JOIN deals d ON d.id = w.deal_id
             JOIN scoped_exposure se ON se.deal_id = w.deal_id
+            WHERE w.decided_at::date <= %s::date
             ORDER BY w.decided_at DESC, se.scoped_exposure DESC
             LIMIT 5
             """,
@@ -9688,6 +9816,7 @@ def get_portfolio(
                 owner_id,
                 account_id,
                 account_id,
+                effective_as_at,
             ),
         ).fetchall()
 
@@ -9724,6 +9853,8 @@ def get_portfolio(
             JOIN deals d ON d.id = r.deal_id
             JOIN scoped_exposure se ON se.deal_id = r.deal_id
             WHERE r.status <> 'resolved'
+              AND r.opened_at::date <= %s::date
+              AND (r.closed_at IS NULL OR r.closed_at::date > %s::date)
             ORDER BY
               CASE r.severity
                 WHEN 'high' THEN 0
@@ -9741,6 +9872,8 @@ def get_portfolio(
                 owner_id,
                 account_id,
                 account_id,
+                effective_as_at,
+                effective_as_at,
             ),
         ).fetchall()
 
@@ -9787,6 +9920,7 @@ def get_portfolio(
             JOIN scoped_exposure se ON se.deal_id = br.deal_id
             LEFT JOIN vote_counts vc ON vc.borrower_request_id = br.id
             WHERE br.request_status NOT IN ('closed', 'declined')
+              AND br.submitted_at::date <= %s::date
             ORDER BY
               CASE br.priority
                 WHEN 'high' THEN 0
@@ -9804,6 +9938,7 @@ def get_portfolio(
                 owner_id,
                 account_id,
                 account_id,
+                effective_as_at,
             ),
         ).fetchall()
 
@@ -9821,13 +9956,230 @@ def get_portfolio(
             deal_slug_rows = []
 
     allowed_deal_slugs = {row["slug"] for row in deal_slug_rows}
-    visible_holdings = [
+    scoped_holdings = [
         row for row in holdings if row["deal_slug"] in allowed_deal_slugs
     ]
+
+    available_filters = {
+        "sectors": sorted({row["sector"] for row in scoped_holdings if row["sector"]}),
+        "regions": sorted({row["region"] for row in scoped_holdings if row["region"]}),
+        "dealTypes": sorted(
+            {row["deal_type"] for row in scoped_holdings if row["deal_type"]}
+        ),
+        "phases": sorted({row["phase"] for row in scoped_holdings if row["phase"]}),
+        "grades": sorted(
+            {row["effective_grade"] for row in scoped_holdings if row["effective_grade"]}
+        ),
+        "revenueRisks": sorted(
+            {row["revenue_risk"] for row in scoped_holdings if row["revenue_risk"]}
+        ),
+        "watchlistStates": ["all", "watchlist", "clear"],
+    }
+
+    selected_watchlist = watchlist or "all"
+    selected_filters["watchlist"] = None if selected_watchlist == "all" else selected_watchlist
+
+    def holding_matches_filters(row):
+        if sector and row["sector"] != sector:
+            return False
+        if region and row["region"] != region:
+            return False
+        if deal_type and row["deal_type"] != deal_type:
+            return False
+        if phase and row["phase"] != phase:
+            return False
+        if grade and row["effective_grade"] != grade:
+            return False
+        if revenue_risk and row["revenue_risk"] != revenue_risk:
+            return False
+        if selected_watchlist == "watchlist" and not row["watchlist"]:
+            return False
+        if selected_watchlist == "clear" and row["watchlist"]:
+            return False
+        return True
+
+    visible_holdings = [row for row in scoped_holdings if holding_matches_filters(row)]
     visible_deal_slugs = {row["deal_slug"] for row in visible_holdings}
     visible_deal_ids = [
         int(row["id"]) for row in deal_slug_rows if row["slug"] in visible_deal_slugs
     ]
+    pending_review_counts: dict[int, int] = {}
+    overdue_obligation_counts: dict[int, int] = {}
+    request_summary_map: dict[int, dict[str, int]] = {}
+    assessment_map: dict[int, dict[str, object | None]] = {}
+    forecast_map: dict[int, dict[str, object | None]] = {}
+    fulfilment_rate_pct = 0.0
+    high_critical_risk_count = 0
+    deteriorating_deal_count = 0
+
+    if visible_deal_ids:
+        with get_connection() as conn:
+            pending_review_rows = conn.execute(
+                f"""
+                SELECT deal_id, COUNT(*)::int AS pending_reviews
+                FROM review_items
+                WHERE deal_id IN ({sql_placeholders(visible_deal_ids)})
+                  AND status = 'pending'
+                GROUP BY deal_id
+                """,
+                tuple(visible_deal_ids),
+            ).fetchall()
+            pending_review_counts = {
+                int(row["deal_id"]): int(row["pending_reviews"])
+                for row in pending_review_rows
+            }
+
+            overdue_obligation_rows = conn.execute(
+                f"""
+                SELECT deal_id, COUNT(*)::int AS overdue_obligations
+                FROM obligations
+                WHERE deal_id IN ({sql_placeholders(visible_deal_ids)})
+                  AND status = 'overdue'
+                  AND due_date <= %s::date
+                GROUP BY deal_id
+                """,
+                (*tuple(visible_deal_ids), effective_as_at),
+            ).fetchall()
+            overdue_obligation_counts = {
+                int(row["deal_id"]): int(row["overdue_obligations"])
+                for row in overdue_obligation_rows
+            }
+
+            request_summary_rows = conn.execute(
+                f"""
+                WITH vote_counts AS (
+                  SELECT
+                    borrower_request_id,
+                    COUNT(*) FILTER (WHERE vote_status = 'oppose')::int AS oppose_votes
+                  FROM borrower_request_votes
+                  GROUP BY borrower_request_id
+                )
+                SELECT
+                  br.deal_id,
+                  COUNT(*)::int AS open_requests,
+                  COUNT(*) FILTER (WHERE br.priority = 'high')::int AS high_priority_requests,
+                  COALESCE(SUM(COALESCE(vc.oppose_votes, 0)), 0)::int AS oppose_votes
+                FROM borrower_requests br
+                LEFT JOIN vote_counts vc ON vc.borrower_request_id = br.id
+                WHERE br.deal_id IN ({sql_placeholders(visible_deal_ids)})
+                  AND br.request_status NOT IN ('closed', 'declined')
+                  AND br.submitted_at::date <= %s::date
+                GROUP BY br.deal_id
+                """,
+                (*tuple(visible_deal_ids), effective_as_at),
+            ).fetchall()
+            request_summary_map = {
+                int(row["deal_id"]): {
+                    "openRequests": int(row["open_requests"]),
+                    "highPriorityRequests": int(row["high_priority_requests"]),
+                    "opposeVotes": int(row["oppose_votes"]),
+                }
+                for row in request_summary_rows
+            }
+
+            assessment_rows = conn.execute(
+                f"""
+                SELECT DISTINCT ON (a.deal_id)
+                  a.deal_id,
+                  a.overall_score,
+                  a.watchlist_recommendation,
+                  a.escalation_level,
+                  a.summary
+                FROM deal_assessments a
+                WHERE a.deal_id IN ({sql_placeholders(visible_deal_ids)})
+                  AND a.assessment_date <= %s::date
+                ORDER BY a.deal_id, a.assessment_date DESC, a.id DESC
+                """,
+                (*tuple(visible_deal_ids), effective_as_at),
+            ).fetchall()
+            assessment_map = {
+                int(row["deal_id"]): {
+                    "overallScore": as_number(row["overall_score"]),
+                    "watchlistRecommendation": row["watchlist_recommendation"],
+                    "escalationLevel": row["escalation_level"],
+                    "summary": row["summary"],
+                }
+                for row in assessment_rows
+            }
+
+            latest_period_rows = conn.execute(
+                f"""
+                SELECT DISTINCT ON (deal_id)
+                  deal_id,
+                  period_key
+                FROM financial_periods
+                WHERE deal_id IN ({sql_placeholders(visible_deal_ids)})
+                  AND period_end <= %s::date
+                ORDER BY deal_id, period_end DESC, id DESC
+                """,
+                (*tuple(visible_deal_ids), effective_as_at),
+            ).fetchall()
+
+            for row in latest_period_rows:
+                summary = build_forecast_summary(
+                    conn, int(row["deal_id"]), row["period_key"]
+                )
+                forecasted_dscr, forecast_case_count, forecast_summary = (
+                    dashboard_forecast_snapshot(summary)
+                )
+                forecast_map[int(row["deal_id"])] = {
+                    "forecastedDscr": forecasted_dscr,
+                    "forecastCaseCount": forecast_case_count,
+                    "forecastSummary": forecast_summary,
+                }
+
+            trailing_start = effective_as_at - timedelta(days=365)
+            fulfilment_row = conn.execute(
+                f"""
+                SELECT
+                  COUNT(*) FILTER (WHERE status = 'fulfilled')::int AS on_time_count,
+                  COUNT(*) FILTER (WHERE due_date BETWEEN %s::date AND %s::date)::int AS trailing_due_count
+                FROM obligations
+                WHERE deal_id IN ({sql_placeholders(visible_deal_ids)})
+                  AND due_date BETWEEN %s::date AND %s::date
+                """,
+                (
+                    trailing_start,
+                    effective_as_at,
+                    *tuple(visible_deal_ids),
+                    trailing_start,
+                    effective_as_at,
+                ),
+            ).fetchone()
+            trailing_due_count = int(fulfilment_row["trailing_due_count"] or 0)
+            fulfilment_rate_pct = (
+                round((int(fulfilment_row["on_time_count"] or 0) / trailing_due_count) * 100, 1)
+                if trailing_due_count
+                else 100.0
+            )
+
+            risk_count_row = conn.execute(
+                f"""
+                SELECT COUNT(*)::int AS count
+                FROM risk_register_entries
+                WHERE deal_id IN ({sql_placeholders(visible_deal_ids)})
+                  AND severity IN ('high', 'critical')
+                  AND opened_at::date <= %s::date
+                  AND (closed_at IS NULL OR closed_at::date > %s::date)
+                """,
+                (*tuple(visible_deal_ids), effective_as_at, effective_as_at),
+            ).fetchone()
+            high_critical_risk_count = int(risk_count_row["count"] or 0)
+
+            deteriorating_row = conn.execute(
+                f"""
+                SELECT COUNT(DISTINCT t.deal_id)::int AS count
+                FROM trend_records t
+                JOIN financial_periods fp ON fp.id = t.financial_period_id
+                WHERE t.deal_id IN ({sql_placeholders(visible_deal_ids)})
+                  AND t.status = 'active'
+                  AND t.direction = 'down'
+                  AND fp.period_end <= %s::date
+                """,
+                (*tuple(visible_deal_ids), effective_as_at),
+            ).fetchone()
+            deteriorating_deal_count = int(deteriorating_row["count"] or 0)
+
     visible_deal_metrics = {}
     for row in visible_holdings:
         item = visible_deal_metrics.setdefault(
@@ -9953,20 +10305,7 @@ def get_portfolio(
         if total_aum
         else 0
     )
-    if visible_deal_ids:
-        with get_connection() as conn:
-            visible_pending_reviews_row = conn.execute(
-                f"""
-                SELECT COUNT(*)::int AS count
-                FROM review_items
-                WHERE deal_id IN ({sql_placeholders(visible_deal_ids)})
-                  AND status = 'pending'
-                """,
-                tuple(visible_deal_ids),
-            ).fetchone()
-        visible_pending_reviews = int(visible_pending_reviews_row["count"])
-    else:
-        visible_pending_reviews = 0
+    visible_pending_reviews = sum(pending_review_counts.values())
 
     visible_overdue_items = [
         row for row in overdue_items if row["deal_slug"] in visible_deal_slugs
@@ -9987,7 +10326,15 @@ def get_portfolio(
         row for row in request_rows if row["deal_slug"] in visible_deal_slugs
     ]
     visible_covenant_heatmap = [
-        row for row in covenant_heatmap if row["slug"] in visible_deal_slugs
+        {
+            "slug": item["slug"],
+            "name": item["name"],
+            "covenant_code": item["covenantCode"],
+            "covenant_name": item["covenantName"],
+            "status": item["covenantStatus"],
+            "headroom_pct": item["headroomPct"],
+        }
+        for item in visible_deal_metrics.values()
     ]
     grade_distribution_map = {}
     distribution_summary_map = {}
@@ -10045,6 +10392,164 @@ def get_portfolio(
         for item in recent_alerts[:6]
     ]
 
+    holding_rows = []
+    deal_rows_by_slug: dict[str, dict[str, object]] = {}
+
+    for row in visible_holdings:
+        deal_id = int(row["deal_id"])
+        pending_reviews = pending_review_counts.get(deal_id, 0)
+        overdue_obligations = overdue_obligation_counts.get(deal_id, 0)
+        deliverables_up_to_date = overdue_obligations == 0
+        request_summary = request_summary_map.get(
+            deal_id,
+            {"openRequests": 0, "highPriorityRequests": 0, "opposeVotes": 0},
+        )
+        assessment = assessment_map.get(
+            deal_id,
+            {
+                "overallScore": None,
+                "watchlistRecommendation": None,
+                "escalationLevel": None,
+                "summary": None,
+            },
+        )
+        forecast = forecast_map.get(
+            deal_id,
+            {
+                "forecastedDscr": None,
+                "forecastCaseCount": 0,
+                "forecastSummary": None,
+            },
+        )
+
+        review_status = f"{pending_reviews} pending" if pending_reviews else "clear"
+        governance_parts = []
+        open_requests = int(request_summary["openRequests"])
+        oppose_votes = int(request_summary["opposeVotes"])
+        if open_requests:
+            governance_parts.append(
+                f"{open_requests} open request{'s' if open_requests != 1 else ''}"
+            )
+        if oppose_votes:
+            governance_parts.append(
+                f"{oppose_votes} oppose vote{'s' if oppose_votes != 1 else ''}"
+            )
+        if not governance_parts:
+            governance_parts.append("no open governance items")
+
+        holding_row = {
+            "id": int(row["id"]),
+            "organisationId": int(row["organisation_id"]),
+            "organisationName": row["organisation_name"],
+            "ownerId": int(row["owner_id"]),
+            "ownerName": row["owner_name"],
+            "accountId": int(row["account_id"]),
+            "accountName": row["account_name"],
+            "benchmark": row["benchmark"],
+            "currentAmount": int(row["current_amount"]),
+            "acquisitionDate": row["acquisition_date"],
+            "status": row["status"],
+            "dealId": deal_id,
+            "dealSlug": row["deal_slug"],
+            "dealName": row["deal_name"],
+            "borrower": row["borrower"],
+            "sector": row["sector"],
+            "dealType": row["deal_type"],
+            "revenueRisk": row["revenue_risk"],
+            "grade": row["effective_grade"],
+            "watchlist": bool(row["watchlist"]),
+            "phase": row["phase"],
+            "region": row["region"],
+            "exposure": int(row["current_amount"]),
+            "reportedDscr": as_number(row["current_value"]),
+            "covenantStatus": row["covenant_status"],
+            "headroomPct": as_number(row["headroom_pct"]),
+            "distributionStatus": row["distribution_status"],
+            "distributionBlockerCount": int(row["blocker_count"] or 0),
+            "overdueObligations": overdue_obligations,
+            "deliverablesUpToDate": deliverables_up_to_date,
+            "pendingReviews": pending_reviews,
+            "reviewStatus": review_status,
+            "performanceScore": assessment["overallScore"],
+            "performanceSummary": assessment["summary"],
+            "watchlistRecommendation": assessment["watchlistRecommendation"],
+            "escalationLevel": assessment["escalationLevel"],
+            "forecastedDscr": forecast["forecastedDscr"],
+            "forecastCaseCount": int(forecast["forecastCaseCount"]),
+            "forecastSummary": forecast["forecastSummary"],
+            "openRequests": open_requests,
+            "highPriorityRequests": int(request_summary["highPriorityRequests"]),
+            "requestsWithOpposition": oppose_votes,
+            "governanceSummary": " · ".join(governance_parts),
+        }
+        holding_rows.append(holding_row)
+
+        deal_entry = deal_rows_by_slug.setdefault(
+            row["deal_slug"],
+            {
+                "dealId": deal_id,
+                "dealSlug": row["deal_slug"],
+                "dealName": row["deal_name"],
+                "borrower": row["borrower"],
+                "sector": row["sector"],
+                "dealType": row["deal_type"],
+                "revenueRisk": row["revenue_risk"],
+                "grade": row["effective_grade"],
+                "watchlist": bool(row["watchlist"]),
+                "exposure": 0,
+                "reportedDscr": as_number(row["current_value"]),
+                "covenantStatus": row["covenant_status"],
+                "distributionStatus": row["distribution_status"],
+                "distributionBlockerCount": int(row["blocker_count"] or 0),
+                "overdueObligations": overdue_obligations,
+                "deliverablesUpToDate": deliverables_up_to_date,
+                "pendingReviews": pending_reviews,
+                "reviewStatus": review_status,
+                "performanceScore": assessment["overallScore"],
+                "performanceSummary": assessment["summary"],
+                "watchlistRecommendation": assessment["watchlistRecommendation"],
+                "escalationLevel": assessment["escalationLevel"],
+                "forecastedDscr": forecast["forecastedDscr"],
+                "forecastCaseCount": int(forecast["forecastCaseCount"]),
+                "forecastSummary": forecast["forecastSummary"],
+                "openRequests": open_requests,
+                "highPriorityRequests": int(request_summary["highPriorityRequests"]),
+                "requestsWithOpposition": oppose_votes,
+                "governanceSummary": " · ".join(governance_parts),
+                "organisations": set(),
+                "owners": set(),
+                "accounts": set(),
+            },
+        )
+        deal_entry["exposure"] += int(row["current_amount"])
+        deal_entry["organisations"].add(row["organisation_name"])
+        deal_entry["owners"].add(row["owner_name"])
+        deal_entry["accounts"].add(row["account_name"])
+
+    deal_rows = [
+        {
+            **deal_row,
+            "organisations": sorted(deal_row["organisations"]),
+            "owners": sorted(deal_row["owners"]),
+            "accounts": sorted(deal_row["accounts"]),
+        }
+        for deal_row in sorted(
+            deal_rows_by_slug.values(),
+            key=lambda item: (-int(item["exposure"]), str(item["dealName"])),
+        )
+    ]
+
+    restricted_deal_count = sum(
+        1
+        for deal_row in deal_rows
+        if deal_row["distributionStatus"] in ("restricted", "review_required")
+    )
+    blocked_deal_count = sum(
+        1
+        for deal_row in deal_rows
+        if deal_row["distributionStatus"] == "blocked"
+    )
+
     return {
         "viewer": serialize_viewer(viewer_context),
         "platformClient": {
@@ -10052,12 +10557,51 @@ def get_portfolio(
             "name": scope["platformClientName"],
             "clientType": scope["platformClientType"],
         },
+        "asOf": {
+            "requested": requested_as_at.isoformat() if requested_as_at else None,
+            "effective": effective_as_at.isoformat(),
+            "default": demo_clock["_date"].isoformat(),
+            "clockLabel": demo_clock["clockLabel"],
+            "isHistorical": requested_as_at is not None,
+        },
         "currentScope": {
             "level": scope["level"],
             "title": scope["title"],
             "subtitle": scope["subtitle"],
             "benchmark": scope["benchmark"],
             "breadcrumb": scope["breadcrumb"],
+        },
+        "scopeFilters": {
+            "organisation": str(scope["organisationId"]) if scope["organisationId"] else None,
+            "owner": str(scope["ownerId"]) if scope["ownerId"] else None,
+            "account": str(scope["accountId"]) if scope["accountId"] else None,
+        },
+        "selectedFilters": {
+            "organisation": str(scope["organisationId"]) if scope["organisationId"] else None,
+            "owner": str(scope["ownerId"]) if scope["ownerId"] else None,
+            "account": str(scope["accountId"]) if scope["accountId"] else None,
+            "asAt": effective_as_at.isoformat(),
+            "sector": sector,
+            "region": region,
+            "dealType": deal_type,
+            "phase": phase,
+            "grade": grade,
+            "watchlist": selected_watchlist,
+            "revenueRisk": revenue_risk,
+        },
+        "availableFilters": available_filters,
+        "summary": {
+            "totalExposure": total_aum,
+            "dealCount": len(deal_rows),
+            "organisationCount": len({int(row["organisationId"]) for row in holding_rows}),
+            "ownerCount": len({int(row["ownerId"]) for row in holding_rows}),
+            "accountCount": len({int(row["accountId"]) for row in holding_rows}),
+            "pendingReviews": sum(int(row["pendingReviews"]) for row in deal_rows),
+            "overdueObligations": sum(int(row["overdueObligations"]) for row in deal_rows),
+            "openRequests": sum(int(row["openRequests"]) for row in deal_rows),
+            "watchlistCount": sum(1 for row in deal_rows if row["watchlist"]),
+            "restrictedDealCount": restricted_deal_count,
+            "blockedDealCount": blocked_deal_count,
         },
         "hierarchy": {
             "organisations": [
@@ -10072,6 +10616,7 @@ def get_portfolio(
                     "href": portfolio_href(
                         organisation_id=item["id"],
                         viewer_name=viewer_context["displayName"],
+                        extra_params=selected_filters,
                     ),
                 }
                 for item in sorted(
@@ -10093,6 +10638,7 @@ def get_portfolio(
                     "href": portfolio_href(
                         owner_id=item["id"],
                         viewer_name=viewer_context["displayName"],
+                        extra_params=selected_filters,
                     ),
                 }
                 for item in sorted(
@@ -10117,6 +10663,7 @@ def get_portfolio(
                     "href": portfolio_href(
                         account_id=item["id"],
                         viewer_name=viewer_context["displayName"],
+                        extra_params=selected_filters,
                     ),
                 }
                 for item in sorted(
@@ -10125,39 +10672,20 @@ def get_portfolio(
                 )
             ],
         },
-        "holdings": [
-            {
-                "id": int(row["id"]),
-                "organisationId": int(row["organisation_id"]),
-                "organisationName": row["organisation_name"],
-                "ownerId": int(row["owner_id"]),
-                "ownerName": row["owner_name"],
-                "accountId": int(row["account_id"]),
-                "accountName": row["account_name"],
-                "benchmark": row["benchmark"],
-                "currentAmount": int(row["current_amount"]),
-                "acquisitionDate": row["acquisition_date"],
-                "status": row["status"],
-                "dealSlug": row["deal_slug"],
-                "dealName": row["deal_name"],
-                "grade": row["effective_grade"],
-                "watchlist": row["watchlist"],
-                "phase": row["phase"],
-                "region": row["region"],
-                "covenantStatus": row["covenant_status"],
-                "headroomPct": as_number(row["headroom_pct"]),
-                "distributionStatus": row["distribution_status"],
-                "distributionBlockerCount": int(row["blocker_count"] or 0),
-            }
-            for row in visible_holdings
-        ],
+        "holdings": holding_rows,
+        "deals": deal_rows,
         "totalAum": total_aum,
-        "dealCount": len(visible_deal_metrics),
+        "dealCount": len(deal_rows),
         "weightedAvgDscr": weighted_avg_dscr,
         "weightedAvgHeadroomPct": weighted_avg_headroom,
         "overdueObligations": len(visible_overdue_items),
         "pendingReviews": visible_pending_reviews,
         "watchlistCount": sum(1 for item in visible_deal_metrics.values() if item["watchlist"]),
+        "healthInputs": {
+            "fulfilmentRatePct": fulfilment_rate_pct,
+            "highCriticalRiskCount": high_critical_risk_count,
+            "deterioratingDealCount": deteriorating_deal_count,
+        },
         "gradeDistribution": sorted(
             grade_distribution_map.values(), key=lambda item: item["grade"]
         ),
@@ -10254,22 +10782,58 @@ def get_portfolio(
 
 
 @app.get("/api/dashboard")
-def get_dashboard(viewer: str | None = None):
+def get_dashboard(
+    organisation: int | None = None,
+    owner: int | None = None,
+    account: int | None = None,
+    as_at: str | None = None,
+    sector: str | None = None,
+    region: str | None = None,
+    deal_type: str | None = None,
+    phase: str | None = None,
+    grade: str | None = None,
+    watchlist: str | None = None,
+    revenue_risk: str | None = None,
+    viewer: str | None = None,
+):
+    return get_portfolio(
+        organisation=organisation,
+        owner=owner,
+        account=account,
+        as_at=as_at,
+        sector=sector,
+        region=region,
+        deal_type=deal_type,
+        phase=phase,
+        grade=grade,
+        watchlist=watchlist,
+        revenue_risk=revenue_risk,
+        viewer=viewer,
+    )
+
     with get_connection() as conn:
         viewer_context = load_viewer_context(conn, viewer)
         ensure_permission(
             conn,
             viewer_context,
             "view_portfolio",
-            title="Dashboard access denied",
-            summary="The selected viewer attempted to open the dashboard without portfolio access.",
-            deep_link="/dashboard",
+            title="Portfolio access denied",
+            summary="The selected viewer attempted to open the portfolio workspace without portfolio access.",
+            deep_link="/portfolio",
+        )
+        ensure_access_to_scope(
+            conn,
+            viewer_context,
+            organisation_id=organisation,
+            owner_id=owner,
+            account_id=account,
+            deep_link="/portfolio",
         )
         scope = resolve_portfolio_scope(
             conn,
-            None,
-            None,
-            None,
+            organisation,
+            owner,
+            account,
             viewer_context["displayName"],
         )
 
@@ -10319,9 +10883,20 @@ def get_dashboard(viewer: str | None = None):
             ) dist ON TRUE
             WHERE h.status = 'active'
               AND o.platform_client_id = %s
+              AND (%s::int IS NULL OR o.id = %s::int)
+              AND (%s::int IS NULL OR po.id = %s::int)
+              AND (%s::int IS NULL OR a.id = %s::int)
             ORDER BY o.name, po.name, a.name, h.current_amount DESC
             """,
-            (scope["platformClientId"],),
+            (
+                scope["platformClientId"],
+                scope["organisationId"],
+                scope["organisationId"],
+                scope["ownerId"],
+                scope["ownerId"],
+                scope["accountId"],
+                scope["accountId"],
+            ),
         ).fetchall()
 
         access_deal_ids = sorted(viewer_context["access"]["dealIds"])
@@ -10616,6 +11191,18 @@ def get_dashboard(viewer: str | None = None):
             "id": scope["platformClientId"],
             "name": scope["platformClientName"],
             "clientType": scope["platformClientType"],
+        },
+        "currentScope": {
+            "level": scope["level"],
+            "title": scope["title"],
+            "subtitle": scope["subtitle"],
+            "benchmark": scope["benchmark"],
+            "breadcrumb": scope["breadcrumb"],
+        },
+        "scopeFilters": {
+            "organisation": str(scope["organisationId"]) if scope["organisationId"] else None,
+            "owner": str(scope["ownerId"]) if scope["ownerId"] else None,
+            "account": str(scope["accountId"]) if scope["accountId"] else None,
         },
         "summary": {
             "totalExposure": sum(int(row["exposure"]) for row in deal_rows),

@@ -92,6 +92,22 @@ export type DashboardResponse = {
     name: string;
     clientType: string;
   };
+  currentScope: {
+    level: string;
+    title: string;
+    subtitle: string;
+    benchmark: string | null;
+    breadcrumb: Array<{
+      label: string;
+      href: string;
+      active: boolean;
+    }>;
+  };
+  scopeFilters: {
+    organisation?: string | null;
+    owner?: string | null;
+    account?: string | null;
+  };
   summary: {
     totalExposure: number;
     dealCount: number;

@@ -1773,6 +1773,150 @@ select {
   line-height: 1.6;
 }
 
+.portfolio-toolbar {
+  padding: 18px 20px;
+}
+
+.portfolio-toolbar-form {
+  display: grid;
+  gap: 14px;
+}
+
+.portfolio-toolbar-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.portfolio-toolbar-field {
+  display: grid;
+  gap: 8px;
+}
+
+.portfolio-toolbar-field span {
+  color: var(--ink-soft);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.portfolio-toolbar-field input,
+.portfolio-toolbar-field select {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  background: var(--panel-strong);
+  color: var(--ink);
+  padding: 0.78rem 0.9rem;
+}
+
+.portfolio-toolbar-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.portfolio-toolbar-actions .button {
+  min-height: 46px;
+  padding: 0.78rem 1.1rem;
+}
+
+.portfolio-toolbar-advanced {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.portfolio-toolbar-disclosure {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.portfolio-toolbar-advanced-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.metric-groups {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.metric-group {
+  display: grid;
+  gap: 8px;
+}
+
+.metric-group-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.metric-group-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+}
+
+.key-metric-card {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--panel-strong) 92%, white);
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    background-color 160ms ease;
+}
+
+.key-metric-card:hover {
+  transform: translateY(-1px);
+}
+
+.key-metric-card span {
+  color: var(--ink-soft);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  line-height: 1.2;
+}
+
+.key-metric-card strong {
+  font-size: 0.98rem;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+}
+
+.key-metric-card.good {
+  border-color: color-mix(in srgb, var(--good) 30%, var(--line-strong));
+  background: color-mix(in srgb, var(--good-soft) 42%, var(--panel-strong));
+}
+
+.key-metric-card.warning {
+  border-color: color-mix(in srgb, var(--warning) 32%, var(--line-strong));
+  background: color-mix(in srgb, var(--warning-soft) 46%, var(--panel-strong));
+}
+
+.key-metric-card.critical {
+  border-color: color-mix(in srgb, var(--critical) 32%, var(--line-strong));
+  background: color-mix(in srgb, var(--critical-soft) 42%, var(--panel-strong));
+}
+
 .dashboard-table-wrap {
   overflow-x: auto;
   border: 1px solid var(--line);
@@ -2865,6 +3009,20 @@ blockquote {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
+  .portfolio-toolbar-row,
+  .portfolio-toolbar-advanced-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .metric-group-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .portfolio-toolbar-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+
 }
 
 @media (max-width: 1100px) {
@@ -2891,6 +3049,15 @@ blockquote {
 
   .metric-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .portfolio-toolbar-row,
+  .portfolio-toolbar-advanced-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .metric-group-grid {
+    grid-template-columns: 1fr;
   }
 
   .holding-list {
@@ -2957,6 +3124,19 @@ blockquote {
 
   .review-summary-bar {
     grid-template-columns: 1fr;
+  }
+
+  .portfolio-toolbar-row,
+  .portfolio-toolbar-advanced-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .metric-group-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .portfolio-toolbar-actions {
+    flex-wrap: wrap;
   }
 
   .review-workspace-summary {

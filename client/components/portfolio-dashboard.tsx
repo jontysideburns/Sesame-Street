@@ -258,7 +258,9 @@ export async function PortfolioDashboard({
               </div>
               <div className="holding-meta">
                 <strong>{formatMoney(holding.currentAmount)}</strong>
-                <span>{holding.headroomPct.toFixed(1)}% headroom</span>
+                <span>
+                  {holding.headroomPct === null ? "Headroom pending" : `${holding.headroomPct.toFixed(1)}% headroom`}
+                </span>
                 <small>
                   {holding.distributionBlockerCount > 0
                     ? `${holding.distributionBlockerCount} blocker${
