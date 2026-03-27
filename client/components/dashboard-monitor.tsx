@@ -1479,6 +1479,19 @@ export function DashboardMonitor({
 
         <div className="dashboard-table-wrap">
           <table className="dashboard-table">
+            <colgroup>
+              <col style={{ width: "22%" }} />
+              <col style={{ width: "7%" }} />
+              <col style={{ width: "8%" }} />
+              <col style={{ width: "8%" }} />
+              <col style={{ width: "7%" }} />
+              <col style={{ width: "8%" }} />
+              <col style={{ width: "9%" }} />
+              <col style={{ width: "7%" }} />
+              <col style={{ width: "8%" }} />
+              <col style={{ width: "8%" }} />
+              <col style={{ width: "8%" }} />
+            </colgroup>
             <thead>
               <tr>
                 <th>{viewMode === "hierarchy" ? "Client / deal" : "Deal"}</th>
