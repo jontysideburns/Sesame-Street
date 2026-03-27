@@ -60,6 +60,8 @@ CREATE TABLE IF NOT EXISTS app_user_roles (
 CREATE TABLE IF NOT EXISTS deals (
   id SERIAL PRIMARY KEY,
   slug TEXT NOT NULL UNIQUE,
+
+  -- Core (existing fields kept as-is)
   name TEXT NOT NULL,
   borrower TEXT NOT NULL,
   sector TEXT NOT NULL,
@@ -79,7 +81,154 @@ CREATE TABLE IF NOT EXISTS deals (
   latest_period_end DATE NOT NULL,
   latest_reported_at TIMESTAMPTZ NOT NULL,
   next_test_date DATE NOT NULL,
-  metrics JSONB NOT NULL
+  metrics JSONB NOT NULL,
+
+  -- F.1 Deal Identity
+  borrower_legal_name TEXT,
+  borrower_trading_name TEXT,
+  borrower_lei VARCHAR(20),
+  borrower_jurisdiction VARCHAR(2),
+  borrower_registered_number TEXT,
+  project_codename TEXT,
+  approved_auditors TEXT[],
+  sic_code VARCHAR(5),
+  sector_label TEXT,
+  sub_sector_label TEXT,
+  ticcs_classification TEXT,
+  sponsor_name TEXT,
+  sponsor_fund TEXT,
+  parent_group TEXT,
+  ownership_structure TEXT,
+  consortium_members JSONB,
+  country VARCHAR(2),
+  reporting_currency VARCHAR(3),
+  counterparties JSONB,
+
+  -- F.2 Structure & Terms
+  structure_type TEXT,
+  origination_type TEXT,
+  seniority TEXT,
+  security_type TEXT,
+  security_summary TEXT,
+  origination_date DATE,
+  commitment_date DATE,
+  first_drawdown_date DATE,
+  cod_date DATE,
+  cod_months INTEGER,
+  maturity_date DATE,
+  weighted_average_life DECIMAL,
+  contract_length_months INTEGER,
+  fiscal_year_end_month INTEGER,
+  concession_expiry_date DATE,
+  regulatory_period_current TEXT,
+  reporting_periodicity TEXT,
+  total_drawn DECIMAL,
+  our_commitment DECIMAL,
+  our_drawn DECIMAL,
+  our_holding_pct DECIMAL,
+  pricing_type TEXT,
+  pricing_margin_bps INTEGER,
+  reference_rate TEXT,
+  coupon_rate DECIMAL,
+  amortisation_profile TEXT,
+  call_protection TEXT,
+  governing_law TEXT,
+  syndicated BOOLEAN DEFAULT FALSE,
+  number_of_lenders INTEGER,
+  facility_agent TEXT,
+  security_trustee TEXT,
+
+  -- F.2.4 Change of Control
+  coc_regime_exists BOOLEAN DEFAULT FALSE,
+  coc_definition TEXT,
+  coc_consequence TEXT,
+  coc_prepayment_basis TEXT,
+  coc_permitted_transfers JSONB,
+  coc_consent_threshold TEXT,
+
+  -- F.2.5 Sources & Uses
+  sources_and_uses JSONB,
+  enterprise_value DECIMAL,
+
+  -- F.2A Capital Structure
+  capital_structure_instruments JSONB,
+  capital_structure_classes JSONB,
+  capital_structure_entities JSONB,
+  cashflow_waterfall JSONB,
+  reserve_accounts JSONB,
+  liquidity_facilities JSONB,
+
+  -- F.3 Ratings
+  moodys_rating TEXT,
+  moodys_outlook TEXT,
+  moodys_watch TEXT,
+  sp_rating TEXT,
+  sp_outlook TEXT,
+  sp_watch TEXT,
+  fitch_rating TEXT,
+  fitch_outlook TEXT,
+  fitch_watch TEXT,
+  internal_credit_score TEXT,
+  performance_grade INTEGER,
+  ma_eligibility TEXT,
+  rating_trigger_configured BOOLEAN DEFAULT FALSE,
+  rating_trigger_threshold TEXT,
+  rating_trigger_consequence TEXT,
+
+  -- F.6.3 Covenant proxy flags
+  no_hard_covenant_dscr BOOLEAN DEFAULT FALSE,
+  no_hard_covenant_icr BOOLEAN DEFAULT FALSE,
+  proxy_default_flag BOOLEAN DEFAULT FALSE,
+
+  -- F.7 Sector KPIs (static/origination)
+  sector_kpis_static JSONB,
+
+  -- F.8 Stress Configuration
+  stress_parameters JSONB,
+  named_scenarios JSONB,
+
+  -- F.9 Key Outputs
+  unlevered_irr DECIMAL,
+  levered_equity_irr DECIMAL,
+  moic DECIMAL,
+  all_in_cost_of_debt DECIMAL,
+  ebitda_margin_lifetime DECIMAL,
+  tax_leakage_rate DECIMAL,
+  upfront_economics DECIMAL,
+
+  -- F.10 Collateral
+  collateral_assessment JSONB,
+
+  -- F.11 Revenue Risk (expanded from revenue_risk code)
+  revenue_pricing_mechanism TEXT,
+  revenue_volume_mechanism TEXT,
+  revenue_duration_category TEXT,
+  revenue_risk_composite TEXT,
+  revenue_risk_level TEXT,
+
+  -- F.12 Equity Cure
+  equity_cure_available BOOLEAN DEFAULT FALSE,
+  equity_cure_regime JSONB,
+
+  -- F.13 Monitoring State
+  overall_covenant_status TEXT DEFAULT 'performing',
+  compliance_status TEXT DEFAULT 'fully_compliant',
+  distribution_status TEXT DEFAULT 'permitted',
+  consecutive_lockup_periods INTEGER DEFAULT 0,
+  assigned_ham TEXT,
+  assigned_pm TEXT,
+
+  -- F.15 Development
+  development_phases JSONB,
+  rollout_plan JSONB,
+
+  -- F.16 Hedging
+  hedging_policy JSONB,
+  hedging_portfolio JSONB,
+
+  -- F.17 Metadata
+  model_version TEXT,
+  model_date DATE
 );
 
 CREATE TABLE IF NOT EXISTS app_entitlements (
@@ -121,6 +270,29 @@ CREATE TABLE IF NOT EXISTS covenant_history (
   dscr NUMERIC(8, 2) NOT NULL,
   expected_dscr NUMERIC(8, 2) NOT NULL
 );
+
+-- F.6.3 Full covenant threshold configuration (one row per covenant per deal)
+CREATE TABLE IF NOT EXISTS covenant_thresholds (
+  id SERIAL PRIMARY KEY,
+  deal_id INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+  covenant_name TEXT NOT NULL,
+  ratio_name TEXT NOT NULL,
+  covenant_category TEXT NOT NULL,  -- cash_flow_cover, collateral_value, incurrence, distribution, financial_maintenance
+  test_type TEXT NOT NULL,          -- hard_covenant, distribution_condition, trigger, default, soft_default
+  direction TEXT NOT NULL,          -- min, max
+  composition_tag TEXT,
+  test_frequency TEXT,              -- quarterly, semi_annual, annual
+  enforcement_class TEXT,
+  lockup_level DECIMAL,
+  trigger_level DECIMAL,
+  default_level DECIMAL,
+  equity_cure_available BOOLEAN DEFAULT FALSE,
+  step_down_schedule JSONB,         -- [{period, lockup, trigger, default}]
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX idx_covenant_thresholds_deal ON covenant_thresholds(deal_id);
 
 CREATE TABLE IF NOT EXISTS obligations (
   id SERIAL PRIMARY KEY,
@@ -173,6 +345,64 @@ CREATE TABLE IF NOT EXISTS financial_variances (
   materiality TEXT NOT NULL,
   commentary TEXT NOT NULL
 );
+
+-- Actuals received from borrowers (one row per period per source hierarchy)
+CREATE TABLE IF NOT EXISTS actual_periods (
+  id SERIAL PRIMARY KEY,
+  deal_id INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+  period_label TEXT NOT NULL,         -- e.g. 'Q1 2026'
+  period_flag TEXT NOT NULL,          -- e.g. '2026Q1' (sort key)
+  period_start DATE NOT NULL,
+  period_end DATE NOT NULL,
+  period_frequency TEXT NOT NULL,     -- monthly, quarterly, semi_annual, annual
+  source_document_id INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+  source_document_name TEXT,
+  source_document_type TEXT,          -- compliance_certificate, financial_statements, operating_report
+  received_date DATE,
+  extraction_confidence DECIMAL,
+  approval_tier TEXT,                 -- auto_approved, ham_reviewed, manual_entry
+  approved_by TEXT,
+  approved_at TIMESTAMPTZ,
+  source_hierarchy TEXT DEFAULT 'certificate',  -- audited, certificate, unaudited, management, model
+  actual_metrics JSONB NOT NULL DEFAULT '{}',
+  borrower_reported_ratios JSONB DEFAULT '{}',
+  platform_computed_ratios JSONB DEFAULT '{}',
+  ratio_reconciliation_status TEXT,   -- matched, minor_variance, material_variance, unreconciled
+  ratio_reconciliation_detail JSONB,
+  borrower_narrative TEXT,
+  ham_acknowledged BOOLEAN DEFAULT FALSE,
+  ham_acknowledged_at TIMESTAMPTZ,
+  sector_kpis JSONB DEFAULT '{}',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(deal_id, period_flag, source_hierarchy)
+);
+CREATE INDEX idx_actual_periods_deal ON actual_periods(deal_id);
+CREATE INDEX idx_actual_periods_flag ON actual_periods(period_flag);
+
+-- Covenant test results computed against actual_periods data
+CREATE TABLE IF NOT EXISTS covenant_tests (
+  id SERIAL PRIMARY KEY,
+  actual_period_id INTEGER REFERENCES actual_periods(id) ON DELETE CASCADE,
+  deal_id INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+  covenant_threshold_id INTEGER REFERENCES covenant_thresholds(id) ON DELETE SET NULL,
+  covenant_name TEXT NOT NULL,
+  test_type TEXT NOT NULL,
+  ratio_value DECIMAL,
+  borrower_reported_value DECIMAL,
+  lockup_threshold DECIMAL,
+  trigger_threshold DECIMAL,
+  default_threshold DECIMAL,
+  tier_status TEXT NOT NULL,          -- performing, distribution_lockup, trigger_event, event_of_default
+  headroom_to_lockup DECIMAL,
+  headroom_to_trigger DECIMAL,
+  headroom_to_default DECIMAL,
+  components JSONB,                   -- {numerator, denominator, numerator_label, denominator_label}
+  source_citation TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX idx_covenant_tests_deal ON covenant_tests(deal_id);
+CREATE INDEX idx_covenant_tests_period ON covenant_tests(actual_period_id);
 
 CREATE TABLE IF NOT EXISTS forecast_cases (
   id SERIAL PRIMARY KEY,
@@ -505,7 +735,24 @@ CREATE TABLE IF NOT EXISTS risk_register_entries (
   mitigant TEXT NOT NULL,
   next_review_date DATE NOT NULL,
   opened_at TIMESTAMPTZ NOT NULL,
-  closed_at TIMESTAMPTZ
+  closed_at TIMESTAMPTZ,
+
+  -- F.11 TopSheet spec additions (Layer 2 risk register fields)
+  risk_id TEXT,                       -- e.g. 'RISK-CF-001', 'CUSTOM-001'
+  risk_name TEXT,
+  likelihood TEXT,                    -- low, moderate, high, very_high
+  score DECIMAL,
+  trend TEXT,                         -- improving, stable, deteriorating
+  sensitised_at_origination BOOLEAN DEFAULT FALSE,
+  sensitivity_name TEXT,
+  stress_description TEXT,
+  stress_parameters JSONB,
+  dscr_min_stress DECIMAL,
+  dscr_max_stress DECIMAL,
+  dscr_avg_stress DECIMAL,
+  monitoring_kpi TEXT,
+  monitoring_threshold DECIMAL,
+  identified_at TEXT DEFAULT 'origination'  -- origination, monitoring, annual_review
 );
 
 CREATE TABLE IF NOT EXISTS borrower_requests (
