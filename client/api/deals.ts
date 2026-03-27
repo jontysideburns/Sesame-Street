@@ -219,6 +219,7 @@ export type DealResponse = {
       deltaToMonitoring: Record<string, number>;
     }>;
   } | null;
+  riskRegister?: Array<Record<string, unknown>>;
   snapshotHistory: Array<{
     id: number;
     snapshotLabel: string;

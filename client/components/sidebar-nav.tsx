@@ -138,6 +138,17 @@ function SlidersIcon(className?: string) {
   );
 }
 
+function JpsIcon(className?: string) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <rect x="3" y="13" width="3.5" height="8" rx="1" fill="currentColor" opacity="0.5" />
+      <rect x="8.5" y="9" width="3.5" height="12" rx="1" fill="currentColor" opacity="0.7" />
+      <rect x="14" y="5" width="3.5" height="16" rx="1" fill="currentColor" />
+      <path d="M4.5 11 9 7.5l5 3 5-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function DotsIcon(className?: string) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -149,6 +160,13 @@ function DotsIcon(className?: string) {
 }
 
 const primaryNavItems: NavItem[] = [
+  {
+    href: "/jps",
+    label: "JPS",
+    matches: (pathname) => pathname.startsWith("/jps"),
+    icon: JpsIcon,
+    requiredPermission: "canViewPortfolio"
+  },
   {
     href: "/portfolio",
     label: "Portfolio",
