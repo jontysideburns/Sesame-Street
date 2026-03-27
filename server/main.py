@@ -16987,3 +16987,358 @@ async def get_risk_template(conn=Depends(get_conn)):
         "template": REVENUE_RISK_TEMPLATE,
         "dealClassifications": deal_classifications,
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# RISK REGISTER endpoints
+# ═══════════════════════════════════════════════════════════════════════════════
+
+SECTOR_TO_SUBSECTOR = {
+    "Data Center": "7F: Data Centres",
+    "Renewable Energy": "7C: Renewable Energy — Common",
+    "Solar": "7A: Renewable Energy — Solar",
+    "Wind": "7B: Renewable Energy — Wind",
+    "Energy Storage": "7D: Energy Storage / Battery",
+    "Rail": "7H: Rail",
+    "Rolling Stock": "7I: Rolling Stock",
+    "Ports": "7J: Ports",
+    "Airports": "7K: Airports",
+    "Roads": "7L: Roads",
+    "Gas Utilities": "7M: Gas Utilities",
+    "Electricity Utilities": "7N: Electricity Utilities",
+    "Pipelines": "7O: Pipelines",
+    "Thermal Generation": "7Q: Thermal Generation",
+    "Real Estate": "7T: Real Estate",
+    "Social Infrastructure": "7U: Social Infrastructure",
+    "Energy from Waste": "7W: Energy from Waste",
+    "Clean Tech": "7X: Clean Tech Charging",
+    "Telecommunications": "7G: Telecommunications",
+}
+
+
+def _get_deal_id(conn, slug: str) -> int:
+    row = conn.execute("SELECT id FROM deals WHERE slug = %s", (slug,)).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Deal not found")
+    return int(row["id"])
+
+
+@app.get("/api/deals/{slug}/risk-register")
+async def get_risk_register(
+    slug: str,
+    status: str | None = None,
+    category: str | None = None,
+    risk_level: str | None = None,
+    sector_filter: bool = True,
+    conn=Depends(get_conn),
+):
+    deal = conn.execute(
+        "SELECT id, sector FROM deals WHERE slug = %s", (slug,)
+    ).fetchone()
+    if not deal:
+        raise HTTPException(status_code=404, detail="Deal not found")
+
+    deal_id = int(deal["id"])
+    deal_sector = deal["sector"] or ""
+    sector_sub = SECTOR_TO_SUBSECTOR.get(deal_sector)
+
+    # Ensure register is initialised
+    conn.execute(
+        """
+        INSERT INTO deal_risk_register (deal_id, risk_id, status)
+        SELECT %s, risk_id, 'not_yet_assessed'
+        FROM risk_taxonomy
+        ON CONFLICT (deal_id, risk_id) DO NOTHING
+        """,
+        (deal_id,),
+    )
+
+    conditions = ["drr.deal_id = %s"]
+    params: list = [deal_id]
+
+    if status:
+        statuses = [s.strip() for s in status.split(",")]
+        conditions.append(f"drr.status = ANY(%s)")
+        params.append(statuses)
+
+    if category:
+        conditions.append("rt.category_code = %s")
+        params.append(category)
+
+    if risk_level:
+        levels = [l.strip() for l in risk_level.split(",")]
+        conditions.append("drr.risk_level = ANY(%s)")
+        params.append(levels)
+
+    if sector_filter and sector_sub:
+        conditions.append(
+            "(rt.category_number BETWEEN 1 AND 6 OR rt.sub_sector = %s OR drr.status = 'assessed')"
+        )
+        params.append(sector_sub)
+
+    where = " AND ".join(conditions)
+    rows = conn.execute(
+        f"""
+        SELECT
+            drr.id, drr.deal_id, drr.risk_id, drr.status,
+            drr.likelihood, drr.severity, drr.risk_score, drr.risk_level,
+            drr.mitigation_party_score, drr.mitigation_party_name, drr.mitigation_party_detail,
+            drr.mitigation_capital_score, drr.mitigation_capital_type,
+            drr.mitigation_capital_provider, drr.mitigation_capital_amount,
+            drr.mitigation_capital_expiry, drr.mitigation_capital_detail,
+            drr.sensitised_at_origination, drr.sensitivity_name,
+            drr.stress_applied, drr.stress_dscr_min, drr.stress_dscr_max, drr.stress_dscr_avg,
+            drr.monitoring_kpi, drr.monitoring_threshold,
+            drr.trend, drr.commentary,
+            drr.assessed_by, drr.assessed_at, drr.review_trigger,
+            rt.risk_name, rt.category_code, rt.category_name,
+            rt.category_number, rt.sub_sector, rt.sort_order,
+            rt.description, rt.typical_sectors, rt.key_indicators
+        FROM deal_risk_register drr
+        JOIN risk_taxonomy rt ON drr.risk_id = rt.risk_id
+        WHERE {where}
+        ORDER BY rt.sort_order
+        """,
+        params,
+    ).fetchall()
+
+    def fmt_row(r):
+        return {
+            "id": str(r["id"]),
+            "riskId": r["risk_id"],
+            "riskName": r["risk_name"],
+            "categoryCode": r["category_code"],
+            "categoryName": r["category_name"],
+            "categoryNumber": r["category_number"],
+            "subSector": r["sub_sector"],
+            "description": r["description"],
+            "typicalSectors": r["typical_sectors"],
+            "keyIndicators": r["key_indicators"],
+            "status": r["status"],
+            "likelihood": r["likelihood"],
+            "severity": r["severity"],
+            "riskScore": r["risk_score"],
+            "riskLevel": r["risk_level"],
+            "mitigationPartyScore": r["mitigation_party_score"],
+            "mitigationPartyName": r["mitigation_party_name"],
+            "mitigationPartyDetail": r["mitigation_party_detail"],
+            "mitigationCapitalScore": r["mitigation_capital_score"],
+            "mitigationCapitalType": r["mitigation_capital_type"],
+            "mitigationCapitalProvider": r["mitigation_capital_provider"],
+            "mitigationCapitalAmount": float(r["mitigation_capital_amount"]) if r["mitigation_capital_amount"] is not None else None,
+            "mitigationCapitalExpiry": str(r["mitigation_capital_expiry"]) if r["mitigation_capital_expiry"] else None,
+            "mitigationCapitalDetail": r["mitigation_capital_detail"],
+            "sensitisedAtOrigination": r["sensitised_at_origination"],
+            "sensitivityName": r["sensitivity_name"],
+            "stressApplied": r["stress_applied"],
+            "stressDscrMin": float(r["stress_dscr_min"]) if r["stress_dscr_min"] is not None else None,
+            "stressDscrMax": float(r["stress_dscr_max"]) if r["stress_dscr_max"] is not None else None,
+            "stressDscrAvg": float(r["stress_dscr_avg"]) if r["stress_dscr_avg"] is not None else None,
+            "monitoringKpi": r["monitoring_kpi"],
+            "monitoringThreshold": float(r["monitoring_threshold"]) if r["monitoring_threshold"] is not None else None,
+            "trend": r["trend"],
+            "commentary": r["commentary"],
+            "assessedBy": r["assessed_by"],
+            "assessedAt": r["assessed_at"].isoformat() if r["assessed_at"] else None,
+            "reviewTrigger": r["review_trigger"],
+        }
+
+    return {
+        "dealSlug": slug,
+        "dealSector": deal_sector,
+        "sectorSubsector": sector_sub,
+        "total": len(rows),
+        "risks": [fmt_row(r) for r in rows],
+    }
+
+
+@app.put("/api/deals/{slug}/risk-register/{risk_id}")
+async def update_risk_entry(
+    slug: str,
+    risk_id: str,
+    body: dict,
+    conn=Depends(get_conn),
+):
+    deal_id = _get_deal_id(conn, slug)
+
+    # Archive prior version
+    prior = conn.execute(
+        """
+        SELECT id, likelihood, severity, risk_score, risk_level,
+               mitigation_party_score, mitigation_capital_score,
+               trend, commentary, assessed_by, assessed_at, review_trigger
+        FROM deal_risk_register
+        WHERE deal_id = %s AND risk_id = %s
+        """,
+        (deal_id, risk_id),
+    ).fetchone()
+
+    if not prior:
+        raise HTTPException(status_code=404, detail="Risk not found in register")
+
+    new_id_row = conn.execute(
+        """
+        UPDATE deal_risk_register SET
+            status = COALESCE(%s, status),
+            likelihood = %s,
+            severity = %s,
+            mitigation_party_score = %s,
+            mitigation_party_name = %s,
+            mitigation_party_detail = %s,
+            mitigation_capital_score = %s,
+            mitigation_capital_type = %s,
+            mitigation_capital_provider = %s,
+            mitigation_capital_amount = %s,
+            mitigation_capital_expiry = %s,
+            mitigation_capital_detail = %s,
+            sensitised_at_origination = COALESCE(%s, sensitised_at_origination),
+            sensitivity_name = %s,
+            stress_applied = %s,
+            stress_dscr_min = %s,
+            stress_dscr_max = %s,
+            stress_dscr_avg = %s,
+            monitoring_kpi = %s,
+            monitoring_threshold = %s,
+            trend = COALESCE(%s, trend),
+            commentary = %s,
+            assessed_by = %s,
+            assessed_at = NOW(),
+            review_trigger = %s,
+            updated_at = NOW()
+        WHERE deal_id = %s AND risk_id = %s
+        RETURNING id
+        """,
+        (
+            body.get("status"),
+            body.get("likelihood"),
+            body.get("severity"),
+            body.get("mitigationPartyScore"),
+            body.get("mitigationPartyName"),
+            body.get("mitigationPartyDetail"),
+            body.get("mitigationCapitalScore"),
+            body.get("mitigationCapitalType"),
+            body.get("mitigationCapitalProvider"),
+            body.get("mitigationCapitalAmount"),
+            body.get("mitigationCapitalExpiry"),
+            body.get("mitigationCapitalDetail"),
+            body.get("sensitisedAtOrigination"),
+            body.get("sensitivityName"),
+            body.get("stressApplied"),
+            body.get("stressDscrMin"),
+            body.get("stressDscrMax"),
+            body.get("stressDscrAvg"),
+            body.get("monitoringKpi"),
+            body.get("monitoringThreshold"),
+            body.get("trend"),
+            body.get("commentary"),
+            body.get("assessedBy"),
+            body.get("reviewTrigger"),
+            deal_id,
+            risk_id,
+        ),
+    ).fetchone()
+
+    # Write history record
+    conn.execute(
+        """
+        INSERT INTO deal_risk_register_history
+            (deal_id, risk_id, likelihood, severity, risk_score, risk_level,
+             mitigation_party_score, mitigation_capital_score,
+             trend, commentary, assessed_by, assessed_at, review_trigger,
+             superseded_by)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """,
+        (
+            deal_id, risk_id,
+            prior["likelihood"], prior["severity"],
+            prior["risk_score"], prior["risk_level"],
+            prior["mitigation_party_score"], prior["mitigation_capital_score"],
+            prior["trend"], prior["commentary"],
+            prior["assessed_by"], prior["assessed_at"], prior["review_trigger"],
+            new_id_row["id"],
+        ),
+    )
+
+    return {"ok": True, "id": str(new_id_row["id"])}
+
+
+@app.post("/api/deals/{slug}/risk-register/initialise")
+async def initialise_risk_register_endpoint(slug: str, conn=Depends(get_conn)):
+    deal_id = _get_deal_id(conn, slug)
+    result = conn.execute("SELECT initialise_risk_register(%s)", (deal_id,)).fetchone()
+    return {"ok": True, "rowsInserted": result[0] if result else 0}
+
+
+@app.get("/api/portfolio/risk-heatmap")
+async def get_risk_heatmap(conn=Depends(get_conn)):
+    rows = conn.execute(
+        """
+        SELECT
+            rt.category_name,
+            rt.category_number,
+            drr.risk_level,
+            COUNT(DISTINCT drr.deal_id) AS deal_count,
+            SUM(d.exposure) AS total_exposure
+        FROM deal_risk_register drr
+        JOIN risk_taxonomy rt ON drr.risk_id = rt.risk_id
+        JOIN deals d ON drr.deal_id = d.id
+        WHERE drr.status = 'assessed'
+          AND drr.risk_level IN ('high', 'critical', 'fatal')
+        GROUP BY rt.category_name, rt.category_number, drr.risk_level
+        ORDER BY rt.category_number, drr.risk_level
+        """
+    ).fetchall()
+    return {
+        "heatmap": [
+            {
+                "categoryName": r["category_name"],
+                "categoryNumber": r["category_number"],
+                "riskLevel": r["risk_level"],
+                "dealCount": r["deal_count"],
+                "totalExposure": float(r["total_exposure"]) if r["total_exposure"] else 0,
+            }
+            for r in rows
+        ]
+    }
+
+
+@app.get("/api/portfolio/weak-mitigation")
+async def get_weak_mitigation(conn=Depends(get_conn)):
+    rows = conn.execute(
+        """
+        SELECT
+            d.name AS deal_name,
+            d.slug AS deal_slug,
+            rt.risk_name,
+            drr.risk_id,
+            drr.risk_score,
+            drr.risk_level,
+            drr.mitigation_party_score,
+            drr.mitigation_capital_score,
+            drr.commentary
+        FROM deal_risk_register drr
+        JOIN risk_taxonomy rt ON drr.risk_id = rt.risk_id
+        JOIN deals d ON drr.deal_id = d.id
+        WHERE drr.status = 'assessed'
+          AND drr.risk_level IN ('high', 'critical', 'fatal')
+          AND drr.mitigation_party_score IN ('M1_none', 'M2_reputational')
+          AND drr.mitigation_capital_score IN ('C1_none', 'C2_comfort')
+        ORDER BY drr.risk_score DESC
+        """
+    ).fetchall()
+    return {
+        "items": [
+            {
+                "dealName": r["deal_name"],
+                "dealSlug": r["deal_slug"],
+                "riskId": r["risk_id"],
+                "riskName": r["risk_name"],
+                "riskScore": r["risk_score"],
+                "riskLevel": r["risk_level"],
+                "mitigationPartyScore": r["mitigation_party_score"],
+                "mitigationCapitalScore": r["mitigation_capital_score"],
+                "commentary": r["commentary"],
+            }
+            for r in rows
+        ]
+    }

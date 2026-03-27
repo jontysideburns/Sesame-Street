@@ -126,6 +126,20 @@ export default async function JpsDealPage({
           )}
         </section>
 
+        {/* Risk register link */}
+        <section className="panel section-panel">
+          <header className="panel-heading">
+            <p className="panel-eyebrow">F.11 Risk Register</p>
+            <h2 className="panel-title">Full risk register</h2>
+          </header>
+          <p style={{ margin: "0 0 12px", color: "var(--ink-soft)", fontSize: "0.9rem" }}>
+            226-risk taxonomy covering credit, structural, operational, market, regulatory, ESG, and sector-specific risks. Filterable by category, score, and mitigation quality.
+          </p>
+          <Link href={`/jps/${slug}/risk-register`} className="jps-action-link" style={{ fontSize: "0.95rem" }}>
+            Open risk register →
+          </Link>
+        </section>
+
         {/* Actuals periods */}
         <section className="panel section-panel">
           <header className="panel-heading">

@@ -1949,3 +1949,393 @@ SELECT setval(pg_get_serial_sequence('notification_deliveries', 'id'), COALESCE(
 SELECT setval(pg_get_serial_sequence('notification_digests', 'id'), COALESCE((SELECT MAX(id) FROM notification_digests), 1), TRUE);
 SELECT setval(pg_get_serial_sequence('notification_digest_items', 'id'), COALESCE((SELECT MAX(id) FROM notification_digest_items), 1), TRUE);
 SELECT setval(pg_get_serial_sequence('activity_events', 'id'), COALESCE((SELECT MAX(id) FROM activity_events), 1), TRUE);
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- RISK REGISTER — taxonomy, deal register, history
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS risk_taxonomy (
+    risk_id         TEXT PRIMARY KEY,
+    risk_name       TEXT NOT NULL,
+    category_code   TEXT NOT NULL,
+    category_name   TEXT NOT NULL,
+    category_number INTEGER NOT NULL,
+    sub_sector      TEXT,
+    description     TEXT,
+    typical_sectors TEXT,
+    key_indicators  TEXT,
+    sort_order      INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_risk_tax_category ON risk_taxonomy(category_code);
+CREATE INDEX IF NOT EXISTS idx_risk_tax_subsector ON risk_taxonomy(sub_sector);
+
+CREATE TABLE IF NOT EXISTS deal_risk_register (
+    id                          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    deal_id                     INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+    risk_id                     TEXT NOT NULL REFERENCES risk_taxonomy(risk_id),
+
+    status                      TEXT NOT NULL DEFAULT 'not_yet_assessed',
+
+    likelihood                  INTEGER CHECK (likelihood BETWEEN 1 AND 5),
+    severity                    INTEGER CHECK (severity BETWEEN 1 AND 6),
+
+    risk_score                  INTEGER GENERATED ALWAYS AS (likelihood * severity) STORED,
+    risk_level                  TEXT GENERATED ALWAYS AS (
+        CASE
+            WHEN likelihood * severity BETWEEN 1  AND 4  THEN 'low'
+            WHEN likelihood * severity BETWEEN 5  AND 9  THEN 'moderate'
+            WHEN likelihood * severity BETWEEN 10 AND 15 THEN 'high'
+            WHEN likelihood * severity BETWEEN 16 AND 24 THEN 'critical'
+            WHEN likelihood * severity BETWEEN 25 AND 30 THEN 'fatal'
+            ELSE NULL
+        END
+    ) STORED,
+
+    mitigation_party_score      TEXT CHECK (mitigation_party_score IN (
+        'M1_none','M2_reputational','M3_contractual','M4_direct_economic','M5_rated_sovereign'
+    )),
+    mitigation_party_name       TEXT,
+    mitigation_party_detail     TEXT,
+
+    mitigation_capital_score    TEXT CHECK (mitigation_capital_score IN (
+        'C1_none','C2_comfort','C3_contractual_backstop','C4_funded_reserve','C5_unconditional_guarantee'
+    )),
+    mitigation_capital_type     TEXT,
+    mitigation_capital_provider TEXT,
+    mitigation_capital_amount   DECIMAL,
+    mitigation_capital_expiry   DATE,
+    mitigation_capital_detail   TEXT,
+
+    sensitised_at_origination   BOOLEAN DEFAULT FALSE,
+    sensitivity_name            TEXT,
+    stress_applied              TEXT,
+    stress_dscr_min             DECIMAL,
+    stress_dscr_max             DECIMAL,
+    stress_dscr_avg             DECIMAL,
+    stress_other_ratios         JSONB,
+    stress_model_scenario       TEXT,
+
+    monitoring_kpi              TEXT,
+    monitoring_threshold        DECIMAL,
+
+    trend                       TEXT DEFAULT 'new',
+    commentary                  TEXT,
+
+    assessed_by                 TEXT,
+    assessed_at                 TIMESTAMPTZ,
+    review_trigger              TEXT,
+    prior_assessment_id         UUID REFERENCES deal_risk_register(id),
+
+    created_at                  TIMESTAMPTZ DEFAULT NOW(),
+    updated_at                  TIMESTAMPTZ DEFAULT NOW(),
+
+    UNIQUE(deal_id, risk_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_drr_deal    ON deal_risk_register(deal_id);
+CREATE INDEX IF NOT EXISTS idx_drr_risk    ON deal_risk_register(risk_id);
+CREATE INDEX IF NOT EXISTS idx_drr_status  ON deal_risk_register(status);
+CREATE INDEX IF NOT EXISTS idx_drr_level   ON deal_risk_register(risk_level);
+CREATE INDEX IF NOT EXISTS idx_drr_score   ON deal_risk_register(risk_score);
+
+CREATE TABLE IF NOT EXISTS deal_risk_register_history (
+    id                          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    deal_id                     INTEGER NOT NULL,
+    risk_id                     TEXT NOT NULL,
+    likelihood                  INTEGER,
+    severity                    INTEGER,
+    risk_score                  INTEGER,
+    risk_level                  TEXT,
+    mitigation_party_score      TEXT,
+    mitigation_capital_score    TEXT,
+    trend                       TEXT,
+    commentary                  TEXT,
+    assessed_by                 TEXT,
+    assessed_at                 TIMESTAMPTZ,
+    review_trigger              TEXT,
+    superseded_at               TIMESTAMPTZ DEFAULT NOW(),
+    superseded_by               UUID REFERENCES deal_risk_register(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_drrh_deal ON deal_risk_register_history(deal_id);
+CREATE INDEX IF NOT EXISTS idx_drrh_risk ON deal_risk_register_history(deal_id, risk_id);
+
+-- Risk taxonomy seed data (226 risks)
+INSERT INTO risk_taxonomy (risk_id, risk_name, category_code, category_name, category_number, sub_sector, sort_order) VALUES
+-- Category 1: Credit & Financial Risk (15)
+('RISK-CF-001','Revenue concentration','CF','Credit & Financial Risk',1,NULL,1),
+('RISK-CF-002','Revenue cyclicality / volatility','CF','Credit & Financial Risk',1,NULL,2),
+('RISK-CF-003','Revenue visibility','CF','Credit & Financial Risk',1,NULL,3),
+('RISK-CF-004','Cost structure rigidity','CF','Credit & Financial Risk',1,NULL,4),
+('RISK-CF-005','Margin compression','CF','Credit & Financial Risk',1,NULL,5),
+('RISK-CF-006','Working capital volatility','CF','Credit & Financial Risk',1,NULL,6),
+('RISK-CF-007','Capital expenditure requirements','CF','Credit & Financial Risk',1,NULL,7),
+('RISK-CF-008','EBITDA quality / adjustment reliance','CF','Credit & Financial Risk',1,NULL,8),
+('RISK-CF-009','Cash flow timing mismatch','CF','Credit & Financial Risk',1,NULL,9),
+('RISK-CF-010','Leverage trajectory','CF','Credit & Financial Risk',1,NULL,10),
+('RISK-CF-011','Interest rate exposure','CF','Credit & Financial Risk',1,NULL,11),
+('RISK-CF-012','Currency exposure','CF','Credit & Financial Risk',1,NULL,12),
+('RISK-CF-013','Pension / deferred obligations','CF','Credit & Financial Risk',1,NULL,13),
+('RISK-CF-014','Tax risk','CF','Credit & Financial Risk',1,NULL,14),
+('RISK-CF-015','Refinancing risk','CF','Credit & Financial Risk',1,NULL,15),
+-- Category 2: Structural & Documentation Risk (11)
+('RISK-ST-001','Covenant adequacy','ST','Structural & Documentation Risk',2,NULL,16),
+('RISK-ST-002','Covenant leakage / EBITDA definition','ST','Structural & Documentation Risk',2,NULL,17),
+('RISK-ST-003','Restricted payment controls','ST','Structural & Documentation Risk',2,NULL,18),
+('RISK-ST-004','Permitted debt / incremental facilities','ST','Structural & Documentation Risk',2,NULL,19),
+('RISK-ST-005','Security package','ST','Structural & Documentation Risk',2,NULL,20),
+('RISK-ST-006','Intercreditor complexity','ST','Structural & Documentation Risk',2,NULL,21),
+('RISK-ST-007','Amendment / waiver risk','ST','Structural & Documentation Risk',2,NULL,22),
+('RISK-ST-008','Subordination / structural subordination','ST','Structural & Documentation Risk',2,NULL,23),
+('RISK-ST-009','Change of control provisions','ST','Structural & Documentation Risk',2,NULL,24),
+('RISK-ST-010','Governing law / enforcement jurisdiction','ST','Structural & Documentation Risk',2,NULL,25),
+('RISK-ST-011','Matching adjustment eligibility','ST','Structural & Documentation Risk',2,NULL,26),
+-- Category 3: Business & Operational Risk (15)
+('RISK-OP-001','Management quality / key person','OP','Business & Operational Risk',3,NULL,27),
+('RISK-OP-002','Competitive position','OP','Business & Operational Risk',3,NULL,28),
+('RISK-OP-003','Technology / disruption risk','OP','Business & Operational Risk',3,NULL,29),
+('RISK-OP-004','Supply chain risk','OP','Business & Operational Risk',3,NULL,30),
+('RISK-OP-005','Operational concentration','OP','Business & Operational Risk',3,NULL,31),
+('RISK-OP-006','Labour / workforce risk','OP','Business & Operational Risk',3,NULL,32),
+('RISK-OP-007','Counterparty credit risk','OP','Business & Operational Risk',3,NULL,33),
+('RISK-OP-008','Contract renewal / re-pricing risk','OP','Business & Operational Risk',3,NULL,34),
+('RISK-OP-009','Equipment lifecycle / major component risk','OP','Business & Operational Risk',3,NULL,35),
+('RISK-OP-010','Decommissioning / end-of-life cost risk','OP','Business & Operational Risk',3,NULL,36),
+('RISK-OP-011','Health, safety & environmental','OP','Business & Operational Risk',3,NULL,37),
+('RISK-OP-012','Cyber / IT risk','OP','Business & Operational Risk',3,NULL,38),
+('RISK-OP-013','Insurance adequacy','OP','Business & Operational Risk',3,NULL,39),
+('RISK-OP-014','Construction / completion risk','OP','Business & Operational Risk',3,NULL,40),
+('RISK-OP-015','Performance / availability risk','OP','Business & Operational Risk',3,NULL,41),
+-- Category 4: Market & Macroeconomic Risk (16)
+('RISK-MK-001','Economic cycle exposure','MK','Market & Macroeconomic Risk',4,NULL,42),
+('RISK-MK-002','Inflation exposure','MK','Market & Macroeconomic Risk',4,NULL,43),
+('RISK-MK-003','Interest rate environment','MK','Market & Macroeconomic Risk',4,NULL,44),
+('RISK-MK-004','Real estate market / valuation risk','MK','Market & Macroeconomic Risk',4,NULL,45),
+('RISK-MK-005','Commodity / input price exposure','MK','Market & Macroeconomic Risk',4,NULL,46),
+('RISK-MK-006','Output price / revenue price risk','MK','Market & Macroeconomic Risk',4,NULL,47),
+('RISK-MK-007','Total addressable market (TAM) risk','MK','Market & Macroeconomic Risk',4,NULL,48),
+('RISK-MK-008','Inter-modal / inter-product competition','MK','Market & Macroeconomic Risk',4,NULL,49),
+('RISK-MK-009','Intra-modal / within-market competition','MK','Market & Macroeconomic Risk',4,NULL,50),
+('RISK-MK-010','Market position / incumbent vs challenger','MK','Market & Macroeconomic Risk',4,NULL,51),
+('RISK-MK-011','Disruptive technology / new entrant risk','MK','Market & Macroeconomic Risk',4,NULL,52),
+('RISK-MK-012','Power / electricity price risk','MK','Market & Macroeconomic Risk',4,NULL,53),
+('RISK-MK-013','Geopolitical / country risk','MK','Market & Macroeconomic Risk',4,NULL,54),
+('RISK-MK-014','Liquidity / secondary market risk','MK','Market & Macroeconomic Risk',4,NULL,55),
+('RISK-MK-015','Contagion / sector sentiment','MK','Market & Macroeconomic Risk',4,NULL,56),
+('RISK-MK-016','Supply chain / equipment market risk','MK','Market & Macroeconomic Risk',4,NULL,57),
+-- Category 5: Regulatory & Legal Risk (9)
+('RISK-RL-001','Regulatory regime change','RL','Regulatory & Legal Risk',5,NULL,58),
+('RISK-RL-002','Licence / concession risk','RL','Regulatory & Legal Risk',5,NULL,59),
+('RISK-RL-003','Environmental regulation','RL','Regulatory & Legal Risk',5,NULL,60),
+('RISK-RL-004','Tax law changes','RL','Regulatory & Legal Risk',5,NULL,61),
+('RISK-RL-005','Employment / labour law changes','RL','Regulatory & Legal Risk',5,NULL,62),
+('RISK-RL-006','Planning / permitting risk','RL','Regulatory & Legal Risk',5,NULL,63),
+('RISK-RL-007','Litigation / claims exposure','RL','Regulatory & Legal Risk',5,NULL,64),
+('RISK-RL-008','Sanctions / AML / KYC risk','RL','Regulatory & Legal Risk',5,NULL,65),
+('RISK-RL-009','Data protection / privacy','RL','Regulatory & Legal Risk',5,NULL,66),
+-- Category 6: ESG & Climate Risk (8)
+('RISK-ESG-001','Physical climate risk','ESG','ESG & Climate Risk',6,NULL,67),
+('RISK-ESG-002','Transition risk','ESG','ESG & Climate Risk',6,NULL,68),
+('RISK-ESG-003','Biodiversity / natural capital','ESG','ESG & Climate Risk',6,NULL,69),
+('RISK-ESG-004','Social licence / community relations','ESG','ESG & Climate Risk',6,NULL,70),
+('RISK-ESG-005','Labour practices / human rights','ESG','ESG & Climate Risk',6,NULL,71),
+('RISK-ESG-006','Corporate governance','ESG','ESG & Climate Risk',6,NULL,72),
+('RISK-ESG-007','Sponsor / shareholder governance','ESG','ESG & Climate Risk',6,NULL,73),
+('RISK-ESG-008','Greenwashing / taxonomy alignment','ESG','ESG & Climate Risk',6,NULL,74),
+-- Category 7: Sector-Specific
+-- 7A Solar (5)
+('RISK-RE-001','Solar resource / irradiance risk','RE','Sector-Specific Risk',7,'7A: Renewable Energy — Solar',75),
+('RISK-RE-002','Panel degradation','RE','Sector-Specific Risk',7,'7A: Renewable Energy — Solar',76),
+('RISK-RE-003','Inverter failure / availability','RE','Sector-Specific Risk',7,'7A: Renewable Energy — Solar',77),
+('RISK-RE-004','Soiling and shading','RE','Sector-Specific Risk',7,'7A: Renewable Energy — Solar',78),
+('RISK-RE-005','Solar technology obsolescence','RE','Sector-Specific Risk',7,'7A: Renewable Energy — Solar',79),
+-- 7B Wind (6)
+('RISK-RE-011','Wind resource risk','RE','Sector-Specific Risk',7,'7B: Renewable Energy — Wind',80),
+('RISK-RE-012','Turbine availability / reliability','RE','Sector-Specific Risk',7,'7B: Renewable Energy — Wind',81),
+('RISK-RE-013','Blade erosion and fatigue','RE','Sector-Specific Risk',7,'7B: Renewable Energy — Wind',82),
+('RISK-RE-014','Gearbox and drivetrain failure','RE','Sector-Specific Risk',7,'7B: Renewable Energy — Wind',83),
+('RISK-RE-015','Wake effects and array losses','RE','Sector-Specific Risk',7,'7B: Renewable Energy — Wind',84),
+('RISK-RE-016','Foundation and structural risk','RE','Sector-Specific Risk',7,'7B: Renewable Energy — Wind',85),
+-- 7C Common Renewable (9)
+('RISK-RE-021','Grid connection / curtailment risk','RE','Sector-Specific Risk',7,'7C: Renewable Energy — Common',86),
+('RISK-RE-022','PPA / offtake risk','RE','Sector-Specific Risk',7,'7C: Renewable Energy — Common',87),
+('RISK-RE-023','Merchant exposure / contract tail risk','RE','Sector-Specific Risk',7,'7C: Renewable Energy — Common',88),
+('RISK-RE-024','O&M contractor performance','RE','Sector-Specific Risk',7,'7C: Renewable Energy — Common',89),
+('RISK-RE-025','Major component reserve adequacy','RE','Sector-Specific Risk',7,'7C: Renewable Energy — Common',90),
+('RISK-RE-026','Land lease / site tenure risk','RE','Sector-Specific Risk',7,'7C: Renewable Energy — Common',91),
+('RISK-RE-027','Decommissioning cost and obligation','RE','Sector-Specific Risk',7,'7C: Renewable Energy — Common',92),
+('RISK-RE-028','Repowering optionality','RE','Sector-Specific Risk',7,'7C: Renewable Energy — Common',93),
+('RISK-RE-029','Climate change impact on resource','RE','Sector-Specific Risk',7,'7C: Renewable Energy — Common',94),
+-- 7D Energy Storage (6)
+('RISK-ES-001','Battery degradation / cycle life','ES','Sector-Specific Risk',7,'7D: Energy Storage / Battery',95),
+('RISK-ES-002','Revenue model uncertainty','ES','Sector-Specific Risk',7,'7D: Energy Storage / Battery',96),
+('RISK-ES-003','Technology obsolescence','ES','Sector-Specific Risk',7,'7D: Energy Storage / Battery',97),
+('RISK-ES-004','Fire and safety risk','ES','Sector-Specific Risk',7,'7D: Energy Storage / Battery',98),
+('RISK-ES-005','Augmentation cost and timing','ES','Sector-Specific Risk',7,'7D: Energy Storage / Battery',99),
+('RISK-ES-006','Grid services market evolution','ES','Sector-Specific Risk',7,'7D: Energy Storage / Battery',100),
+-- 7E Energy Transition (7)
+('RISK-ET-001','Green hydrogen production cost','ET','Sector-Specific Risk',7,'7E: Energy Transition',101),
+('RISK-ET-002','Electrolyser performance and durability','ET','Sector-Specific Risk',7,'7E: Energy Transition',102),
+('RISK-ET-003','Hydrogen offtake / demand risk','ET','Sector-Specific Risk',7,'7E: Energy Transition',103),
+('RISK-ET-004','CCUS storage permanence','ET','Sector-Specific Risk',7,'7E: Energy Transition',104),
+('RISK-ET-005','CCUS capture rate risk','ET','Sector-Specific Risk',7,'7E: Energy Transition',105),
+('RISK-ET-006','Emerging technology scale-up risk','ET','Sector-Specific Risk',7,'7E: Energy Transition',106),
+('RISK-ET-007','Policy / subsidy dependency','ET','Sector-Specific Risk',7,'7E: Energy Transition',107),
+-- 7F Data Centres (9)
+('RISK-DC-001','Power availability and cost','DC','Sector-Specific Risk',7,'7F: Data Centres',108),
+('RISK-DC-002','Cooling infrastructure risk','DC','Sector-Specific Risk',7,'7F: Data Centres',109),
+('RISK-DC-003','Customer concentration / hyperscaler dependency','DC','Sector-Specific Risk',7,'7F: Data Centres',110),
+('RISK-DC-004','Technology density and obsolescence','DC','Sector-Specific Risk',7,'7F: Data Centres',111),
+('RISK-DC-005','Location and connectivity risk','DC','Sector-Specific Risk',7,'7F: Data Centres',112),
+('RISK-DC-006','Regulatory and planning risk','DC','Sector-Specific Risk',7,'7F: Data Centres',113),
+('RISK-DC-007','Supply chain — critical equipment','DC','Sector-Specific Risk',7,'7F: Data Centres',114),
+('RISK-DC-008','Demand sustainability / AI cycle risk','DC','Sector-Specific Risk',7,'7F: Data Centres',115),
+('RISK-DC-009','Uptime and SLA risk','DC','Sector-Specific Risk',7,'7F: Data Centres',116),
+-- 7G Telecoms (4)
+('RISK-TC-001','Network technology obsolescence','TC','Sector-Specific Risk',7,'7G: Telecommunications',117),
+('RISK-TC-002','Overbuild / competitive infrastructure','TC','Sector-Specific Risk',7,'7G: Telecommunications',118),
+('RISK-TC-003','Take-up and penetration rate','TC','Sector-Specific Risk',7,'7G: Telecommunications',119),
+('RISK-TC-004','Churn and ARPU pressure','TC','Sector-Specific Risk',7,'7G: Telecommunications',120),
+-- 7H Rail (6)
+('RISK-RA-001','Franchise / concession reversion risk','RA','Sector-Specific Risk',7,'7H: Rail',121),
+('RISK-RA-002','Farebox / revenue risk','RA','Sector-Specific Risk',7,'7H: Rail',122),
+('RISK-RA-003','Track access charges','RA','Sector-Specific Risk',7,'7H: Rail',123),
+('RISK-RA-004','Subsidy dependency','RA','Sector-Specific Risk',7,'7H: Rail',124),
+('RISK-RA-005','Timetable and capacity allocation','RA','Sector-Specific Risk',7,'7H: Rail',125),
+('RISK-RA-006','Performance regime / penalties','RA','Sector-Specific Risk',7,'7H: Rail',126),
+-- 7I Rolling Stock (6)
+('RISK-RS-001','Residual value / re-leasing risk','RS','Sector-Specific Risk',7,'7I: Rolling Stock',127),
+('RISK-RS-002','Single fleet / single operator risk','RS','Sector-Specific Risk',7,'7I: Rolling Stock',128),
+('RISK-RS-003','Technological obsolescence','RS','Sector-Specific Risk',7,'7I: Rolling Stock',129),
+('RISK-RS-004','Heavy maintenance cost escalation','RS','Sector-Specific Risk',7,'7I: Rolling Stock',130),
+('RISK-RS-005','Availability guarantee','RS','Sector-Specific Risk',7,'7I: Rolling Stock',131),
+('RISK-RS-006','Regulatory / safety compliance','RS','Sector-Specific Risk',7,'7I: Rolling Stock',132),
+-- 7J Ports (7)
+('RISK-PT-001','Cargo volume / throughput risk','PT','Sector-Specific Risk',7,'7J: Ports',133),
+('RISK-PT-002','Competition from neighbouring ports','PT','Sector-Specific Risk',7,'7J: Ports',134),
+('RISK-PT-003','Shipping line concentration','PT','Sector-Specific Risk',7,'7J: Ports',135),
+('RISK-PT-004','Vessel size / infrastructure adequacy','PT','Sector-Specific Risk',7,'7J: Ports',136),
+('RISK-PT-005','Landlord port — tenant credit and lease risk','PT','Sector-Specific Risk',7,'7J: Ports',137),
+('RISK-PT-006','Dredging and maritime access','PT','Sector-Specific Risk',7,'7J: Ports',138),
+('RISK-PT-007','Environmental and decarbonisation','PT','Sector-Specific Risk',7,'7J: Ports',139),
+-- 7K Airports (7)
+('RISK-AP-001','Passenger volume risk','AP','Sector-Specific Risk',7,'7K: Airports',140),
+('RISK-AP-002','Airline concentration and carrier dependency','AP','Sector-Specific Risk',7,'7K: Airports',141),
+('RISK-AP-003','Aeronautical vs commercial revenue mix','AP','Sector-Specific Risk',7,'7K: Airports',142),
+('RISK-AP-004','Capacity constraint / expansion risk','AP','Sector-Specific Risk',7,'7K: Airports',143),
+('RISK-AP-005','Competition from other airports','AP','Sector-Specific Risk',7,'7K: Airports',144),
+('RISK-AP-006','Noise, environment, and night flight restrictions','AP','Sector-Specific Risk',7,'7K: Airports',145),
+('RISK-AP-007','Ground transport access','AP','Sector-Specific Risk',7,'7K: Airports',146),
+-- 7L Roads (6)
+('RISK-RD-001','Traffic volume risk (toll roads)','RD','Sector-Specific Risk',7,'7L: Roads',147),
+('RISK-RD-002','Toll rate / escalation risk','RD','Sector-Specific Risk',7,'7L: Roads',148),
+('RISK-RD-003','Availability payment mechanism','RD','Sector-Specific Risk',7,'7L: Roads',149),
+('RISK-RD-004','Pavement lifecycle cost','RD','Sector-Specific Risk',7,'7L: Roads',150),
+('RISK-RD-005','Competing route risk','RD','Sector-Specific Risk',7,'7L: Roads',151),
+('RISK-RD-006','Winter maintenance / weather','RD','Sector-Specific Risk',7,'7L: Roads',152),
+-- 7M Gas Utilities (5)
+('RISK-GU-001','Demand decline from electrification','GU','Sector-Specific Risk',7,'7M: Gas Utilities',153),
+('RISK-GU-002','RAB / regulatory price review risk','GU','Sector-Specific Risk',7,'7M: Gas Utilities',154),
+('RISK-GU-003','Hydrogen conversion feasibility','GU','Sector-Specific Risk',7,'7M: Gas Utilities',155),
+('RISK-GU-004','Leakage and safety','GU','Sector-Specific Risk',7,'7M: Gas Utilities',156),
+('RISK-GU-005','Decommissioning and stranding','GU','Sector-Specific Risk',7,'7M: Gas Utilities',157),
+-- 7N Electricity Utilities (5)
+('RISK-EU-001','RAB / regulatory price review risk','EU','Sector-Specific Risk',7,'7N: Electricity Utilities',158),
+('RISK-EU-002','Investment programme delivery','EU','Sector-Specific Risk',7,'7N: Electricity Utilities',159),
+('RISK-EU-003','Connection queue and grid congestion','EU','Sector-Specific Risk',7,'7N: Electricity Utilities',160),
+('RISK-EU-004','Weather and resilience','EU','Sector-Specific Risk',7,'7N: Electricity Utilities',161),
+('RISK-EU-005','Distributed generation and demand-side response','EU','Sector-Specific Risk',7,'7N: Electricity Utilities',162),
+-- 7O Pipelines (6)
+('RISK-PL-001','Throughput / utilisation risk','PL','Sector-Specific Risk',7,'7O: Pipelines',163),
+('RISK-PL-002','Tariff / regulated return risk','PL','Sector-Specific Risk',7,'7O: Pipelines',164),
+('RISK-PL-003','Integrity and corrosion','PL','Sector-Specific Risk',7,'7O: Pipelines',165),
+('RISK-PL-004','Environmental and permitting','PL','Sector-Specific Risk',7,'7O: Pipelines',166),
+('RISK-PL-005','Stranding risk (hydrocarbon pipelines)','PL','Sector-Specific Risk',7,'7O: Pipelines',167),
+('RISK-PL-006','Transmission line — right of way and EMF','PL','Sector-Specific Risk',7,'7O: Pipelines',168),
+-- 7P Oil and Gas Storage (5)
+('RISK-ST-101','Storage demand and utilisation','ST1','Sector-Specific Risk',7,'7P: Oil and Gas Storage',169),
+('RISK-ST-102','Contango / spread risk','ST1','Sector-Specific Risk',7,'7P: Oil and Gas Storage',170),
+('RISK-ST-103','Cavern / tank integrity','ST1','Sector-Specific Risk',7,'7P: Oil and Gas Storage',171),
+('RISK-ST-104','Strategic storage mandate risk','ST1','Sector-Specific Risk',7,'7P: Oil and Gas Storage',172),
+('RISK-ST-105','Transition risk','ST1','Sector-Specific Risk',7,'7P: Oil and Gas Storage',173),
+-- 7Q Thermal Generation (7)
+('RISK-TG-001','Dispatch / merit order risk','TG','Sector-Specific Risk',7,'7Q: Thermal Generation',174),
+('RISK-TG-002','Spark / dark / clean spread risk','TG','Sector-Specific Risk',7,'7Q: Thermal Generation',175),
+('RISK-TG-003','Carbon price and emission regulation','TG','Sector-Specific Risk',7,'7Q: Thermal Generation',176),
+('RISK-TG-004','Fuel supply risk','TG','Sector-Specific Risk',7,'7Q: Thermal Generation',177),
+('RISK-TG-005','Plant availability and efficiency','TG','Sector-Specific Risk',7,'7Q: Thermal Generation',178),
+('RISK-TG-006','Capacity market revenue risk','TG','Sector-Specific Risk',7,'7Q: Thermal Generation',179),
+('RISK-TG-007','Biomass sustainability and reputational risk','TG','Sector-Specific Risk',7,'7Q: Thermal Generation',180),
+-- 7R Geothermal (5)
+('RISK-GE-001','Reservoir / resource risk','GE','Sector-Specific Risk',7,'7R: Geothermal',181),
+('RISK-GE-002','Drilling risk','GE','Sector-Specific Risk',7,'7R: Geothermal',182),
+('RISK-GE-003','Scaling, corrosion, and fluid chemistry','GE','Sector-Specific Risk',7,'7R: Geothermal',183),
+('RISK-GE-004','Induced seismicity','GE','Sector-Specific Risk',7,'7R: Geothermal',184),
+('RISK-GE-005','Plant performance and heat rate','GE','Sector-Specific Risk',7,'7R: Geothermal',185),
+-- 7S Power Grids (5)
+('RISK-PG-001','Regulatory and revenue risk','PG','Sector-Specific Risk',7,'7S: Power Grids',186),
+('RISK-PG-002','System operation complexity','PG','Sector-Specific Risk',7,'7S: Power Grids',187),
+('RISK-PG-003','Major project delivery (HVDC, interconnectors)','PG','Sector-Specific Risk',7,'7S: Power Grids',188),
+('RISK-PG-004','Interconnector merchant risk','PG','Sector-Specific Risk',7,'7S: Power Grids',189),
+('RISK-PG-005','Cyber and physical security','PG','Sector-Specific Risk',7,'7S: Power Grids',190),
+-- 7T Real Estate (10)
+('RISK-RE-101','Office — remote working structural shift','REE','Sector-Specific Risk',7,'7T: Real Estate',191),
+('RISK-RE-102','Retail — e-commerce displacement','REE','Sector-Specific Risk',7,'7T: Real Estate',192),
+('RISK-RE-103','Logistics / industrial — supply chain reshoring','REE','Sector-Specific Risk',7,'7T: Real Estate',193),
+('RISK-RE-104','Residential — affordability and regulation','REE','Sector-Specific Risk',7,'7T: Real Estate',194),
+('RISK-RE-105','Student accommodation — demographic and policy','REE','Sector-Specific Risk',7,'7T: Real Estate',195),
+('RISK-RE-106','Healthcare real estate — operator risk','REE','Sector-Specific Risk',7,'7T: Real Estate',196),
+('RISK-RE-107','Hotels — cyclicality and brand','REE','Sector-Specific Risk',7,'7T: Real Estate',197),
+('RISK-RE-108','Self-storage — maturity and saturation','REE','Sector-Specific Risk',7,'7T: Real Estate',198),
+('RISK-RE-109','Mixed-use — complexity and cross-default','REE','Sector-Specific Risk',7,'7T: Real Estate',199),
+('RISK-RE-110','Build quality / defects (new build)','REE','Sector-Specific Risk',7,'7T: Real Estate',200),
+-- 7U Social Infrastructure (5)
+('RISK-SI-001','PFI / PPP availability regime','SI','Sector-Specific Risk',7,'7U: Social Infrastructure',201),
+('RISK-SI-002','Authority / public sector credit','SI','Sector-Specific Risk',7,'7U: Social Infrastructure',202),
+('RISK-SI-003','Lifecycle cost escalation','SI','Sector-Specific Risk',7,'7U: Social Infrastructure',203),
+('RISK-SI-004','Hand-back conditions','SI','Sector-Specific Risk',7,'7U: Social Infrastructure',204),
+('RISK-SI-005','Demand risk (social housing)','SI','Sector-Specific Risk',7,'7U: Social Infrastructure',205),
+-- 7V Other Sectors (6)
+('RISK-OT-001','Resource / reserve risk','OT','Sector-Specific Risk',7,'7V: Other Sectors',206),
+('RISK-OT-002','Healthcare reimbursement risk','OT','Sector-Specific Risk',7,'7V: Other Sectors',207),
+('RISK-OT-003','Network / platform risk','OT','Sector-Specific Risk',7,'7V: Other Sectors',208),
+('RISK-OT-004','Product liability / recall risk','OT','Sector-Specific Risk',7,'7V: Other Sectors',209),
+('RISK-OT-005','Education — regulatory and fee risk','OT','Sector-Specific Risk',7,'7V: Other Sectors',210),
+('RISK-OT-006','Leisure and entertainment — discretionary spend','OT','Sector-Specific Risk',7,'7V: Other Sectors',211),
+-- 7W Energy from Waste (8)
+('RISK-EW-001','Gate fee risk','EW','Sector-Specific Risk',7,'7W: Energy from Waste',212),
+('RISK-EW-002','Waste volume / feedstock risk','EW','Sector-Specific Risk',7,'7W: Energy from Waste',213),
+('RISK-EW-003','Calorific value variability','EW','Sector-Specific Risk',7,'7W: Energy from Waste',214),
+('RISK-EW-004','Power / heat revenue','EW','Sector-Specific Risk',7,'7W: Energy from Waste',215),
+('RISK-EW-005','Emissions and environmental regulation','EW','Sector-Specific Risk',7,'7W: Energy from Waste',216),
+('RISK-EW-006','Residue disposal cost','EW','Sector-Specific Risk',7,'7W: Energy from Waste',217),
+('RISK-EW-007','Technology / availability risk','EW','Sector-Specific Risk',7,'7W: Energy from Waste',218),
+('RISK-EW-008','Contract renewal / merchant tail','EW','Sector-Specific Risk',7,'7W: Energy from Waste',219),
+-- 7X Clean Tech Charging (7)
+('RISK-EV-001','Utilisation / throughput risk','EV','Sector-Specific Risk',7,'7X: Clean Tech Charging',220),
+('RISK-EV-002','Electricity procurement and demand charges','EV','Sector-Specific Risk',7,'7X: Clean Tech Charging',221),
+('RISK-EV-003','Competition and pricing pressure','EV','Sector-Specific Risk',7,'7X: Clean Tech Charging',222),
+('RISK-EV-004','Technology obsolescence / charging speed','EV','Sector-Specific Risk',7,'7X: Clean Tech Charging',223),
+('RISK-EV-005','Grid connection and power capacity','EV','Sector-Specific Risk',7,'7X: Clean Tech Charging',224),
+('RISK-EV-006','Site location and lease risk','EV','Sector-Specific Risk',7,'7X: Clean Tech Charging',225),
+('RISK-EV-007','Regulatory and subsidy risk','EV','Sector-Specific Risk',7,'7X: Clean Tech Charging',226)
+ON CONFLICT (risk_id) DO NOTHING;
+
+-- Function to initialise risk register for a deal
+CREATE OR REPLACE FUNCTION initialise_risk_register(p_deal_id INTEGER)
+RETURNS INTEGER AS $$
+DECLARE
+    row_count INTEGER;
+BEGIN
+    INSERT INTO deal_risk_register (deal_id, risk_id, status)
+    SELECT p_deal_id, risk_id, 'not_yet_assessed'
+    FROM risk_taxonomy
+    ON CONFLICT (deal_id, risk_id) DO NOTHING;
+    GET DIAGNOSTICS row_count = ROW_COUNT;
+    RETURN row_count;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Initialise risk registers for all existing deals
+SELECT initialise_risk_register(id) FROM deals;
