@@ -1,8 +1,8 @@
 :root {
   --font-ui: "Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif;
   --font-display: "Avenir Next", "Trebuchet MS", "Segoe UI", sans-serif;
-  --font-scale-base: 14px;
-  --app-max-width: 1280px;
+  --font-scale-base: 12px;
+  --app-max-width: 100%;
   --shell-pad-x: 28px;
   --shell-pad-top: 36px;
   --shell-pad-bottom: 72px;
@@ -1942,8 +1942,8 @@ button.key-metric-card {
 
 .dashboard-table th,
 .dashboard-table td {
-  min-width: 150px;
-  padding: 14px 16px;
+  min-width: 120px;
+  padding: 10px 12px;
   border-right: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
   text-align: left;
@@ -1966,7 +1966,7 @@ button.key-metric-card {
 .dashboard-table thead th:first-child {
   left: 0;
   z-index: 4;
-  min-width: 320px;
+  min-width: 260px;
   background: color-mix(in srgb, var(--panel-strong) 94%, white);
 }
 
@@ -1974,7 +1974,7 @@ button.key-metric-card {
   position: sticky;
   left: 0;
   z-index: 2;
-  min-width: 320px;
+  min-width: 260px;
   background: color-mix(in srgb, var(--panel-strong) 94%, white);
 }
 
