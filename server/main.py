@@ -8326,6 +8326,132 @@ def get_actual_period_detail(deal_slug: str, period_flag: str):
     return dict(row)
 
 
+# ── Analytics endpoints ────────────────────────────────────────────────────────
+
+class AnalyticsRequest(BaseModel):
+    requestedBy: str
+
+
+@app.post("/api/topsheet/{deal_slug}/actuals/{period_flag}/analyse")
+def analyse_period(deal_slug: str, period_flag: str, payload: AnalyticsRequest):
+    """
+    Run all analytics for an actual period:
+      - Variance report (actual vs base case forecast)
+      - Covenant tests (all configured thresholds)
+      - Ratio reconciliation (borrower-reported vs platform-computed)
+      - Consecutive lockup update (deal-level)
+    """
+    from .analytics import run_analytics_for_period
+
+    with get_connection() as conn:
+        with conn.transaction():
+            viewer_context = load_viewer_context(conn, payload.requestedBy)
+            ensure_permission(
+                conn, viewer_context, "view_portfolio",
+                title="Analytics denied",
+                summary="Viewer does not have permission to run analytics.",
+                deep_link="/portfolio",
+            )
+            deal = conn.execute(
+                "SELECT id FROM deals WHERE slug = %s", (deal_slug,)
+            ).fetchone()
+            if not deal:
+                raise HTTPException(status_code=404, detail="Deal not found")
+
+            result = run_analytics_for_period(conn, deal["id"], period_flag)
+
+    return result.to_dict()
+
+
+@app.get("/api/topsheet/{deal_slug}/variance/{period_flag}")
+def get_variance_report(deal_slug: str, period_flag: str):
+    """Return variance report for an actual period vs base case forecast."""
+    from .analytics import compute_variance_report
+
+    with get_connection() as conn:
+        deal = conn.execute(
+            "SELECT id FROM deals WHERE slug = %s", (deal_slug,)
+        ).fetchone()
+        if not deal:
+            raise HTTPException(status_code=404, detail="Deal not found")
+        result = compute_variance_report(conn, deal["id"], period_flag)
+
+    return {
+        "deal_slug": deal_slug,
+        "period_flag": period_flag,
+        "summary_score": result.summary_score,
+        "variances": result.variances,
+        "errors": result.errors,
+    }
+
+
+@app.get("/api/topsheet/{deal_slug}/covenant-tests/{period_flag}")
+def get_covenant_tests(deal_slug: str, period_flag: str):
+    """Return covenant test results for a specific actual period."""
+    with get_connection() as conn:
+        deal = conn.execute(
+            "SELECT id FROM deals WHERE slug = %s", (deal_slug,)
+        ).fetchone()
+        if not deal:
+            raise HTTPException(status_code=404, detail="Deal not found")
+        actual = conn.execute(
+            "SELECT id FROM actual_periods WHERE deal_id=%s AND period_flag=%s",
+            (deal["id"], period_flag),
+        ).fetchone()
+        if not actual:
+            raise HTTPException(status_code=404, detail="Actual period not found")
+        rows = conn.execute(
+            """SELECT ct.*, cth.covenant_category, cth.test_frequency, cth.direction
+               FROM covenant_tests ct
+               LEFT JOIN covenant_thresholds cth ON cth.id = ct.covenant_threshold_id
+               WHERE ct.actual_period_id = %s
+               ORDER BY cth.covenant_category, ct.covenant_name""",
+            (actual["id"],),
+        ).fetchall()
+
+    return {
+        "deal_slug": deal_slug,
+        "period_flag": period_flag,
+        "tests": [dict(r) for r in rows],
+        "worst_tier": max(
+            (r["tier_status"] for r in rows),
+            key=lambda s: {"performing": 0, "distribution_lockup": 1,
+                           "trigger_event": 2, "event_of_default": 3}.get(s, 0),
+            default="not_assessed",
+        ),
+    }
+
+
+@app.get("/api/topsheet/{deal_slug}/reconciliation/{period_flag}")
+def get_reconciliation(deal_slug: str, period_flag: str):
+    """Return ratio reconciliation detail for a specific actual period."""
+    with get_connection() as conn:
+        deal = conn.execute(
+            "SELECT id FROM deals WHERE slug = %s", (deal_slug,)
+        ).fetchone()
+        if not deal:
+            raise HTTPException(status_code=404, detail="Deal not found")
+        row = conn.execute(
+            """SELECT ratio_reconciliation_status, ratio_reconciliation_detail,
+                      borrower_reported_ratios, platform_computed_ratios
+               FROM actual_periods WHERE deal_id=%s AND period_flag=%s""",
+            (deal["id"], period_flag),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Actual period not found")
+
+    detail = row["ratio_reconciliation_detail"]
+    if isinstance(detail, str):
+        detail = json.loads(detail)
+
+    return {
+        "deal_slug": deal_slug,
+        "period_flag": period_flag,
+        "overall_status": row["ratio_reconciliation_status"],
+        "reconciliations": detail or [],
+    }
+
+
 @app.post("/api/intake/submit")
 def submit_intake_document(payload: IntakeSubmitRequest):
     file_name = Path(payload.fileName).name.strip()
