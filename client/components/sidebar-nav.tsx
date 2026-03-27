@@ -149,6 +149,20 @@ function JpsIcon(className?: string) {
   );
 }
 
+function PlumbingIcon(className?: string) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M5 3v4a2 2 0 0 0 2 2h2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M9 9h6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M15 9h2a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M15 17H9" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M9 17H7a2 2 0 0 1-2-2v-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <circle cx="5" cy="5.5" r="1.5" stroke="currentColor" strokeWidth="1.4" />
+      <circle cx="19" cy="17.5" r="1.5" stroke="currentColor" strokeWidth="1.4" />
+    </svg>
+  );
+}
+
 function DotsIcon(className?: string) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -234,6 +248,12 @@ const primaryNavItems: NavItem[] = [
 ];
 
 const bottomNavItems: NavItem[] = [
+  {
+    href: "/plumbing",
+    label: "Plumbing",
+    matches: (pathname) => pathname.startsWith("/plumbing"),
+    icon: PlumbingIcon
+  },
   {
     href: "/miscellaneous",
     label: "Miscellaneous",
