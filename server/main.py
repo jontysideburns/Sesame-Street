@@ -8229,6 +8229,103 @@ def health():
     return {"ok": True}
 
 
+# ── TopSheet Import ────────────────────────────────────────────────────────────
+
+class TopSheetImportRequest(BaseModel):
+    dealSlug: str
+    fileContentBase64: str
+    requestedBy: str
+
+
+@app.post("/api/topsheet/import")
+def import_topsheet_endpoint(payload: TopSheetImportRequest):
+    """
+    Import a TopSheet Excel template for a deal.
+    Accepts a base64-encoded .xlsx file and imports all sheets into the database.
+    """
+    import base64
+    from .topsheet_importer import import_topsheet
+
+    try:
+        file_bytes = base64.b64decode(payload.fileContentBase64, validate=True)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid base64 file content")
+
+    with get_connection() as conn:
+        with conn.transaction():
+            viewer_context = load_viewer_context(conn, payload.requestedBy)
+            ensure_permission(
+                conn,
+                viewer_context,
+                "view_portfolio",
+                title="TopSheet import denied",
+                summary="The selected viewer does not have permission to import TopSheet data.",
+                deep_link="/portfolio",
+            )
+            result = import_topsheet(conn, payload.dealSlug, file_bytes)
+
+    if not result["ok"] and not result["counts"]:
+        raise HTTPException(status_code=422, detail=result["errors"])
+
+    return result
+
+
+@app.get("/api/topsheet/{deal_slug}/covenant-config")
+def get_covenant_config(deal_slug: str):
+    """Return all configured covenant thresholds for a deal."""
+    with get_connection() as conn:
+        deal = conn.execute(
+            "SELECT id FROM deals WHERE slug = %s", (deal_slug,)
+        ).fetchone()
+        if not deal:
+            raise HTTPException(status_code=404, detail="Deal not found")
+        rows = conn.execute(
+            """SELECT * FROM covenant_thresholds
+               WHERE deal_id = %s ORDER BY covenant_category, covenant_name""",
+            (deal["id"],),
+        ).fetchall()
+    return {"covenants": [dict(r) for r in rows]}
+
+
+@app.get("/api/topsheet/{deal_slug}/actuals")
+def get_actual_periods(deal_slug: str):
+    """Return all actual periods imported for a deal."""
+    with get_connection() as conn:
+        deal = conn.execute(
+            "SELECT id FROM deals WHERE slug = %s", (deal_slug,)
+        ).fetchone()
+        if not deal:
+            raise HTTPException(status_code=404, detail="Deal not found")
+        rows = conn.execute(
+            """SELECT id, period_label, period_flag, period_start, period_end,
+                      period_frequency, source_document_name, source_document_type,
+                      received_date, approval_tier, approved_by,
+                      ratio_reconciliation_status, ham_acknowledged, created_at
+               FROM actual_periods
+               WHERE deal_id = %s ORDER BY period_flag""",
+            (deal["id"],),
+        ).fetchall()
+    return {"actuals": [dict(r) for r in rows]}
+
+
+@app.get("/api/topsheet/{deal_slug}/actuals/{period_flag}")
+def get_actual_period_detail(deal_slug: str, period_flag: str):
+    """Return full actual period data including metrics and ratios."""
+    with get_connection() as conn:
+        deal = conn.execute(
+            "SELECT id FROM deals WHERE slug = %s", (deal_slug,)
+        ).fetchone()
+        if not deal:
+            raise HTTPException(status_code=404, detail="Deal not found")
+        row = conn.execute(
+            "SELECT * FROM actual_periods WHERE deal_id=%s AND period_flag=%s",
+            (deal["id"], period_flag),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Actual period not found")
+    return dict(row)
+
+
 @app.post("/api/intake/submit")
 def submit_intake_document(payload: IntakeSubmitRequest):
     file_name = Path(payload.fileName).name.strip()
