@@ -572,36 +572,341 @@ def parse_actuals_sheet(ws) -> list[dict]:
 
 def parse_risk_register_sheet(ws) -> list[dict]:
     """
-    Parse Risk Register sheet.
-    Row 4 = header: Risk ID, Risk Name, Category, Likelihood, Severity, Score,
-                    Trend, Sensitised at IC?, Sensitivity Detail, Stress Applied
+    Parse Risk Register sheet (Template 2).
+    30 columns per risk row — matches the deal_risk_register table.
+    Columns: #, Risk ID, Risk Name, Description, Typical Sectors, Present,
+    Likelihood, Severity, Score, Risk Level, Trend, Motivated Party (M1-M5),
+    Motivated Party Detail, Capital at Risk (C1-C5), Capital Type, Capital Provider,
+    Capital Amount, Capital Expiry, Capital Detail, Sensitised?, Sensitivity Name,
+    Stress DSCR Min, Min DSCR Year, Stress DSCR Avg, Stress Collateral Ratio,
+    Monitoring KPI, Monitoring Threshold, Commentary, Assessed By, Assessed Date.
     """
     risks = []
     header_found = False
     for row in ws.iter_rows(values_only=True):
         if not header_found:
-            if row and str(row[0] or "").strip().lower() == "risk id":
+            if row and str(row[0] or "").strip().lower() in ("#", "risk id"):
                 header_found = True
+                # Detect whether col 0 is '#' (row number) or 'Risk ID'
+                # If '#', risk_id is col 1; if 'Risk ID', it's col 0
+                if str(row[0] or "").strip() == "#":
+                    continue  # skip header
+                else:
+                    continue
             continue
-        if not row or not row[0]:
+        if not row:
             continue
-        risk_id = str(row[0]).strip()
-        if not risk_id or risk_id.upper().startswith("LAYER"):
+        # Determine offset — if col 0 is a number, risk_id is col 1
+        offset = 0
+        try:
+            int(row[0])
+            offset = 1
+        except (TypeError, ValueError):
+            offset = 0
+        risk_id = _val(row[offset]) if len(row) > offset else None
+        if not risk_id or not str(risk_id).startswith("RISK-"):
             continue
+
+        def _c(idx):
+            real = offset + idx
+            return _val(row[real]) if len(row) > real else None
+
+        present = _c(4)  # column F: Present (Yes/No/N/A)
+        if present and str(present).strip().upper() == "YES":
+            status = "assessed"
+        elif present and str(present).strip().upper() in ("NO", "N/A"):
+            status = "not_applicable"
+        else:
+            status = "not_yet_assessed"
+
+        mitigation_party_raw = _c(10)  # column L
+        mitigation_party_score = None
+        if mitigation_party_raw:
+            mp = str(mitigation_party_raw).strip().upper()
+            mp_map = {"M1": "M1_none", "M2": "M2_reputational", "M3": "M3_contractual",
+                       "M4": "M4_direct_economic", "M5": "M5_rated_sovereign"}
+            mitigation_party_score = mp_map.get(mp[:2], mitigation_party_raw)
+
+        mitigation_capital_raw = _c(12)  # column N
+        mitigation_capital_score = None
+        if mitigation_capital_raw:
+            mc = str(mitigation_capital_raw).strip().upper()
+            mc_map = {"C1": "C1_none", "C2": "C2_comfort", "C3": "C3_contractual_backstop",
+                       "C4": "C4_funded_reserve", "C5": "C5_unconditional_guarantee"}
+            mitigation_capital_score = mc_map.get(mc[:2], mitigation_capital_raw)
+
         risks.append({
-            "risk_id": risk_id,
-            "risk_name": _val(row[1]) if len(row) > 1 else None,
-            "risk_category": _val(row[2]) if len(row) > 2 else None,
-            "likelihood": _val(row[3]) if len(row) > 3 else None,
-            "severity": _val(row[4]) if len(row) > 4 else None,
-            "score": _num(row[5]) if len(row) > 5 else None,
-            "trend": _val(row[6]) if len(row) > 6 else None,
-            "sensitised_at_origination": _bool(_val(row[7])) if len(row) > 7 else False,
-            "sensitivity_name": _val(row[8]) if len(row) > 8 else None,
-            "stress_description": _val(row[9]) if len(row) > 9 else None,
-            "stress_parameters": json.dumps({"raw": _val(row[9])}) if (len(row) > 9 and row[9]) else None,
+            "risk_id": str(risk_id).strip(),
+            "status": status,
+            "likelihood": _num(_c(5)),
+            "severity": _num(_c(6)),
+            "trend": _c(9),
+            "mitigation_party_score": mitigation_party_score,
+            "mitigation_party_detail": _c(11),
+            "mitigation_capital_score": mitigation_capital_score,
+            "mitigation_capital_type": _c(13),
+            "mitigation_capital_provider": _c(14),
+            "mitigation_capital_amount": _num(_c(15)),
+            "mitigation_capital_expiry": _date(_c(16)),
+            "mitigation_capital_detail": _c(17),
+            "sensitised_at_origination": _bool(_c(18)),
+            "sensitivity_name": _c(19),
+            "stress_dscr_min": _num(_c(20)),
+            "stress_dscr_avg": _num(_c(22)),
+            "monitoring_kpi": _c(24),
+            "monitoring_threshold": _num(_c(25)),
+            "commentary": _c(26),
+            "assessed_by": _c(27),
+            "assessed_at": _date(_c(28)),
         })
     return risks
+
+
+# ── Table-format sheet parsers (Template 3 — Deal Structure) ─────────────────
+
+def parse_table_sheet(ws, column_map: dict[str, int], skip_header: bool = True) -> list[dict]:
+    """
+    Generic parser for table-format sheets.
+    column_map: {field_name: column_index (0-based)}.
+    Reads rows until an empty first-mapped column.
+    """
+    rows_out = []
+    header_skipped = False
+    for row in ws.iter_rows(values_only=True):
+        if not header_skipped and skip_header:
+            # Skip until we find the header row
+            if row and any(row):
+                first = str(row[0] or "").strip().lower()
+                # Detect header by checking if it matches expected field labels
+                if any(kw in first for kw in ("name", "instrument", "entity", "counterparty",
+                                                "account", "hedge", "phase", "investor",
+                                                "class", "#", "no.")):
+                    header_skipped = True
+                    continue
+            continue
+        if not row:
+            continue
+        # Find the first mapped column to check for emptiness
+        first_col = min(column_map.values())
+        if row[first_col] is None or str(row[first_col]).strip() == "":
+            continue
+        record = {}
+        for field, col_idx in column_map.items():
+            if col_idx < len(row):
+                record[field] = _val(row[col_idx])
+            else:
+                record[field] = None
+        rows_out.append(record)
+    return rows_out
+
+
+def parse_capital_structure_sheet(ws) -> list[dict]:
+    """Parse Sheet 3: Capital Structure (one row per instrument)."""
+    col_map = {
+        "instrument_name": 0, "instrument_type": 1, "waterfall_priority": 2,
+        "enforcement_class": 3, "committed_amount": 4, "drawn_amount": 5,
+        "currency": 6, "start_date": 7, "maturity_date": 8,
+        "interest_type": 9, "base_rate": 10, "margin_bps": 11,
+        "repayment_type": 12, "our_holding": 13, "our_holding_pct": 14,
+        "dsra_months": 15, "status": 16, "notes": 17,
+    }
+    rows = parse_table_sheet(ws, col_map)
+    for r in rows:
+        r["committed_amount"] = _num(r.get("committed_amount"))
+        r["drawn_amount"] = _num(r.get("drawn_amount"))
+        r["margin_bps"] = int(_num(r["margin_bps"])) if _num(r.get("margin_bps")) is not None else None
+        r["our_holding"] = _num(r.get("our_holding"))
+        r["our_holding_pct"] = _num(r.get("our_holding_pct"))
+        r["dsra_months"] = int(_num(r["dsra_months"])) if _num(r.get("dsra_months")) is not None else None
+        r["waterfall_priority"] = int(_num(r["waterfall_priority"])) if _num(r.get("waterfall_priority")) is not None else None
+        r["start_date"] = _date(r.get("start_date"))
+        r["maturity_date"] = _date(r.get("maturity_date"))
+    return rows
+
+
+def parse_enforcement_classes_sheet(ws) -> list[dict]:
+    """Parse Sheet 4: Enforcement Classes."""
+    col_map = {
+        "class_name": 0, "class_code": 1, "priority": 2,
+        "included_instruments": 3, "ratio_definitions": 4,
+        "covenant_thresholds": 5, "notes": 6,
+    }
+    rows = parse_table_sheet(ws, col_map)
+    for r in rows:
+        r["priority"] = int(_num(r["priority"])) if _num(r.get("priority")) is not None else None
+        for jfield in ("included_instruments", "ratio_definitions", "covenant_thresholds"):
+            v = r.get(jfield)
+            if v and isinstance(v, str):
+                try:
+                    r[jfield] = json.loads(v)
+                except json.JSONDecodeError:
+                    r[jfield] = None
+    return rows
+
+
+def parse_entity_map_sheet(ws) -> list[dict]:
+    """Parse Sheet 5: Entity Map."""
+    col_map = {
+        "entity_name": 0, "entity_type": 1, "parent_entity": 2,
+        "position": 3, "jurisdiction": 4, "securitisation_boundary": 5,
+        "intercompany_loans": 6, "ring_fenced": 7, "notes": 8,
+    }
+    rows = parse_table_sheet(ws, col_map)
+    for r in rows:
+        r["securitisation_boundary"] = _bool(r.get("securitisation_boundary"))
+        r["ring_fenced"] = _bool(r.get("ring_fenced"))
+        v = r.get("intercompany_loans")
+        if v and isinstance(v, str):
+            try:
+                r["intercompany_loans"] = json.loads(v)
+            except json.JSONDecodeError:
+                r["intercompany_loans"] = None
+    return rows
+
+
+def parse_counterparties_sheet(ws) -> list[dict]:
+    """Parse Sheet 8: Counterparties."""
+    col_map = {
+        "name": 0, "counterparty_type": 1, "credit_rating": 2,
+        "lei": 3, "dependency_narrative": 4, "replacement_risk": 5,
+        "contract_expiry": 6, "contract_value": 7, "notes": 8,
+    }
+    rows = parse_table_sheet(ws, col_map)
+    for r in rows:
+        r["contract_expiry"] = _date(r.get("contract_expiry"))
+        r["contract_value"] = _num(r.get("contract_value"))
+    return rows
+
+
+def parse_reserve_accounts_sheet(ws) -> list[dict]:
+    """Parse Sheet 10: Reserve Accounts."""
+    col_map = {
+        "account_name": 0, "account_type": 1, "sizing_basis": 2,
+        "required_balance": 3, "current_balance": 4, "funded_status": 5,
+        "funding_method": 6, "provider": 7, "linked_instrument": 8,
+        "expiry": 9, "notes": 10,
+    }
+    rows = parse_table_sheet(ws, col_map)
+    for r in rows:
+        r["required_balance"] = _num(r.get("required_balance"))
+        r["current_balance"] = _num(r.get("current_balance"))
+        r["expiry"] = _date(r.get("expiry"))
+    return rows
+
+
+def parse_hedge_portfolio_sheet(ws) -> list[dict]:
+    """Parse Sheet 12a: Hedge Portfolio."""
+    col_map = {
+        "hedge_type": 0, "notional": 1, "pct_of_debt": 2,
+        "start_date": 3, "maturity": 4, "fixed_rate": 5,
+        "counterparty": 6, "counterparty_rating": 7,
+        "mark_to_market": 8, "mtm_date": 9, "notes": 10,
+    }
+    rows = parse_table_sheet(ws, col_map)
+    for r in rows:
+        r["notional"] = _num(r.get("notional"))
+        r["pct_of_debt"] = _num(r.get("pct_of_debt"))
+        r["fixed_rate"] = _num(r.get("fixed_rate"))
+        r["mark_to_market"] = _num(r.get("mark_to_market"))
+        r["start_date"] = _date(r.get("start_date"))
+        r["maturity"] = _date(r.get("maturity"))
+        r["mtm_date"] = _date(r.get("mtm_date"))
+    return rows
+
+
+def parse_development_phases_sheet(ws) -> list[dict]:
+    """Parse Sheet 15: Development Phases."""
+    col_map = {
+        "phase_name": 0, "phase_number": 1, "capex_budget": 2,
+        "start_date": 3, "target_end_date": 4, "actual_end_date": 5,
+        "status": 6, "actual_spend": 7, "description": 8, "notes": 9,
+    }
+    rows = parse_table_sheet(ws, col_map)
+    for r in rows:
+        r["phase_number"] = int(_num(r["phase_number"])) if _num(r.get("phase_number")) is not None else None
+        r["capex_budget"] = _num(r.get("capex_budget"))
+        r["actual_spend"] = _num(r.get("actual_spend"))
+        r["start_date"] = _date(r.get("start_date"))
+        r["target_end_date"] = _date(r.get("target_end_date"))
+        r["actual_end_date"] = _date(r.get("actual_end_date"))
+        budget = r.get("capex_budget")
+        spend = r.get("actual_spend")
+        r["variance"] = (budget - spend) if budget is not None and spend is not None else None
+    return rows
+
+
+def parse_investor_allocations_sheet(ws) -> list[dict]:
+    """Parse Sheet 17: Investor Allocations."""
+    col_map = {
+        "investor_name": 0, "account_mandate": 1, "tranche": 2,
+        "amount": 3, "mandate_size": 4, "pct_of_mandate": 5, "notes": 6,
+    }
+    rows = parse_table_sheet(ws, col_map)
+    for r in rows:
+        r["amount"] = _num(r.get("amount"))
+        r["mandate_size"] = _num(r.get("mandate_size"))
+        r["pct_of_mandate"] = _num(r.get("pct_of_mandate"))
+    return rows
+
+
+def parse_intercreditor_sheet(ws) -> dict:
+    """Parse Sheet 18: Intercreditor Terms (key-value format)."""
+    field_map = {
+        "governing law": "governing_law",
+        "standstill period": "standstill_period",
+        "turnover provisions": "turnover_provisions",
+        "permitted junior payments": "permitted_junior_payments",
+        "security release conditions": "security_release_conditions",
+        "non-petition clause": "non_petition_clause",
+        "enforcement priority": "enforcement_priority",
+    }
+    result = {}
+    for row in ws.iter_rows(values_only=True):
+        if not row or row[0] is None:
+            continue
+        label = str(row[0]).strip().lower()
+        if label in field_map:
+            col = field_map[label]
+            val = _val(row[1]) if len(row) > 1 else None
+            if col == "non_petition_clause":
+                val = _bool(val)
+            result[col] = val
+    return result
+
+
+def parse_line_labels_sheet(ws) -> dict:
+    """Parse Line Labels configuration sheet from Template 1."""
+    labels = {
+        "sector_template": None,
+        "revenue_line_labels": [],
+        "cost_line_labels": [],
+        "capex_line_labels": [],
+        "sector_kpi_labels": [],
+    }
+    current_section = None
+    section_map = {
+        "revenue": "revenue_line_labels",
+        "cost": "cost_line_labels",
+        "capex": "capex_line_labels",
+        "kpi": "sector_kpi_labels",
+        "sector kpi": "sector_kpi_labels",
+    }
+    for row in ws.iter_rows(values_only=True):
+        if not row:
+            continue
+        first = str(row[0] or "").strip()
+        first_lower = first.lower()
+        if first_lower.startswith("sector template") or first_lower.startswith("sector:"):
+            labels["sector_template"] = _val(row[1]) if len(row) > 1 else _val(first.split(":")[-1])
+            continue
+        for key, field in section_map.items():
+            if key in first_lower and ("line" in first_lower or "label" in first_lower or "kpi" in first_lower):
+                current_section = field
+                break
+        else:
+            if current_section and first and not first_lower.startswith("f.") and not first.isupper():
+                labels[current_section].append(first)
+    return labels
 
 
 # ── Period helpers ────────────────────────────────────────────────────────────
@@ -827,58 +1132,163 @@ def _upsert_actual_periods(conn, deal_id: int, actuals: list[dict],
     return count
 
 
-def _upsert_risk_entries(conn, deal_id: int, risks: list[dict],
-                          errors: list[str]) -> int:
+def _upsert_risk_register(conn, deal_id: int, risks: list[dict],
+                           errors: list[str]) -> int:
+    """Upsert into deal_risk_register (the 226-risk per-deal table)."""
     count = 0
     for risk in risks:
-        if not risk.get("risk_id"):
+        risk_id = risk.get("risk_id")
+        if not risk_id:
             continue
-        existing = conn.execute(
-            "SELECT id FROM risk_register_entries WHERE deal_id=%s AND risk_id=%s",
-            (deal_id, risk["risk_id"]),
+        # Verify risk_id exists in taxonomy
+        exists = conn.execute(
+            "SELECT 1 FROM risk_taxonomy WHERE risk_id=%s", (risk_id,)
         ).fetchone()
-        if existing:
-            conn.execute(
-                """UPDATE risk_register_entries
-                   SET risk_name=%s, risk_category=%s, likelihood=%s, severity=%s,
-                       score=%s, trend=%s, sensitised_at_origination=%s,
-                       sensitivity_name=%s, stress_description=%s, stress_parameters=%s
-                   WHERE id=%s""",
-                (
-                    risk.get("risk_name"), risk.get("risk_category"),
-                    risk.get("likelihood"), risk.get("severity"),
-                    risk.get("score"), risk.get("trend"),
-                    risk.get("sensitised_at_origination", False),
-                    risk.get("sensitivity_name"), risk.get("stress_description"),
-                    risk.get("stress_parameters"), existing["id"],
-                ),
-            )
-        else:
-            # Insert with required fields — use defaults for mandatory columns
-            conn.execute(
-                """INSERT INTO risk_register_entries
-                   (deal_id, risk_id, risk_name, risk_category, likelihood, severity,
-                    score, trend, sensitised_at_origination, sensitivity_name,
-                    stress_description, stress_parameters,
-                    probability, impact, status, owner_name, title, summary,
-                    mitigant, next_review_date, opened_at)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
-                           'possible','medium','open','TopSheet Import',
-                           %s,'Imported from TopSheet template',
-                           'To be assessed', NOW()::date, NOW())""",
-                (
-                    deal_id, risk["risk_id"], risk.get("risk_name"),
-                    risk.get("risk_category") or "general",
-                    risk.get("likelihood"), risk.get("severity"),
-                    risk.get("score"), risk.get("trend"),
-                    risk.get("sensitised_at_origination", False),
-                    risk.get("sensitivity_name"), risk.get("stress_description"),
-                    risk.get("stress_parameters"),
-                    risk.get("risk_name") or risk["risk_id"],
-                ),
-            )
+        if not exists:
+            errors.append(f"Risk ID '{risk_id}' not found in taxonomy — skipped")
+            continue
+
+        likelihood = int(_num(risk["likelihood"])) if _num(risk.get("likelihood")) is not None else None
+        severity = int(_num(risk["severity"])) if _num(risk.get("severity")) is not None else None
+
+        conn.execute(
+            """INSERT INTO deal_risk_register
+               (deal_id, risk_id, status, likelihood, severity, trend,
+                mitigation_party_score, mitigation_party_detail,
+                mitigation_capital_score, mitigation_capital_type,
+                mitigation_capital_provider, mitigation_capital_amount,
+                mitigation_capital_expiry, mitigation_capital_detail,
+                sensitised_at_origination, sensitivity_name,
+                stress_dscr_min, stress_dscr_avg,
+                monitoring_kpi, monitoring_threshold,
+                commentary, assessed_by, assessed_at, updated_at)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
+               ON CONFLICT (deal_id, risk_id) DO UPDATE SET
+                status=EXCLUDED.status, likelihood=EXCLUDED.likelihood,
+                severity=EXCLUDED.severity, trend=EXCLUDED.trend,
+                mitigation_party_score=EXCLUDED.mitigation_party_score,
+                mitigation_party_detail=EXCLUDED.mitigation_party_detail,
+                mitigation_capital_score=EXCLUDED.mitigation_capital_score,
+                mitigation_capital_type=EXCLUDED.mitigation_capital_type,
+                mitigation_capital_provider=EXCLUDED.mitigation_capital_provider,
+                mitigation_capital_amount=EXCLUDED.mitigation_capital_amount,
+                mitigation_capital_expiry=EXCLUDED.mitigation_capital_expiry,
+                mitigation_capital_detail=EXCLUDED.mitigation_capital_detail,
+                sensitised_at_origination=EXCLUDED.sensitised_at_origination,
+                sensitivity_name=EXCLUDED.sensitivity_name,
+                stress_dscr_min=EXCLUDED.stress_dscr_min,
+                stress_dscr_avg=EXCLUDED.stress_dscr_avg,
+                monitoring_kpi=EXCLUDED.monitoring_kpi,
+                monitoring_threshold=EXCLUDED.monitoring_threshold,
+                commentary=EXCLUDED.commentary,
+                assessed_by=EXCLUDED.assessed_by,
+                assessed_at=EXCLUDED.assessed_at,
+                updated_at=NOW()""",
+            (
+                deal_id, risk_id, risk["status"],
+                likelihood, severity, risk.get("trend"),
+                risk.get("mitigation_party_score"), risk.get("mitigation_party_detail"),
+                risk.get("mitigation_capital_score"), risk.get("mitigation_capital_type"),
+                risk.get("mitigation_capital_provider"), risk.get("mitigation_capital_amount"),
+                risk.get("mitigation_capital_expiry"), risk.get("mitigation_capital_detail"),
+                risk.get("sensitised_at_origination", False), risk.get("sensitivity_name"),
+                risk.get("stress_dscr_min"), risk.get("stress_dscr_avg"),
+                risk.get("monitoring_kpi"), risk.get("monitoring_threshold"),
+                risk.get("commentary"), risk.get("assessed_by"), risk.get("assessed_at"),
+            ),
+        )
         count += 1
     return count
+
+
+def _replace_child_table(conn, deal_id: int, table: str, rows: list[dict],
+                          errors: list[str]) -> int:
+    """Delete-and-replace strategy for child table rows."""
+    if not rows:
+        return 0
+    conn.execute(f"DELETE FROM {table} WHERE deal_id = %s", (deal_id,))
+    count = 0
+    for row in rows:
+        cols = [k for k, v in row.items() if v is not None]
+        if not cols:
+            continue
+        placeholders = ", ".join(["%s"] * (len(cols) + 1))
+        col_names = "deal_id, " + ", ".join(cols)
+        values = [deal_id] + [row[c] for c in cols]
+        # Convert dicts/lists to JSON strings for JSONB columns
+        for i, v in enumerate(values):
+            if isinstance(v, (dict, list)):
+                values[i] = json.dumps(v)
+        try:
+            conn.execute(
+                f"INSERT INTO {table} ({col_names}) VALUES ({placeholders})",
+                values,
+            )
+            count += 1
+        except Exception as e:
+            errors.append(f"{table}: insert failed — {e}")
+    return count
+
+
+def _upsert_intercreditor(conn, deal_id: int, data: dict,
+                           errors: list[str]) -> int:
+    """Upsert intercreditor terms (one row per deal)."""
+    if not data:
+        return 0
+    cols = [k for k, v in data.items() if v is not None]
+    if not cols:
+        return 0
+    existing = conn.execute(
+        "SELECT id FROM intercreditor_terms WHERE deal_id=%s", (deal_id,)
+    ).fetchone()
+    if existing:
+        set_clause = ", ".join(f"{c}=%s" for c in cols)
+        values = [data[c] for c in cols] + [deal_id]
+        conn.execute(
+            f"UPDATE intercreditor_terms SET {set_clause}, updated_at=NOW() WHERE deal_id=%s",
+            values,
+        )
+    else:
+        col_names = "deal_id, " + ", ".join(cols)
+        placeholders = ", ".join(["%s"] * (len(cols) + 1))
+        values = [deal_id] + [data[c] for c in cols]
+        conn.execute(
+            f"INSERT INTO intercreditor_terms ({col_names}) VALUES ({placeholders})",
+            values,
+        )
+    return 1
+
+
+def _upsert_financial_template(conn, deal_id: int, labels: dict,
+                                errors: list[str]) -> int:
+    """Upsert deal_financial_template (one row per deal)."""
+    if not labels:
+        return 0
+    existing = conn.execute(
+        "SELECT id FROM deal_financial_template WHERE deal_id=%s", (deal_id,)
+    ).fetchone()
+    sector = labels.get("sector_template")
+    rev = json.dumps(labels.get("revenue_line_labels", []))
+    cost = json.dumps(labels.get("cost_line_labels", []))
+    capex = json.dumps(labels.get("capex_line_labels", []))
+    kpi = json.dumps(labels.get("sector_kpi_labels", []))
+    if existing:
+        conn.execute(
+            """UPDATE deal_financial_template
+               SET sector_template=%s, revenue_line_labels=%s, cost_line_labels=%s,
+                   capex_line_labels=%s, sector_kpi_labels=%s, updated_at=NOW()
+               WHERE deal_id=%s""",
+            (sector, rev, cost, capex, kpi, deal_id),
+        )
+    else:
+        conn.execute(
+            """INSERT INTO deal_financial_template
+               (deal_id, sector_template, revenue_line_labels, cost_line_labels,
+                capex_line_labels, sector_kpi_labels)
+               VALUES (%s,%s,%s,%s,%s,%s)""",
+            (deal_id, sector, rev, cost, capex, kpi),
+        )
+    return 1
 
 
 # ── Main entry point ──────────────────────────────────────────────────────────
@@ -947,11 +1357,96 @@ def import_topsheet(conn, deal_slug: str, file_bytes: bytes) -> dict:
         n = _upsert_actual_periods(conn, deal_id, actuals, errors)
         counts["actual_periods"] = n
 
-    # Risk Register
-    if "9. Risk Register" in sheet_names:
-        risks = parse_risk_register_sheet(wb["9. Risk Register"])
-        n = _upsert_risk_entries(conn, deal_id, risks, errors)
-        counts["risk_entries"] = n
+    # Risk Register (Template 2 — uses deal_risk_register table)
+    risk_sheet_names = ("Risk Register", "9. Risk Register")
+    for rsn in risk_sheet_names:
+        if rsn in sheet_names:
+            risks = parse_risk_register_sheet(wb[rsn])
+            n = _upsert_risk_register(conn, deal_id, risks, errors)
+            counts["risk_register"] = n
+            break
+
+    # ── Template 3: Table-format child sheets ──
+
+    # Capital Structure (Sheet 3)
+    for sn in ("3. Capital Structure", "Capital Structure"):
+        if sn in sheet_names:
+            rows = parse_capital_structure_sheet(wb[sn])
+            n = _replace_child_table(conn, deal_id, "capital_structure_instruments", rows, errors)
+            counts["capital_structure"] = n
+            break
+
+    # Enforcement Classes (Sheet 4)
+    for sn in ("4. Enforcement Classes", "Enforcement Classes"):
+        if sn in sheet_names:
+            rows = parse_enforcement_classes_sheet(wb[sn])
+            n = _replace_child_table(conn, deal_id, "enforcement_classes", rows, errors)
+            counts["enforcement_classes"] = n
+            break
+
+    # Entity Map (Sheet 5)
+    for sn in ("5. Entity Map", "Entity Map"):
+        if sn in sheet_names:
+            rows = parse_entity_map_sheet(wb[sn])
+            n = _replace_child_table(conn, deal_id, "corporate_entities", rows, errors)
+            counts["corporate_entities"] = n
+            break
+
+    # Counterparties (Sheet 8)
+    for sn in ("8. Counterparties", "Counterparties"):
+        if sn in sheet_names:
+            rows = parse_counterparties_sheet(wb[sn])
+            n = _replace_child_table(conn, deal_id, "deal_counterparties", rows, errors)
+            counts["counterparties"] = n
+            break
+
+    # Reserve Accounts (Sheet 10)
+    for sn in ("10. Reserve Accounts", "Reserve Accounts"):
+        if sn in sheet_names:
+            rows = parse_reserve_accounts_sheet(wb[sn])
+            n = _replace_child_table(conn, deal_id, "deal_reserve_accounts", rows, errors)
+            counts["reserve_accounts"] = n
+            break
+
+    # Hedge Portfolio (Sheet 12a)
+    for sn in ("12a. Hedge Portfolio", "Hedge Portfolio"):
+        if sn in sheet_names:
+            rows = parse_hedge_portfolio_sheet(wb[sn])
+            n = _replace_child_table(conn, deal_id, "hedge_portfolio", rows, errors)
+            counts["hedge_portfolio"] = n
+            break
+
+    # Development Phases (Sheet 15)
+    for sn in ("15. Development", "Development"):
+        if sn in sheet_names:
+            rows = parse_development_phases_sheet(wb[sn])
+            n = _replace_child_table(conn, deal_id, "deal_development_phases", rows, errors)
+            counts["development_phases"] = n
+            break
+
+    # Investor Allocations (Sheet 17)
+    for sn in ("17. Investor Allocation", "Investor Allocation"):
+        if sn in sheet_names:
+            rows = parse_investor_allocations_sheet(wb[sn])
+            n = _replace_child_table(conn, deal_id, "investor_allocations", rows, errors)
+            counts["investor_allocations"] = n
+            break
+
+    # Intercreditor Terms (Sheet 18)
+    for sn in ("18. Intercreditor", "Intercreditor"):
+        if sn in sheet_names:
+            data = parse_intercreditor_sheet(wb[sn])
+            n = _upsert_intercreditor(conn, deal_id, data, errors)
+            counts["intercreditor"] = n
+            break
+
+    # ── Template 1: Line Labels ──
+    for sn in ("Line Labels", "Labels"):
+        if sn in sheet_names:
+            labels = parse_line_labels_sheet(wb[sn])
+            n = _upsert_financial_template(conn, deal_id, labels, errors)
+            counts["financial_template"] = n
+            break
 
     return {
         "ok": len(errors) == 0,
