@@ -17748,3 +17748,748 @@ def get_deal_topsheet(slug: str):
         "latestActuals": [_serialize_row(r) for r in actuals],
         "latestCovenantTests": [_serialize_row(r) for r in cov_tests],
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PHASE 4 — ANALYTICS ENGINES
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+# ── 4A. Covenant Testing Engine ────────────────────────────────────────────
+# Runs all configured covenant thresholds against the latest actual period
+# and writes results to covenant_tests. Returns the 4-tier status per covenant.
+
+@app.post("/api/deals/{slug}/analytics/run-covenant-tests")
+def run_covenant_tests(slug: str, body: dict | None = None):
+    """Run covenant tests for a deal against its latest (or specified) actual period.
+    Body can include {"periodFlag": "2026Q1"} to test a specific period."""
+    with get_connection() as conn:
+        deal_id = _get_deal_id(conn, slug)
+
+        # Resolve actual period
+        period_flag = body.get("periodFlag") if body else None
+        if period_flag:
+            ap = conn.execute(
+                "SELECT * FROM actual_periods WHERE deal_id = %s AND period_flag = %s ORDER BY source_hierarchy LIMIT 1",
+                (deal_id, period_flag),
+            ).fetchone()
+        else:
+            ap = conn.execute(
+                "SELECT * FROM actual_periods WHERE deal_id = %s ORDER BY period_end DESC LIMIT 1",
+                (deal_id,),
+            ).fetchone()
+        if not ap:
+            raise HTTPException(status_code=404, detail="No actual period found for this deal")
+
+        actual_metrics = ap["actual_metrics"] or {}
+
+        # Get configured thresholds
+        thresholds = conn.execute(
+            "SELECT * FROM covenant_thresholds WHERE deal_id = %s",
+            (deal_id,),
+        ).fetchall()
+        if not thresholds:
+            raise HTTPException(status_code=404, detail="No covenant thresholds configured")
+
+        results = []
+        overall_status = "performing"
+        status_rank = {"performing": 0, "distribution_lockup": 1, "trigger_event": 2, "event_of_default": 3}
+
+        for th in thresholds:
+            ratio_name = th["ratio_name"]
+            # Try to find ratio in actual_metrics or platform_computed_ratios
+            ratio_val = None
+            computed = ap.get("platform_computed_ratios") or {}
+            borrower = ap.get("borrower_reported_ratios") or {}
+
+            # Look up ratio value: prefer platform-computed, then borrower, then actual_metrics
+            for source in [computed, borrower, actual_metrics]:
+                if ratio_name in source and source[ratio_name] is not None:
+                    ratio_val = float(source[ratio_name])
+                    break
+
+            if ratio_val is None:
+                # Try composition_tag as key (e.g. "dscr", "llcr")
+                tag = th.get("composition_tag") or ""
+                for source in [computed, borrower, actual_metrics]:
+                    if tag in source and source[tag] is not None:
+                        ratio_val = float(source[tag])
+                        break
+
+            lockup = float(th["lockup_level"]) if th["lockup_level"] is not None else None
+            trigger = float(th["trigger_level"]) if th["trigger_level"] is not None else None
+            default = float(th["default_level"]) if th["default_level"] is not None else None
+            borrower_val = borrower.get(ratio_name)
+            direction = th["direction"]  # "min" = must be >= threshold, "max" = must be <= threshold
+
+            # Determine tier status
+            tier = "performing"
+            if ratio_val is not None:
+                if direction == "min":
+                    if default is not None and ratio_val < default:
+                        tier = "event_of_default"
+                    elif trigger is not None and ratio_val < trigger:
+                        tier = "trigger_event"
+                    elif lockup is not None and ratio_val < lockup:
+                        tier = "distribution_lockup"
+                elif direction == "max":
+                    if default is not None and ratio_val > default:
+                        tier = "event_of_default"
+                    elif trigger is not None and ratio_val > trigger:
+                        tier = "trigger_event"
+                    elif lockup is not None and ratio_val > lockup:
+                        tier = "distribution_lockup"
+
+            # Compute headroom
+            h_lockup = round(ratio_val - lockup, 4) if ratio_val is not None and lockup is not None else None
+            h_trigger = round(ratio_val - trigger, 4) if ratio_val is not None and trigger is not None else None
+            h_default = round(ratio_val - default, 4) if ratio_val is not None and default is not None else None
+            if direction == "max":
+                h_lockup = -h_lockup if h_lockup is not None else None
+                h_trigger = -h_trigger if h_trigger is not None else None
+                h_default = -h_default if h_default is not None else None
+
+            # Insert test result
+            row = conn.execute(
+                """INSERT INTO covenant_tests
+                    (actual_period_id, deal_id, covenant_threshold_id, covenant_name,
+                     test_type, ratio_value, borrower_reported_value,
+                     lockup_threshold, trigger_threshold, default_threshold,
+                     tier_status, headroom_to_lockup, headroom_to_trigger, headroom_to_default,
+                     components, source_citation)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                   RETURNING id""",
+                (ap["id"], deal_id, th["id"], th["covenant_name"],
+                 th["test_type"], ratio_val,
+                 float(borrower_val) if borrower_val is not None else None,
+                 lockup, trigger, default,
+                 tier, h_lockup, h_trigger, h_default,
+                 json.dumps({"ratio_name": ratio_name, "direction": direction,
+                             "composition_tag": th.get("composition_tag")}),
+                 f"actual_period {ap['period_label']} ({ap['source_hierarchy']})"),
+            ).fetchone()
+
+            if status_rank.get(tier, 0) > status_rank.get(overall_status, 0):
+                overall_status = tier
+
+            results.append({
+                "id": str(row["id"]),
+                "covenantName": th["covenant_name"],
+                "testType": th["test_type"],
+                "ratioValue": ratio_val,
+                "lockupThreshold": lockup,
+                "triggerThreshold": trigger,
+                "defaultThreshold": default,
+                "tierStatus": tier,
+                "headroomToLockup": h_lockup,
+                "headroomToTrigger": h_trigger,
+                "headroomToDefault": h_default,
+            })
+
+        # Update deal-level covenant status
+        conn.execute(
+            "UPDATE deals SET overall_covenant_status = %s WHERE id = %s",
+            (overall_status, deal_id),
+        )
+
+        # If lockup detected, increment consecutive lockup counter
+        if overall_status in ("distribution_lockup", "trigger_event", "event_of_default"):
+            conn.execute(
+                "UPDATE deals SET consecutive_lockup_periods = consecutive_lockup_periods + 1 WHERE id = %s",
+                (deal_id,),
+            )
+        else:
+            conn.execute(
+                "UPDATE deals SET consecutive_lockup_periods = 0 WHERE id = %s",
+                (deal_id,),
+            )
+
+    return {
+        "dealSlug": slug,
+        "periodLabel": ap["period_label"],
+        "overallStatus": overall_status,
+        "testsRun": len(results),
+        "results": results,
+    }
+
+
+# ── 4B. Variance Engine ───────────────────────────────────────────────────
+# Compares actual metrics against the active forecast for the same period.
+
+@app.post("/api/deals/{slug}/analytics/run-variance")
+def run_variance_analysis(slug: str, body: dict | None = None):
+    """Run variance analysis: compare actuals vs forecast for latest (or specified) period.
+    Body can include {"periodFlag": "2026Q1"}."""
+    with get_connection() as conn:
+        deal_id = _get_deal_id(conn, slug)
+
+        period_flag = body.get("periodFlag") if body else None
+        if period_flag:
+            ap = conn.execute(
+                "SELECT * FROM actual_periods WHERE deal_id = %s AND period_flag = %s ORDER BY source_hierarchy LIMIT 1",
+                (deal_id, period_flag),
+            ).fetchone()
+        else:
+            ap = conn.execute(
+                "SELECT * FROM actual_periods WHERE deal_id = %s ORDER BY period_end DESC LIMIT 1",
+                (deal_id,),
+            ).fetchone()
+        if not ap:
+            raise HTTPException(status_code=404, detail="No actual period found")
+
+        # Find matching forecast period from the active base-case version
+        fp = conn.execute(
+            """SELECT fcp.scenario_metrics, fcp.period_label
+               FROM forecast_case_periods fcp
+               JOIN forecast_case_versions fcv ON fcp.forecast_case_version_id = fcv.id
+               JOIN forecast_cases fc ON fcv.forecast_case_id = fc.id
+               WHERE fc.deal_id = %s AND fc.drives_monitoring = TRUE AND fcv.is_active = TRUE
+                 AND fcp.period_key = %s
+               LIMIT 1""",
+            (deal_id, ap["period_flag"]),
+        ).fetchone()
+
+        actual_metrics = ap["actual_metrics"] or {}
+        forecast_metrics = (fp["scenario_metrics"] if fp else {}) or {}
+
+        # Also check financial_periods for expected_metrics fallback
+        if not forecast_metrics:
+            fin_p = conn.execute(
+                """SELECT expected_metrics FROM financial_periods
+                   WHERE deal_id = %s AND period_key = %s""",
+                (deal_id, ap["period_flag"]),
+            ).fetchone()
+            if fin_p:
+                forecast_metrics = fin_p["expected_metrics"] or {}
+
+        # Compute variances for every metric present in actuals
+        variances = []
+        material_count = 0
+        for key, actual_val in actual_metrics.items():
+            if actual_val is None:
+                continue
+            try:
+                av = float(actual_val)
+            except (ValueError, TypeError):
+                continue
+            forecast_val = forecast_metrics.get(key)
+            if forecast_val is None:
+                continue
+            try:
+                fv = float(forecast_val)
+            except (ValueError, TypeError):
+                continue
+
+            var_value = round(av - fv, 2)
+            var_pct = round((var_value / fv) * 100, 2) if fv != 0 else 0.0
+            direction = "favourable" if var_value >= 0 else "adverse"
+            # Materiality: >10% = material, 5-10% = notable, <5% = immaterial
+            abs_pct = abs(var_pct)
+            if abs_pct >= 10:
+                materiality = "material"
+                material_count += 1
+            elif abs_pct >= 5:
+                materiality = "notable"
+            else:
+                materiality = "immaterial"
+
+            variances.append({
+                "metricKey": key,
+                "actualValue": av,
+                "forecastValue": fv,
+                "varianceValue": var_value,
+                "variancePct": var_pct,
+                "direction": direction,
+                "materiality": materiality,
+            })
+
+        # Persist to financial_variances if we have a financial_period
+        fin_period = conn.execute(
+            "SELECT id FROM financial_periods WHERE deal_id = %s AND period_key = %s",
+            (deal_id, ap["period_flag"]),
+        ).fetchone()
+
+        if fin_period:
+            # Clear old variances for this period
+            conn.execute(
+                "DELETE FROM financial_variances WHERE financial_period_id = %s",
+                (fin_period["id"],),
+            )
+            for v in variances:
+                conn.execute(
+                    """INSERT INTO financial_variances
+                        (financial_period_id, metric_key, metric_label,
+                         reported_value, expected_value, variance_value, variance_pct,
+                         direction, materiality, commentary)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                    (fin_period["id"], v["metricKey"], v["metricKey"],
+                     v["actualValue"], v["forecastValue"], v["varianceValue"],
+                     v["variancePct"], v["direction"], v["materiality"], ""),
+                )
+
+    return {
+        "dealSlug": slug,
+        "periodLabel": ap["period_label"],
+        "totalMetrics": len(variances),
+        "materialCount": material_count,
+        "variances": sorted(variances, key=lambda x: abs(x["variancePct"]), reverse=True),
+    }
+
+
+# ── 4C. Risk Score Computation ─────────────────────────────────────────────
+# Aggregates deal_risk_register into a portfolio-level risk score.
+
+@app.get("/api/deals/{slug}/analytics/risk-score")
+def get_deal_risk_score(slug: str):
+    """Compute aggregate risk score for a deal from its assessed risk register entries."""
+    with get_connection() as conn:
+        deal_id = _get_deal_id(conn, slug)
+        rows = conn.execute(
+            """SELECT risk_id, risk_score, risk_level,
+                      mitigation_party_score, mitigation_capital_score,
+                      category_code
+               FROM deal_risk_register
+               WHERE deal_id = %s AND status = 'assessed'""",
+            (deal_id,),
+        ).fetchall()
+
+    if not rows:
+        return {"dealSlug": slug, "riskScore": None, "message": "No assessed risks"}
+
+    # Score weights by risk level
+    level_weights = {"negligible": 1, "low": 2, "moderate": 3, "high": 5, "critical": 8, "fatal": 13}
+    # Mitigation discount factors
+    party_discount = {
+        "M1_none": 1.0, "M2_reputational": 0.95, "M3_contractual": 0.80,
+        "M4_insured": 0.60, "M5_guaranteed": 0.40,
+    }
+    capital_discount = {
+        "C1_none": 1.0, "C2_comfort": 0.95, "C3_reserve": 0.75,
+        "C4_funded": 0.55, "C5_overcollateralised": 0.35,
+    }
+
+    total_weighted = 0.0
+    max_possible = 0.0
+    by_category = {}
+
+    for r in rows:
+        raw_weight = level_weights.get(r["risk_level"], 3)
+        pd = party_discount.get(r["mitigation_party_score"], 1.0)
+        cd = capital_discount.get(r["mitigation_capital_score"], 1.0)
+        net_score = r["risk_score"] * pd * cd
+        total_weighted += net_score
+        max_possible += 25 * 1.0 * 1.0  # max risk_score = 25 with no mitigation
+
+        cat = r["category_code"] or "unknown"
+        if cat not in by_category:
+            by_category[cat] = {"count": 0, "totalNet": 0.0, "maxRisk": "negligible"}
+        by_category[cat]["count"] += 1
+        by_category[cat]["totalNet"] += net_score
+        if level_weights.get(r["risk_level"], 0) > level_weights.get(by_category[cat]["maxRisk"], 0):
+            by_category[cat]["maxRisk"] = r["risk_level"]
+
+    # Normalise to 0-100 scale
+    normalised_score = round((total_weighted / max_possible) * 100, 1) if max_possible > 0 else 0
+
+    # Grade: A (0-15), B (15-30), C (30-50), D (50-70), E (70+)
+    if normalised_score <= 15:
+        grade = "A"
+    elif normalised_score <= 30:
+        grade = "B"
+    elif normalised_score <= 50:
+        grade = "C"
+    elif normalised_score <= 70:
+        grade = "D"
+    else:
+        grade = "E"
+
+    return {
+        "dealSlug": slug,
+        "assessedRisks": len(rows),
+        "rawWeightedScore": round(total_weighted, 2),
+        "maxPossibleScore": round(max_possible, 2),
+        "normalisedScore": normalised_score,
+        "riskGrade": grade,
+        "byCategory": by_category,
+    }
+
+
+@app.get("/api/portfolio/analytics/risk-scores")
+def get_portfolio_risk_scores():
+    """Risk scores for all deals with assessed risk registers."""
+    with get_connection() as conn:
+        deals = conn.execute(
+            """SELECT d.id, d.slug, d.name, d.sector, d.exposure, d.grade,
+                      COUNT(drr.id) AS assessed_count
+               FROM deals d
+               JOIN deal_risk_register drr ON d.id = drr.deal_id AND drr.status = 'assessed'
+               GROUP BY d.id ORDER BY d.name"""
+        ).fetchall()
+
+    results = []
+    for d in deals:
+        # Inline the risk score calc per deal
+        with get_connection() as conn:
+            rows = conn.execute(
+                """SELECT risk_score, risk_level, mitigation_party_score, mitigation_capital_score
+                   FROM deal_risk_register WHERE deal_id = %s AND status = 'assessed'""",
+                (d["id"],),
+            ).fetchall()
+
+        level_weights = {"negligible": 1, "low": 2, "moderate": 3, "high": 5, "critical": 8, "fatal": 13}
+        party_discount = {"M1_none": 1.0, "M2_reputational": 0.95, "M3_contractual": 0.80, "M4_insured": 0.60, "M5_guaranteed": 0.40}
+        capital_discount = {"C1_none": 1.0, "C2_comfort": 0.95, "C3_reserve": 0.75, "C4_funded": 0.55, "C5_overcollateralised": 0.35}
+
+        total_w = sum(r["risk_score"] * party_discount.get(r["mitigation_party_score"], 1.0) * capital_discount.get(r["mitigation_capital_score"], 1.0) for r in rows)
+        max_p = len(rows) * 25
+        norm = round((total_w / max_p) * 100, 1) if max_p > 0 else 0
+        grade = "A" if norm <= 15 else "B" if norm <= 30 else "C" if norm <= 50 else "D" if norm <= 70 else "E"
+
+        results.append({
+            "slug": d["slug"], "name": d["name"], "sector": d["sector"],
+            "exposure": int(d["exposure"]), "currentGrade": d["grade"],
+            "assessedRisks": d["assessed_count"],
+            "normalisedRiskScore": norm, "riskGrade": grade,
+        })
+
+    return {"items": sorted(results, key=lambda x: x["normalisedRiskScore"], reverse=True)}
+
+
+# ── 4D. Deal Performance Grade Computation ────────────────────────────────
+# Composite grade from covenant status, variance, risk, and compliance.
+
+@app.post("/api/deals/{slug}/analytics/compute-grade")
+def compute_deal_grade(slug: str):
+    """Compute a composite performance grade from covenant, variance, risk, and compliance signals."""
+    with get_connection() as conn:
+        deal_id = _get_deal_id(conn, slug)
+        deal = conn.execute("SELECT * FROM deals WHERE id = %s", (deal_id,)).fetchone()
+
+        # 1. Covenant score (0-25) — from latest covenant tests
+        latest_tests = conn.execute(
+            """SELECT tier_status FROM covenant_tests
+               WHERE deal_id = %s ORDER BY created_at DESC LIMIT 10""",
+            (deal_id,),
+        ).fetchall()
+        tier_scores = {"performing": 25, "distribution_lockup": 15, "trigger_event": 5, "event_of_default": 0}
+        if latest_tests:
+            covenant_score = round(sum(tier_scores.get(t["tier_status"], 12) for t in latest_tests) / len(latest_tests))
+        else:
+            covenant_score = 20  # no data = assume ok
+
+        # 2. Variance score (0-25) — from latest financial_variances
+        latest_fp = conn.execute(
+            "SELECT id FROM financial_periods WHERE deal_id = %s ORDER BY period_end DESC LIMIT 1",
+            (deal_id,),
+        ).fetchone()
+        if latest_fp:
+            var_rows = conn.execute(
+                "SELECT variance_pct, materiality FROM financial_variances WHERE financial_period_id = %s",
+                (latest_fp["id"],),
+            ).fetchall()
+            if var_rows:
+                material_pct = sum(1 for v in var_rows if v["materiality"] == "material") / len(var_rows)
+                variance_score = round(25 * (1 - material_pct))
+            else:
+                variance_score = 22
+        else:
+            variance_score = 22
+
+        # 3. Risk score (0-25) — from risk register
+        risk_rows = conn.execute(
+            """SELECT risk_score, risk_level, mitigation_party_score, mitigation_capital_score
+               FROM deal_risk_register WHERE deal_id = %s AND status = 'assessed'""",
+            (deal_id,),
+        ).fetchall()
+        if risk_rows:
+            party_disc = {"M1_none": 1.0, "M2_reputational": 0.95, "M3_contractual": 0.80, "M4_insured": 0.60, "M5_guaranteed": 0.40}
+            cap_disc = {"C1_none": 1.0, "C2_comfort": 0.95, "C3_reserve": 0.75, "C4_funded": 0.55, "C5_overcollateralised": 0.35}
+            total_w = sum(r["risk_score"] * party_disc.get(r["mitigation_party_score"], 1.0) * cap_disc.get(r["mitigation_capital_score"], 1.0) for r in risk_rows)
+            max_p = len(risk_rows) * 25
+            norm_risk = (total_w / max_p) * 100 if max_p > 0 else 0
+            risk_score = round(25 * (1 - norm_risk / 100))
+        else:
+            risk_score = 20
+
+        # 4. Compliance score (0-25) — from obligations
+        obligations = conn.execute(
+            "SELECT status, days_overdue FROM obligations WHERE deal_id = %s",
+            (deal_id,),
+        ).fetchall()
+        if obligations:
+            overdue = sum(1 for o in obligations if o["days_overdue"] > 0)
+            compliance_score = round(25 * (1 - overdue / len(obligations)))
+        else:
+            compliance_score = 25  # no obligations = fully compliant
+
+        overall_score = covenant_score + variance_score + risk_score + compliance_score
+
+        # Grade: 90-100=1, 80-89=2, 70-79=3, 60-69=4, 50-59=5, <50=6
+        if overall_score >= 90:
+            grade = "1"
+        elif overall_score >= 80:
+            grade = "2"
+        elif overall_score >= 70:
+            grade = "3"
+        elif overall_score >= 60:
+            grade = "4"
+        elif overall_score >= 50:
+            grade = "5"
+        else:
+            grade = "6"
+
+        # Watchlist recommendation
+        if overall_score < 50:
+            watchlist_rec = "add_to_watchlist"
+            escalation = "senior_management"
+        elif overall_score < 60:
+            watchlist_rec = "watch_closely"
+            escalation = "portfolio_manager"
+        elif overall_score < 70:
+            watchlist_rec = "monitor"
+            escalation = "none"
+        else:
+            watchlist_rec = "no_action"
+            escalation = "none"
+
+        # Persist assessment
+        if latest_fp:
+            conn.execute(
+                """INSERT INTO deal_assessments
+                    (deal_id, financial_period_id, assessment_date, grade,
+                     overall_score, covenant_score, variance_score, trend_score,
+                     compliance_score, watchlist_status, watchlist_recommendation,
+                     escalation_level, summary)
+                   VALUES (%s, %s, CURRENT_DATE, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                   ON CONFLICT (deal_id, financial_period_id) DO UPDATE SET
+                     grade = EXCLUDED.grade, overall_score = EXCLUDED.overall_score,
+                     covenant_score = EXCLUDED.covenant_score, variance_score = EXCLUDED.variance_score,
+                     trend_score = EXCLUDED.trend_score, compliance_score = EXCLUDED.compliance_score,
+                     watchlist_recommendation = EXCLUDED.watchlist_recommendation,
+                     escalation_level = EXCLUDED.escalation_level, summary = EXCLUDED.summary""",
+                (deal_id, latest_fp["id"], grade, overall_score,
+                 covenant_score, variance_score, risk_score, compliance_score,
+                 deal["watchlist"], watchlist_rec, escalation,
+                 f"Grade {grade} (score {overall_score}/100): cov={covenant_score} var={variance_score} risk={risk_score} comp={compliance_score}"),
+            )
+
+        # Update deal grade
+        conn.execute("UPDATE deals SET grade = %s WHERE id = %s", (grade, deal_id))
+
+    return {
+        "dealSlug": slug,
+        "grade": grade,
+        "overallScore": overall_score,
+        "components": {
+            "covenant": covenant_score,
+            "variance": variance_score,
+            "risk": risk_score,
+            "compliance": compliance_score,
+        },
+        "watchlistRecommendation": watchlist_rec,
+        "escalationLevel": escalation,
+    }
+
+
+# ── 4E. Distribution Assessment ───────────────────────────────────────────
+# Determines whether distributions are permitted based on covenant status and blockers.
+
+@app.post("/api/deals/{slug}/analytics/assess-distribution")
+def assess_distribution(slug: str):
+    """Assess whether distributions are currently permitted for this deal."""
+    with get_connection() as conn:
+        deal_id = _get_deal_id(conn, slug)
+        deal = conn.execute("SELECT * FROM deals WHERE id = %s", (deal_id,)).fetchone()
+
+        # Get latest covenant tests
+        latest_tests = conn.execute(
+            """SELECT ct.covenant_name, ct.tier_status, ct.ratio_value,
+                      ct.lockup_threshold, ct.headroom_to_lockup
+               FROM covenant_tests ct
+               WHERE ct.deal_id = %s
+               ORDER BY ct.created_at DESC LIMIT 20""",
+            (deal_id,),
+        ).fetchall()
+
+        blockers = []
+        failed_conditions = []
+
+        # Check covenant status
+        cov_status = deal["overall_covenant_status"] or "performing"
+        if cov_status != "performing":
+            blockers.append(f"Covenant status: {cov_status}")
+            for t in latest_tests:
+                if t["tier_status"] != "performing":
+                    failed_conditions.append({
+                        "covenant": t["covenant_name"],
+                        "status": t["tier_status"],
+                        "value": float(t["ratio_value"]) if t["ratio_value"] else None,
+                        "threshold": float(t["lockup_threshold"]) if t["lockup_threshold"] else None,
+                    })
+
+        # Check consecutive lockup
+        consec = deal["consecutive_lockup_periods"] or 0
+        if consec >= 2:
+            blockers.append(f"Consecutive lockup periods: {consec}")
+
+        # Check reserve accounts — any unfunded?
+        reserves = conn.execute(
+            "SELECT account_name, funded_status FROM deal_reserve_accounts WHERE deal_id = %s AND funded_status != 'fully_funded' AND funded_status != 'surplus'",
+            (deal_id,),
+        ).fetchall()
+        for r in reserves:
+            blockers.append(f"Reserve underfunded: {r['account_name']} ({r['funded_status']})")
+
+        # Check overdue obligations
+        overdue = conn.execute(
+            "SELECT title, days_overdue FROM obligations WHERE deal_id = %s AND days_overdue > 0 AND status != 'completed'",
+            (deal_id,),
+        ).fetchall()
+        for o in overdue:
+            blockers.append(f"Overdue obligation: {o['title']} ({o['days_overdue']}d)")
+
+        dist_status = "permitted" if len(blockers) == 0 else "blocked"
+        lockup_state = cov_status
+
+        # Persist
+        latest_fp = conn.execute(
+            "SELECT id FROM financial_periods WHERE deal_id = %s ORDER BY period_end DESC LIMIT 1",
+            (deal_id,),
+        ).fetchone()
+        if latest_fp:
+            conn.execute(
+                """INSERT INTO distribution_assessments
+                    (deal_id, financial_period_id, assessed_at, distribution_status,
+                     lockup_state, blocker_count, summary, rationale,
+                     failed_conditions, required_actions)
+                   VALUES (%s, %s, NOW(), %s, %s, %s, %s, %s, %s, %s)
+                   ON CONFLICT (deal_id, financial_period_id) DO UPDATE SET
+                     assessed_at = NOW(), distribution_status = EXCLUDED.distribution_status,
+                     lockup_state = EXCLUDED.lockup_state, blocker_count = EXCLUDED.blocker_count,
+                     summary = EXCLUDED.summary, failed_conditions = EXCLUDED.failed_conditions""",
+                (deal_id, latest_fp["id"], dist_status, lockup_state,
+                 len(blockers),
+                 f"Distribution {'permitted' if dist_status == 'permitted' else 'blocked'} — {len(blockers)} blockers",
+                 "; ".join(blockers) if blockers else "All conditions met",
+                 json.dumps(failed_conditions), json.dumps([])),
+            )
+
+        # Update deal
+        conn.execute(
+            "UPDATE deals SET distribution_status = %s WHERE id = %s",
+            (dist_status, deal_id),
+        )
+
+    return {
+        "dealSlug": slug,
+        "distributionStatus": dist_status,
+        "lockupState": lockup_state,
+        "blockerCount": len(blockers),
+        "blockers": blockers,
+        "failedConditions": failed_conditions,
+    }
+
+
+# ── 4F. Trend Detection ───────────────────────────────────────────────────
+# Analyses metrics across periods to detect deteriorating/improving trends.
+
+@app.post("/api/deals/{slug}/analytics/detect-trends")
+def detect_trends(slug: str, body: dict | None = None):
+    """Detect trends across the last N periods for key metrics.
+    Body can include {"periodsBack": 6, "metrics": ["dscr","revenue","ebitda"]}."""
+    periods_back = (body or {}).get("periodsBack", 4)
+    target_metrics = (body or {}).get("metrics", [
+        "dscr", "llcr", "plcr", "revenue", "ebitda", "cfads",
+        "opex", "capex", "debt_service", "net_income",
+    ])
+
+    with get_connection() as conn:
+        deal_id = _get_deal_id(conn, slug)
+
+        actuals = conn.execute(
+            """SELECT period_label, period_flag, actual_metrics
+               FROM actual_periods WHERE deal_id = %s
+               ORDER BY period_end DESC LIMIT %s""",
+            (deal_id, periods_back),
+        ).fetchall()
+
+        if len(actuals) < 2:
+            return {"dealSlug": slug, "trends": [], "message": "Insufficient periods for trend detection"}
+
+        # Reverse to chronological order
+        actuals = list(reversed(actuals))
+        trends = []
+
+        latest_fp = conn.execute(
+            "SELECT id FROM financial_periods WHERE deal_id = %s ORDER BY period_end DESC LIMIT 1",
+            (deal_id,),
+        ).fetchone()
+
+        for metric in target_metrics:
+            values = []
+            for a in actuals:
+                m = (a["actual_metrics"] or {}).get(metric)
+                if m is not None:
+                    try:
+                        values.append(float(m))
+                    except (ValueError, TypeError):
+                        pass
+
+            if len(values) < 2:
+                continue
+
+            # Simple linear trend: compare first half avg vs second half avg
+            mid = len(values) // 2
+            first_half = sum(values[:mid]) / mid if mid > 0 else values[0]
+            second_half = sum(values[mid:]) / (len(values) - mid)
+            total_change = values[-1] - values[0]
+            total_change_pct = round((total_change / values[0]) * 100, 2) if values[0] != 0 else 0
+
+            if second_half > first_half * 1.03:
+                direction = "improving"
+            elif second_half < first_half * 0.97:
+                direction = "deteriorating"
+            else:
+                direction = "stable"
+
+            # Severity for deteriorating metrics
+            abs_change = abs(total_change_pct)
+            if direction == "deteriorating":
+                severity = "critical" if abs_change > 20 else "high" if abs_change > 10 else "moderate" if abs_change > 5 else "low"
+            else:
+                severity = "none"
+
+            trend_type = "monotonic" if all(values[i] >= values[i-1] for i in range(1, len(values))) or \
+                         all(values[i] <= values[i-1] for i in range(1, len(values))) else "volatile"
+
+            trend = {
+                "metricKey": metric,
+                "direction": direction,
+                "trendType": trend_type,
+                "periodsObserved": len(values),
+                "totalChangePct": total_change_pct,
+                "severity": severity,
+                "values": values,
+                "periodLabels": [a["period_label"] for a in actuals[:len(values)]],
+            }
+            trends.append(trend)
+
+            # Persist deteriorating trends
+            if latest_fp and direction == "deteriorating":
+                conn.execute(
+                    """INSERT INTO trend_records
+                        (deal_id, financial_period_id, metric_key, metric_label,
+                         trend_type, direction, periods_observed, severity,
+                         total_change_pct, status, summary)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                    (deal_id, latest_fp["id"], metric, metric,
+                     trend_type, direction, len(values), severity,
+                     total_change_pct, "active",
+                     f"{metric} {direction} by {total_change_pct}% over {len(values)} periods"),
+                )
+
+    return {
+        "dealSlug": slug,
+        "periodsAnalysed": len(actuals),
+        "trends": sorted(trends, key=lambda t: abs(t["totalChangePct"]), reverse=True),
+    }
