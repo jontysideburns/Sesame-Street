@@ -2339,3 +2339,288 @@ $$ LANGUAGE plpgsql;
 
 -- Initialise risk registers for all existing deals
 SELECT initialise_risk_register(id) FROM deals;
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- DEAL STRUCTURE CHILD TABLES (Template 3 — table-format sheets)
+-- Promotes JSONB fields on deals to proper relational tables for querying,
+-- filtering, and maintaining structured data per the Integrated Platform Ref v2.2
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+-- F.2A Capital Structure — one row per debt instrument per deal
+CREATE TABLE IF NOT EXISTS capital_structure_instruments (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    deal_id             INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+    instrument_name     TEXT NOT NULL,
+    instrument_type     TEXT NOT NULL,           -- senior_term, senior_rcf, capex_facility, junior_mezz, shl, bond, private_placement, other
+    waterfall_priority  INTEGER NOT NULL,        -- 1 = most senior
+    enforcement_class   TEXT,                    -- links to enforcement_classes.class_code
+    committed_amount    DECIMAL,
+    drawn_amount        DECIMAL,
+    currency            VARCHAR(3),
+    start_date          DATE,
+    maturity_date       DATE,
+    interest_type       TEXT,                    -- fixed, floating, index_linked, hybrid
+    base_rate           TEXT,                    -- e.g. 'SONIA', 'SOFR', 'Euribor 3m'
+    margin_bps          INTEGER,
+    all_in_rate         DECIMAL,
+    repayment_type      TEXT,                    -- bullet, amortising, sculpted, cash_sweep, hybrid
+    amortisation_profile TEXT,
+    call_protection     TEXT,
+    our_holding         DECIMAL,                -- our share of this instrument
+    our_holding_pct     DECIMAL,
+    dsra_months         INTEGER,
+    status              TEXT DEFAULT 'active',   -- active, repaid, cancelled, restructured
+    notes               TEXT,
+    created_at          TIMESTAMPTZ DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_csi_deal ON capital_structure_instruments(deal_id);
+
+-- F.2A.3 Enforcement Classes — one row per class per deal
+CREATE TABLE IF NOT EXISTS enforcement_classes (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    deal_id             INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+    class_name          TEXT NOT NULL,
+    class_code          TEXT NOT NULL,           -- e.g. 'A', 'B', 'Senior', 'Junior'
+    priority            INTEGER NOT NULL,        -- 1 = most senior class
+    included_instruments JSONB,                  -- [{instrument_name, instrument_type}]
+    ratio_definitions   JSONB,                   -- [{ratio_name, numerator, denominator, description}]
+    covenant_thresholds JSONB,                   -- [{ratio_name, lockup, trigger, default}]
+    notes               TEXT,
+    created_at          TIMESTAMPTZ DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(deal_id, class_code)
+);
+CREATE INDEX IF NOT EXISTS idx_ec_deal ON enforcement_classes(deal_id);
+
+-- F.2A.4 Entity Map — one row per corporate entity per deal
+CREATE TABLE IF NOT EXISTS corporate_entities (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    deal_id             INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+    entity_name         TEXT NOT NULL,
+    entity_type         TEXT NOT NULL,           -- opco, bidco, holdco, topco, spv, issuer, guarantor, servicer
+    parent_entity       TEXT,                    -- name of parent in the structure
+    position            TEXT,                    -- description of position in structure
+    jurisdiction        VARCHAR(2),
+    securitisation_boundary BOOLEAN DEFAULT FALSE,
+    intercompany_loans  JSONB,                   -- [{from, to, amount, rate, subordinated}]
+    ring_fenced         BOOLEAN DEFAULT FALSE,
+    notes               TEXT,
+    created_at          TIMESTAMPTZ DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_ce_deal ON corporate_entities(deal_id);
+
+-- F.4 Counterparties — one row per counterparty per deal
+CREATE TABLE IF NOT EXISTS deal_counterparties (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    deal_id             INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+    name                TEXT NOT NULL,
+    counterparty_type   TEXT NOT NULL,           -- epc_contractor, o_and_m, offtaker, supplier, anchor_tenant, operator, servicer, facility_agent, security_trustee, hedging_provider, insurer, other
+    credit_rating       TEXT,
+    lei                 TEXT,
+    dependency_narrative TEXT,                   -- how critical is this counterparty
+    replacement_risk    TEXT,                    -- low, medium, high, critical
+    contract_expiry     DATE,
+    contract_value      DECIMAL,
+    notes               TEXT,
+    created_at          TIMESTAMPTZ DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_dcp_deal ON deal_counterparties(deal_id);
+
+-- F.2A.2.6 Reserve Accounts — one row per reserve/facility per deal
+CREATE TABLE IF NOT EXISTS deal_reserve_accounts (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    deal_id             INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+    account_name        TEXT NOT NULL,
+    account_type        TEXT NOT NULL,           -- dsra, mra, capex_reserve, o_and_m_reserve, distribution_reserve, liquidity_facility, letter_of_credit, other
+    sizing_basis        TEXT,                    -- e.g. '6 months DS', '3 months opex', 'fixed amount'
+    required_balance    DECIMAL,
+    current_balance     DECIMAL,
+    funded_status       TEXT DEFAULT 'fully_funded', -- fully_funded, partially_funded, unfunded, surplus
+    funding_method      TEXT,                    -- cash, letter_of_credit, surety_bond, insurance
+    provider            TEXT,                    -- provider of LC/surety if applicable
+    provider_rating     TEXT,
+    linked_instrument   TEXT,                    -- which debt instrument this reserve supports
+    expiry              DATE,
+    notes               TEXT,
+    created_at          TIMESTAMPTZ DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_dra_deal ON deal_reserve_accounts(deal_id);
+
+-- F.16 Hedge Portfolio — one row per hedge per deal
+CREATE TABLE IF NOT EXISTS hedge_portfolio (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    deal_id             INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+    hedge_type          TEXT NOT NULL,           -- interest_rate_swap, interest_rate_cap, interest_rate_floor, fx_forward, fx_option, inflation_swap, commodity_swap, other
+    notional            DECIMAL,
+    pct_of_debt         DECIMAL,
+    start_date          DATE,
+    maturity            DATE,
+    fixed_rate          DECIMAL,                -- for IRS: the fixed leg rate
+    strike              DECIMAL,                -- for caps/floors: the strike rate
+    counterparty        TEXT,
+    counterparty_rating TEXT,
+    mark_to_market      DECIMAL,                -- current MTM value
+    mtm_date            DATE,
+    notes               TEXT,
+    created_at          TIMESTAMPTZ DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_hp_deal ON hedge_portfolio(deal_id);
+
+-- F.15 Development Phases — one row per phase per deal
+CREATE TABLE IF NOT EXISTS deal_development_phases (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    deal_id             INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+    phase_name          TEXT NOT NULL,
+    phase_number        INTEGER,
+    capex_budget        DECIMAL,
+    start_date          DATE,
+    target_end_date     DATE,
+    actual_end_date     DATE,
+    status              TEXT DEFAULT 'not_started', -- not_started, in_progress, completed, delayed, cancelled
+    actual_spend        DECIMAL,
+    variance            DECIMAL,                -- budget - actual
+    variance_pct        DECIMAL,
+    description         TEXT,
+    notes               TEXT,
+    created_at          TIMESTAMPTZ DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_ddp_deal ON deal_development_phases(deal_id);
+
+-- F.14 Investor Allocations — one row per investor per deal
+CREATE TABLE IF NOT EXISTS investor_allocations (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    deal_id             INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+    investor_name       TEXT NOT NULL,
+    account_mandate     TEXT,                    -- mandate/fund name
+    tranche             TEXT,                    -- which instrument/tranche
+    amount              DECIMAL,
+    mandate_size        DECIMAL,                -- total mandate size
+    pct_of_mandate      DECIMAL,                -- amount / mandate_size
+    notes               TEXT,
+    created_at          TIMESTAMPTZ DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_ia_deal ON investor_allocations(deal_id);
+
+-- F.2A.8 Intercreditor Terms — one row per deal (could be on deals table but complex enough for its own)
+CREATE TABLE IF NOT EXISTS intercreditor_terms (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    deal_id             INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+    governing_law       TEXT,
+    standstill_period   TEXT,                    -- e.g. '180 days', '12 months'
+    turnover_provisions TEXT,                    -- description of turnover waterfall
+    permitted_junior_payments TEXT,              -- what junior creditors can receive during standstill
+    security_release_conditions TEXT,            -- conditions under which security can be released
+    non_petition_clause BOOLEAN DEFAULT FALSE,
+    enforcement_priority TEXT,                   -- description of enforcement hierarchy
+    notes               TEXT,
+    created_at          TIMESTAMPTZ DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(deal_id)
+);
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- FINANCIAL TEMPLATE (Template 1 — line label configuration)
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+-- One record per deal — stores the sector template and custom line labels
+CREATE TABLE IF NOT EXISTS deal_financial_template (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    deal_id             INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+    sector_template     TEXT,                    -- data_centre, wind_farm, port, airport, toll_road, social_infrastructure, real_estate, clean_tech_hub
+    revenue_line_labels JSONB DEFAULT '[]',      -- up to 8 custom revenue line labels
+    cost_line_labels    JSONB DEFAULT '[]',      -- up to 12 custom cost line labels
+    capex_line_labels   JSONB DEFAULT '[]',      -- up to 5 custom capex line labels
+    funding_line_labels JSONB DEFAULT '[]',      -- up to 2 custom other funding line labels
+    ds_line_labels      JSONB DEFAULT '[]',      -- up to 2 custom other debt service line labels
+    equity_line_labels  JSONB DEFAULT '[]',      -- up to 2 custom equity movement line labels
+    sector_kpi_labels   JSONB DEFAULT '[]',      -- up to 10 sector KPI labels
+    class_ratio_labels  JSONB DEFAULT '[]',      -- up to 4 class-based ratio labels
+    rab_leverage_labels JSONB DEFAULT '[]',      -- up to 4 RAB-based leverage labels
+    notes               TEXT,
+    created_at          TIMESTAMPTZ DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(deal_id)
+);
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- SEED DATA — Demo deal child records
+-- Populates the new child tables for the Aurora Prime Data Campus demo deal
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+-- Capital structure for Aurora Prime (deal_id = 1)
+INSERT INTO capital_structure_instruments (deal_id, instrument_name, instrument_type, waterfall_priority, enforcement_class, committed_amount, drawn_amount, currency, start_date, maturity_date, interest_type, base_rate, margin_bps, repayment_type, our_holding, our_holding_pct, dsra_months, status) VALUES
+(1, 'Senior Term Loan A', 'senior_term', 1, 'Senior', 180000000, 180000000, 'GBP', '2023-03-15', '2033-03-15', 'floating', 'SONIA', 225, 'sculpted', 45000000, 25.0, 6, 'active'),
+(1, 'Senior RCF', 'senior_rcf', 2, 'Senior', 20000000, 0, 'GBP', '2023-03-15', '2028-03-15', 'floating', 'SONIA', 200, 'bullet', 5000000, 25.0, NULL, 'active'),
+(1, 'Capex Facility', 'capex_facility', 3, 'Senior', 30000000, 15000000, 'GBP', '2023-03-15', '2031-03-15', 'floating', 'SONIA', 275, 'amortising', 7500000, 25.0, NULL, 'active')
+ON CONFLICT DO NOTHING;
+
+-- Enforcement classes for Aurora Prime
+INSERT INTO enforcement_classes (deal_id, class_name, class_code, priority, included_instruments, ratio_definitions, covenant_thresholds) VALUES
+(1, 'Senior Class', 'Senior', 1, '[{"instrument_name":"Senior Term Loan A","instrument_type":"senior_term"},{"instrument_name":"Senior RCF","instrument_type":"senior_rcf"},{"instrument_name":"Capex Facility","instrument_type":"capex_facility"}]'::jsonb, '[{"ratio_name":"senior_quarterly_dscr","numerator":"CFADS","denominator":"Senior Debt Service"},{"ratio_name":"ltv_npv","numerator":"Senior Net Debt","denominator":"NPV of Cashflows"}]'::jsonb, '[{"ratio_name":"senior_quarterly_dscr","lockup":1.20,"trigger":1.10,"default":1.05},{"ratio_name":"ltv_npv","lockup":0.70,"trigger":0.80,"default":0.85}]'::jsonb)
+ON CONFLICT DO NOTHING;
+
+-- Corporate entities for Aurora Prime
+INSERT INTO corporate_entities (deal_id, entity_name, entity_type, parent_entity, position, jurisdiction, securitisation_boundary, ring_fenced) VALUES
+(1, 'Aurora Prime Holdings Ltd', 'holdco', NULL, 'Top of structure — equity ownership', 'GB', FALSE, FALSE),
+(1, 'Aurora Prime Data Campus Ltd', 'opco', 'Aurora Prime Holdings Ltd', 'Operating company — owns and operates data centre', 'GB', TRUE, TRUE),
+(1, 'Aurora Prime Finance Ltd', 'spv', 'Aurora Prime Holdings Ltd', 'Issuer — borrower under facility agreement', 'GB', TRUE, TRUE)
+ON CONFLICT DO NOTHING;
+
+-- Counterparties for Aurora Prime
+INSERT INTO deal_counterparties (deal_id, name, counterparty_type, credit_rating, dependency_narrative, replacement_risk, contract_expiry) VALUES
+(1, 'Hyperion Cloud Services Inc', 'anchor_tenant', 'A-/Stable', 'Anchor tenant — 60% of contracted capacity on 10yr take-or-pay. Default would trigger covenant breach.', 'high', '2033-06-30'),
+(1, 'TechVault Systems Ltd', 'anchor_tenant', 'BBB/Stable', 'Second tenant — 25% capacity on 7yr contract. Material but replaceable given location quality.', 'medium', '2030-09-30'),
+(1, 'Meridian Power Solutions', 'supplier', 'A/Stable', 'Sole electricity supplier under 15yr PPA. Grid-connected with backup diesel.', 'medium', '2038-03-15'),
+(1, 'DataOps International', 'o_and_m', 'BBB+/Stable', 'O&M contractor for mechanical/electrical systems. 5yr contract with 2yr extension option.', 'low', '2028-03-15'),
+(1, 'Fluor Corporation', 'epc_contractor', 'BBB/Stable', 'EPC contractor for Phase 2 expansion. Fixed-price lump sum with LD regime.', 'low', '2025-12-31')
+ON CONFLICT DO NOTHING;
+
+-- Reserve accounts for Aurora Prime
+INSERT INTO deal_reserve_accounts (deal_id, account_name, account_type, sizing_basis, required_balance, current_balance, funded_status, funding_method, linked_instrument) VALUES
+(1, 'Debt Service Reserve Account', 'dsra', '6 months senior DS', 4500000, 4500000, 'fully_funded', 'cash', 'Senior Term Loan A'),
+(1, 'Maintenance Reserve Account', 'mra', 'Independent engineer lifecycle model', 2000000, 1800000, 'partially_funded', 'cash', NULL),
+(1, 'Capex Reserve', 'capex_reserve', 'Phase 2 expansion budget', 8000000, 3000000, 'partially_funded', 'cash', 'Capex Facility')
+ON CONFLICT DO NOTHING;
+
+-- Hedge portfolio for Aurora Prime
+INSERT INTO hedge_portfolio (deal_id, hedge_type, notional, pct_of_debt, start_date, maturity, fixed_rate, counterparty, counterparty_rating, mark_to_market, mtm_date) VALUES
+(1, 'interest_rate_swap', 180000000, 100.0, '2023-03-15', '2033-03-15', 3.45, 'Barclays Bank PLC', 'A/Stable', 2300000, '2025-12-31'),
+(1, 'interest_rate_cap', 30000000, 100.0, '2023-03-15', '2031-03-15', 4.50, 'HSBC Holdings PLC', 'A+/Stable', 450000, '2025-12-31')
+ON CONFLICT DO NOTHING;
+
+-- Development phases for Aurora Prime
+INSERT INTO deal_development_phases (deal_id, phase_name, phase_number, capex_budget, start_date, target_end_date, actual_end_date, status, actual_spend, variance, description) VALUES
+(1, 'Phase 1 — Core Data Hall (4MW)', 1, 85000000, '2022-06-01', '2023-09-30', '2023-08-15', 'completed', 83500000, 1500000, 'Initial 4MW data hall with N+1 cooling, dual feed power, and edge network POP'),
+(1, 'Phase 2 — Expansion (6MW)', 2, 110000000, '2024-01-15', '2025-06-30', NULL, 'in_progress', 65000000, NULL, 'Additional 6MW capacity, second data hall, enhanced cooling for high-density GPU workloads'),
+(1, 'Phase 3 — Campus Completion (10MW)', 3, 95000000, '2025-09-01', '2027-03-31', NULL, 'not_started', 0, NULL, 'Final 10MW phase, campus-wide redundancy, on-site renewable generation')
+ON CONFLICT DO NOTHING;
+
+-- Investor allocations for Aurora Prime
+INSERT INTO investor_allocations (deal_id, investor_name, account_mandate, tranche, amount, mandate_size, pct_of_mandate) VALUES
+(1, 'Meridian Insurance Group', 'UK Infrastructure Debt Fund III', 'Senior Term Loan A', 45000000, 2500000000, 1.80),
+(1, 'Sovereign Wealth Partners', 'Global Infrastructure Credit', 'Senior Term Loan A', 36000000, 8000000000, 0.45),
+(1, 'Northern Pensions Consortium', 'Matching Adjustment Portfolio', 'Senior Term Loan A', 54000000, 1200000000, 4.50),
+(1, 'Meridian Insurance Group', 'UK Infrastructure Debt Fund III', 'Capex Facility', 7500000, 2500000000, 0.30)
+ON CONFLICT DO NOTHING;
+
+-- Intercreditor terms for Aurora Prime
+INSERT INTO intercreditor_terms (deal_id, governing_law, standstill_period, turnover_provisions, permitted_junior_payments, security_release_conditions, non_petition_clause, enforcement_priority) VALUES
+(1, 'English law', '180 days from enforcement notice', 'All junior receipts turned over to senior waterfall during enforcement', 'Scheduled interest only; no principal, no PIK capitalisation during standstill', 'Requires 75% senior creditor consent; automatic on full senior repayment', TRUE, 'Senior agent leads enforcement; junior can accelerate only after standstill expiry and senior non-action for 30 days')
+ON CONFLICT DO NOTHING;
+
+-- Financial template for Aurora Prime (data centre sector)
+INSERT INTO deal_financial_template (deal_id, sector_template, revenue_line_labels, cost_line_labels, capex_line_labels, sector_kpi_labels) VALUES
+(1, 'data_centre',
+ '["GPU/Compute Revenue","Colocation Revenue","Power Recharge","Connectivity Revenue","Managed Services","Storage Revenue","Edge Services","Other Revenue"]'::jsonb,
+ '["Power Cost","Cooling Cost","Network/Connectivity","Managed Infrastructure Platform (MIP)","Facilities Management","Security & Access","Insurance","Land Lease / Rent","Management Fee","Marketing & Sales","General & Admin","Other Opex"]'::jsonb,
+ '["IT Infrastructure","Power & Cooling Plant","Building & Civil Works","Network Equipment","Other Capex"]'::jsonb,
+ '["Contracted Capacity (MW)","Leased Capacity (%)","PUE (Power Usage Effectiveness)","Weighted Average Lease Term (yrs)","Blended $/kW/month","GPU Utilisation (%)","Customer Concentration (top 3 %)","Availability (% uptime)","Carbon Intensity (tCO2e/MW)","Capex per MW Installed"]'::jsonb
+)
+ON CONFLICT DO NOTHING;
