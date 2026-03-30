@@ -17258,6 +17258,23 @@ def _json_serial(obj):
     return str(obj)
 
 
+def _serialize_row(r, skip_deal_id=True):
+    """Convert a DB row dict to JSON-safe dict."""
+    item = {}
+    for k, v in dict(r).items():
+        if skip_deal_id and k == "deal_id":
+            continue
+        if isinstance(v, (date, datetime)):
+            item[k] = v.isoformat()
+        elif hasattr(v, "__float__") and not isinstance(v, (int, float, bool)):
+            item[k] = float(v)
+        elif isinstance(v, uuid_mod.UUID):
+            item[k] = str(v)
+        else:
+            item[k] = v
+    return item
+
+
 def _child_table_get(table: str, slug: str, order_by: str = "created_at"):
     """Generic GET for deal child tables."""
     with get_connection() as conn:
@@ -17266,64 +17283,165 @@ def _child_table_get(table: str, slug: str, order_by: str = "created_at"):
             f"SELECT * FROM {table} WHERE deal_id = %s ORDER BY {order_by}",
             (deal_id,),
         ).fetchall()
-    items = []
-    for r in rows:
-        item = {}
-        for k, v in dict(r).items():
-            if k == "deal_id":
-                continue
-            if isinstance(v, (date, datetime)):
-                item[k] = v.isoformat()
-            elif hasattr(v, "__float__") and not isinstance(v, (int, float, bool)):
-                item[k] = float(v)
-            elif isinstance(v, uuid_mod.UUID):
-                item[k] = str(v)
-            else:
-                item[k] = v
-        items.append(item)
-    return {"dealSlug": slug, "total": len(items), "items": items}
+    return {"dealSlug": slug, "total": len(rows), "items": [_serialize_row(r) for r in rows]}
+
+
+# ── Column specs for generic CRUD ──────────────────────────────────────────
+# Maps table name → list of writable column names (excluding id, deal_id, created_at, updated_at)
+_CHILD_TABLE_COLUMNS = {
+    "capital_structure_instruments": [
+        "instrument_name", "instrument_type", "waterfall_priority", "enforcement_class",
+        "committed_amount", "drawn_amount", "currency", "start_date", "maturity_date",
+        "interest_type", "base_rate", "margin_bps", "all_in_rate", "repayment_type",
+        "amortisation_profile", "call_protection", "our_holding", "our_holding_pct",
+        "dsra_months", "status", "notes",
+    ],
+    "enforcement_classes": [
+        "class_name", "class_code", "priority", "included_instruments",
+        "ratio_definitions", "covenant_thresholds", "notes",
+    ],
+    "corporate_entities": [
+        "entity_name", "entity_type", "parent_entity", "position", "jurisdiction",
+        "securitisation_boundary", "intercompany_loans", "ring_fenced", "notes",
+    ],
+    "deal_counterparties": [
+        "name", "counterparty_type", "credit_rating", "lei",
+        "dependency_narrative", "replacement_risk", "contract_expiry",
+        "contract_value", "notes",
+    ],
+    "deal_reserve_accounts": [
+        "account_name", "account_type", "sizing_basis", "required_balance",
+        "current_balance", "funded_status", "funding_method", "provider",
+        "provider_rating", "linked_instrument", "expiry", "notes",
+    ],
+    "hedge_portfolio": [
+        "hedge_type", "notional", "pct_of_debt", "start_date", "maturity",
+        "fixed_rate", "strike", "counterparty", "counterparty_rating",
+        "mark_to_market", "mtm_date", "notes",
+    ],
+    "deal_development_phases": [
+        "phase_name", "phase_number", "capex_budget", "start_date",
+        "target_end_date", "actual_end_date", "status", "actual_spend",
+        "variance", "variance_pct", "description", "notes",
+    ],
+    "investor_allocations": [
+        "investor_name", "account_mandate", "tranche", "amount",
+        "mandate_size", "pct_of_mandate", "notes",
+    ],
+}
+
+# camelCase → snake_case mapping for JSON body keys
+import re as _re
+def _camel_to_snake(name: str) -> str:
+    return _re.sub(r'(?<!^)(?=[A-Z])', '_', name).lower()
+
+
+def _body_to_cols(body: dict, columns: list[str]) -> dict:
+    """Extract writable columns from request body, accepting both camelCase and snake_case keys."""
+    result = {}
+    for col in columns:
+        if col in body:
+            result[col] = body[col]
+        else:
+            # try camelCase version
+            parts = col.split("_")
+            camel = parts[0] + "".join(p.capitalize() for p in parts[1:])
+            if camel in body:
+                result[col] = body[camel]
+    return result
+
+
+def _child_table_post(table: str, slug: str, body: dict):
+    """Generic POST — insert one row into a child table."""
+    columns = _CHILD_TABLE_COLUMNS[table]
+    data = _body_to_cols(body, columns)
+    if not data:
+        raise HTTPException(status_code=400, detail="No valid fields provided")
+    cols = list(data.keys())
+    placeholders = ", ".join(["%s"] * (len(cols) + 1))
+    col_names = ", ".join(["deal_id"] + cols)
+    with get_connection() as conn:
+        deal_id = _get_deal_id(conn, slug)
+        row = conn.execute(
+            f"INSERT INTO {table} ({col_names}) VALUES ({placeholders}) RETURNING *",
+            [deal_id] + [json.dumps(v) if isinstance(v, (dict, list)) else v for v in data.values()],
+        ).fetchone()
+    return {"ok": True, "item": _serialize_row(row)}
+
+
+def _child_table_put(table: str, slug: str, row_id: str, body: dict):
+    """Generic PUT — update one row by UUID id."""
+    columns = _CHILD_TABLE_COLUMNS[table]
+    data = _body_to_cols(body, columns)
+    if not data:
+        raise HTTPException(status_code=400, detail="No valid fields provided")
+    set_parts = [f"{col} = %s" for col in data.keys()] + ["updated_at = NOW()"]
+    with get_connection() as conn:
+        deal_id = _get_deal_id(conn, slug)
+        row = conn.execute(
+            f"UPDATE {table} SET {', '.join(set_parts)} WHERE id = %s AND deal_id = %s RETURNING *",
+            [json.dumps(v) if isinstance(v, (dict, list)) else v for v in data.values()] + [row_id, deal_id],
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Row not found")
+    return {"ok": True, "item": _serialize_row(row)}
+
+
+def _child_table_delete(table: str, slug: str, row_id: str):
+    """Generic DELETE — remove one row by UUID id."""
+    with get_connection() as conn:
+        deal_id = _get_deal_id(conn, slug)
+        result = conn.execute(
+            f"DELETE FROM {table} WHERE id = %s AND deal_id = %s RETURNING id",
+            (row_id, deal_id),
+        ).fetchone()
+    if not result:
+        raise HTTPException(status_code=404, detail="Row not found")
+    return {"ok": True, "deleted": str(result["id"])}
 
 
 
-@app.get("/api/deals/{slug}/capital-structure")
-def get_capital_structure(slug: str):
-    return _child_table_get("capital_structure_instruments", slug, "waterfall_priority")
+# ── Multi-row child tables: GET / POST / PUT / DELETE ──────────────────────
+
+_CHILD_ROUTES = [
+    ("capital-structure",   "capital_structure_instruments", "waterfall_priority"),
+    ("enforcement-classes", "enforcement_classes",           "priority"),
+    ("corporate-entities",  "corporate_entities",            "entity_type"),
+    ("counterparties",      "deal_counterparties",           "counterparty_type"),
+    ("reserve-accounts",    "deal_reserve_accounts",         "account_type"),
+    ("hedge-portfolio",     "hedge_portfolio",               "maturity"),
+    ("development-phases",  "deal_development_phases",       "phase_number"),
+    ("investor-allocations","investor_allocations",          "investor_name"),
+]
+
+for _route_slug, _table_name, _order_col in _CHILD_ROUTES:
+    def _make_endpoints(route_slug, table_name, order_col):
+        @app.get(f"/api/deals/{{slug}}/{route_slug}")
+        def get_items(slug: str, _tbl=table_name, _ord=order_col):
+            return _child_table_get(_tbl, slug, _ord)
+
+        @app.post(f"/api/deals/{{slug}}/{route_slug}")
+        def create_item(slug: str, body: dict, _tbl=table_name):
+            return _child_table_post(_tbl, slug, body)
+
+        @app.put(f"/api/deals/{{slug}}/{route_slug}/{{row_id}}")
+        def update_item(slug: str, row_id: str, body: dict, _tbl=table_name):
+            return _child_table_put(_tbl, slug, row_id, body)
+
+        @app.delete(f"/api/deals/{{slug}}/{route_slug}/{{row_id}}")
+        def delete_item(slug: str, row_id: str, _tbl=table_name):
+            return _child_table_delete(_tbl, slug, row_id)
+
+    _make_endpoints(_route_slug, _table_name, _order_col)
 
 
-@app.get("/api/deals/{slug}/enforcement-classes")
-def get_enforcement_classes(slug: str):
-    return _child_table_get("enforcement_classes", slug, "priority")
+# ── Singleton tables: GET / PUT ────────────────────────────────────────────
 
-
-@app.get("/api/deals/{slug}/corporate-entities")
-def get_corporate_entities(slug: str):
-    return _child_table_get("corporate_entities", slug, "entity_type")
-
-
-@app.get("/api/deals/{slug}/counterparties")
-def get_counterparties(slug: str):
-    return _child_table_get("deal_counterparties", slug, "counterparty_type")
-
-
-@app.get("/api/deals/{slug}/reserve-accounts")
-def get_reserve_accounts(slug: str):
-    return _child_table_get("deal_reserve_accounts", slug, "account_type")
-
-
-@app.get("/api/deals/{slug}/hedge-portfolio")
-def get_hedge_portfolio(slug: str):
-    return _child_table_get("hedge_portfolio", slug, "maturity")
-
-
-@app.get("/api/deals/{slug}/development-phases")
-def get_development_phases(slug: str):
-    return _child_table_get("deal_development_phases", slug, "phase_number")
-
-
-@app.get("/api/deals/{slug}/investor-allocations")
-def get_investor_allocations(slug: str):
-    return _child_table_get("investor_allocations", slug, "investor_name")
-
+_INTERCREDITOR_COLS = [
+    "governing_law", "standstill_period", "turnover_provisions",
+    "permitted_junior_payments", "security_release_conditions",
+    "non_petition_clause", "enforcement_priority", "notes",
+]
 
 @app.get("/api/deals/{slug}/intercreditor")
 def get_intercreditor(slug: str):
@@ -17334,13 +17452,36 @@ def get_intercreditor(slug: str):
         ).fetchone()
     if not row:
         return {"dealSlug": slug, "terms": None}
-    terms = {}
-    for k, v in dict(row).items():
-        if k in ("id", "deal_id", "created_at", "updated_at"):
-            continue
-        terms[k] = v
-    return {"dealSlug": slug, "terms": terms}
+    return {"dealSlug": slug, "terms": _serialize_row(row)}
 
+
+@app.put("/api/deals/{slug}/intercreditor")
+def upsert_intercreditor(slug: str, body: dict):
+    data = _body_to_cols(body, _INTERCREDITOR_COLS)
+    if not data:
+        raise HTTPException(status_code=400, detail="No valid fields provided")
+    cols = list(data.keys())
+    vals = [json.dumps(v) if isinstance(v, (dict, list)) else v for v in data.values()]
+    set_clause = ", ".join(f"{c} = EXCLUDED.{c}" for c in cols) + ", updated_at = NOW()"
+    col_names = ", ".join(["deal_id"] + cols)
+    placeholders = ", ".join(["%s"] * (len(cols) + 1))
+    with get_connection() as conn:
+        deal_id = _get_deal_id(conn, slug)
+        row = conn.execute(
+            f"""INSERT INTO intercreditor_terms ({col_names}) VALUES ({placeholders})
+                ON CONFLICT (deal_id) DO UPDATE SET {set_clause}
+                RETURNING *""",
+            [deal_id] + vals,
+        ).fetchone()
+    return {"ok": True, "terms": _serialize_row(row)}
+
+
+_FINANCIAL_TEMPLATE_COLS = [
+    "sector_template", "revenue_line_labels", "cost_line_labels",
+    "capex_line_labels", "funding_line_labels", "ds_line_labels",
+    "equity_line_labels", "sector_kpi_labels", "class_ratio_labels",
+    "rab_leverage_labels", "notes",
+]
 
 @app.get("/api/deals/{slug}/financial-template")
 def get_financial_template(slug: str):
@@ -17351,13 +17492,259 @@ def get_financial_template(slug: str):
         ).fetchone()
     if not row:
         return {"dealSlug": slug, "template": None}
+    return {"dealSlug": slug, "template": _serialize_row(row)}
+
+
+@app.put("/api/deals/{slug}/financial-template")
+def upsert_financial_template(slug: str, body: dict):
+    data = _body_to_cols(body, _FINANCIAL_TEMPLATE_COLS)
+    if not data:
+        raise HTTPException(status_code=400, detail="No valid fields provided")
+    cols = list(data.keys())
+    vals = [json.dumps(v) if isinstance(v, (dict, list)) else v for v in data.values()]
+    set_clause = ", ".join(f"{c} = EXCLUDED.{c}" for c in cols) + ", updated_at = NOW()"
+    col_names = ", ".join(["deal_id"] + cols)
+    placeholders = ", ".join(["%s"] * (len(cols) + 1))
+    with get_connection() as conn:
+        deal_id = _get_deal_id(conn, slug)
+        row = conn.execute(
+            f"""INSERT INTO deal_financial_template ({col_names}) VALUES ({placeholders})
+                ON CONFLICT (deal_id) DO UPDATE SET {set_clause}
+                RETURNING *""",
+            [deal_id] + vals,
+        ).fetchone()
+    return {"ok": True, "template": _serialize_row(row)}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PORTFOLIO AGGREGATION ENDPOINTS (Phase 3)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/portfolio/capital-summary")
+def get_portfolio_capital_summary():
+    """Cross-deal capital structure summary — total committed, drawn, by instrument type."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            """SELECT csi.instrument_type,
+                      COUNT(*) AS instrument_count,
+                      COUNT(DISTINCT csi.deal_id) AS deal_count,
+                      SUM(csi.committed_amount) AS total_committed,
+                      SUM(csi.drawn_amount) AS total_drawn,
+                      SUM(csi.our_holding) AS our_total_holding,
+                      AVG(csi.margin_bps) AS avg_margin_bps,
+                      AVG(csi.all_in_rate) AS avg_all_in_rate
+               FROM capital_structure_instruments csi
+               JOIN deals d ON csi.deal_id = d.id
+               WHERE csi.status = 'active'
+               GROUP BY csi.instrument_type
+               ORDER BY SUM(csi.committed_amount) DESC"""
+        ).fetchall()
+    return {"items": [_serialize_row(r, skip_deal_id=False) for r in rows]}
+
+
+@app.get("/api/portfolio/maturity-profile")
+def get_portfolio_maturity_profile():
+    """Maturity wall — total commitments maturing by year."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            """SELECT EXTRACT(YEAR FROM csi.maturity_date)::int AS maturity_year,
+                      COUNT(*) AS instrument_count,
+                      SUM(csi.committed_amount) AS total_committed,
+                      SUM(csi.our_holding) AS our_holding
+               FROM capital_structure_instruments csi
+               WHERE csi.status = 'active' AND csi.maturity_date IS NOT NULL
+               GROUP BY maturity_year
+               ORDER BY maturity_year"""
+        ).fetchall()
+    return {"items": [_serialize_row(r, skip_deal_id=False) for r in rows]}
+
+
+@app.get("/api/portfolio/counterparty-exposure")
+def get_portfolio_counterparty_exposure():
+    """Counterparty concentration — aggregate exposure by counterparty name across deals."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            """SELECT dc.name AS counterparty_name,
+                      dc.counterparty_type,
+                      COUNT(DISTINCT dc.deal_id) AS deal_count,
+                      SUM(dc.contract_value) AS total_contract_value,
+                      ARRAY_AGG(DISTINCT d.name) AS deal_names
+               FROM deal_counterparties dc
+               JOIN deals d ON dc.deal_id = d.id
+               GROUP BY dc.name, dc.counterparty_type
+               ORDER BY SUM(dc.contract_value) DESC NULLS LAST"""
+        ).fetchall()
+    items = []
+    for r in rows:
+        item = _serialize_row(r, skip_deal_id=False)
+        # ARRAY_AGG comes back as a list already
+        items.append(item)
+    return {"items": items}
+
+
+@app.get("/api/portfolio/hedge-summary")
+def get_portfolio_hedge_summary():
+    """Hedging coverage across the portfolio — by type, with total notional and MTM."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            """SELECT hp.hedge_type,
+                      COUNT(*) AS hedge_count,
+                      COUNT(DISTINCT hp.deal_id) AS deal_count,
+                      SUM(hp.notional) AS total_notional,
+                      SUM(hp.mark_to_market) AS total_mtm,
+                      AVG(hp.fixed_rate) AS avg_fixed_rate,
+                      AVG(hp.strike) AS avg_strike
+               FROM hedge_portfolio hp
+               WHERE hp.maturity >= CURRENT_DATE OR hp.maturity IS NULL
+               GROUP BY hp.hedge_type
+               ORDER BY SUM(hp.notional) DESC NULLS LAST"""
+        ).fetchall()
+    return {"items": [_serialize_row(r, skip_deal_id=False) for r in rows]}
+
+
+@app.get("/api/portfolio/development-status")
+def get_portfolio_development_status():
+    """All active development phases across the portfolio — spend tracking."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            """SELECT d.name AS deal_name, d.slug AS deal_slug,
+                      dp.phase_name, dp.phase_number, dp.status,
+                      dp.capex_budget, dp.actual_spend, dp.variance, dp.variance_pct,
+                      dp.start_date, dp.target_end_date, dp.actual_end_date
+               FROM deal_development_phases dp
+               JOIN deals d ON dp.deal_id = d.id
+               WHERE dp.status IN ('in_progress', 'delayed')
+               ORDER BY dp.variance_pct ASC NULLS LAST"""
+        ).fetchall()
+    return {"items": [_serialize_row(r, skip_deal_id=False) for r in rows]}
+
+
+@app.get("/api/portfolio/investor-book")
+def get_portfolio_investor_book():
+    """Investor allocations across the portfolio — who holds what."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            """SELECT ia.investor_name, ia.account_mandate,
+                      COUNT(DISTINCT ia.deal_id) AS deal_count,
+                      SUM(ia.amount) AS total_allocated,
+                      SUM(ia.mandate_size) AS total_mandate_size,
+                      ARRAY_AGG(DISTINCT d.name) AS deal_names
+               FROM investor_allocations ia
+               JOIN deals d ON ia.deal_id = d.id
+               GROUP BY ia.investor_name, ia.account_mandate
+               ORDER BY SUM(ia.amount) DESC NULLS LAST"""
+        ).fetchall()
+    return {"items": [_serialize_row(r, skip_deal_id=False) for r in rows]}
+
+
+@app.get("/api/portfolio/sector-concentration")
+def get_portfolio_sector_concentration():
+    """Sector concentration — total exposure and deal count by sector."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            """SELECT d.sector,
+                      COUNT(*) AS deal_count,
+                      SUM(d.exposure) AS total_exposure,
+                      SUM(d.facility_amount) AS total_facility,
+                      AVG(CAST((d.metrics->>'dscr') AS DECIMAL)) AS avg_dscr,
+                      SUM(CASE WHEN d.watchlist THEN 1 ELSE 0 END) AS watchlist_count
+               FROM deals d
+               GROUP BY d.sector
+               ORDER BY SUM(d.exposure) DESC"""
+        ).fetchall()
+    return {"items": [_serialize_row(r, skip_deal_id=False) for r in rows]}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TOPSHEET PROJECTION ENDPOINT (Phase 3) — full deal data export
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/deals/{slug}/topsheet")
+def get_deal_topsheet(slug: str):
+    """Full TopSheet projection — all deal data + child tables + latest periods."""
+    with get_connection() as conn:
+        deal_row = conn.execute("SELECT * FROM deals WHERE slug = %s", (slug,)).fetchone()
+        if not deal_row:
+            raise HTTPException(status_code=404, detail="Deal not found")
+        deal_id = int(deal_row["id"])
+
+        # Child tables
+        cap_struct = conn.execute(
+            "SELECT * FROM capital_structure_instruments WHERE deal_id = %s ORDER BY waterfall_priority", (deal_id,)
+        ).fetchall()
+        enforcement = conn.execute(
+            "SELECT * FROM enforcement_classes WHERE deal_id = %s ORDER BY priority", (deal_id,)
+        ).fetchall()
+        entities = conn.execute(
+            "SELECT * FROM corporate_entities WHERE deal_id = %s ORDER BY entity_type", (deal_id,)
+        ).fetchall()
+        counterparties = conn.execute(
+            "SELECT * FROM deal_counterparties WHERE deal_id = %s ORDER BY counterparty_type", (deal_id,)
+        ).fetchall()
+        reserves = conn.execute(
+            "SELECT * FROM deal_reserve_accounts WHERE deal_id = %s ORDER BY account_type", (deal_id,)
+        ).fetchall()
+        hedges = conn.execute(
+            "SELECT * FROM hedge_portfolio WHERE deal_id = %s ORDER BY maturity", (deal_id,)
+        ).fetchall()
+        dev_phases = conn.execute(
+            "SELECT * FROM deal_development_phases WHERE deal_id = %s ORDER BY phase_number", (deal_id,)
+        ).fetchall()
+        investors = conn.execute(
+            "SELECT * FROM investor_allocations WHERE deal_id = %s ORDER BY investor_name", (deal_id,)
+        ).fetchall()
+        intercreditor = conn.execute(
+            "SELECT * FROM intercreditor_terms WHERE deal_id = %s", (deal_id,)
+        ).fetchone()
+        fin_template = conn.execute(
+            "SELECT * FROM deal_financial_template WHERE deal_id = %s", (deal_id,)
+        ).fetchone()
+
+        # Risk register summary
+        risk_summary = conn.execute(
+            """SELECT risk_level, COUNT(*) AS cnt
+               FROM deal_risk_register WHERE deal_id = %s AND status = 'assessed'
+               GROUP BY risk_level""",
+            (deal_id,),
+        ).fetchall()
+
+        # Latest financial periods (last 4)
+        periods = conn.execute(
+            """SELECT * FROM financial_periods WHERE deal_id = %s
+               ORDER BY period_end DESC LIMIT 4""",
+            (deal_id,),
+        ).fetchall()
+
+        # Latest actuals (last 4)
+        actuals = conn.execute(
+            """SELECT * FROM actual_periods WHERE deal_id = %s
+               ORDER BY period_end DESC LIMIT 4""",
+            (deal_id,),
+        ).fetchall()
+
+        # Covenant tests (latest 4)
+        cov_tests = conn.execute(
+            """SELECT * FROM covenant_tests WHERE deal_id = %s
+               ORDER BY test_date DESC LIMIT 4""",
+            (deal_id,),
+        ).fetchall()
+
+    deal = _serialize_row(deal_row, skip_deal_id=False)
+
     return {
-        "dealSlug": slug,
-        "template": {
-            "sectorTemplate": row["sector_template"],
-            "revenueLineLabels": row["revenue_line_labels"],
-            "costLineLabels": row["cost_line_labels"],
-            "capexLineLabels": row["capex_line_labels"],
-            "sectorKpiLabels": row["sector_kpi_labels"],
-        },
+        "deal": deal,
+        "capitalStructure": [_serialize_row(r) for r in cap_struct],
+        "enforcementClasses": [_serialize_row(r) for r in enforcement],
+        "corporateEntities": [_serialize_row(r) for r in entities],
+        "counterparties": [_serialize_row(r) for r in counterparties],
+        "reserveAccounts": [_serialize_row(r) for r in reserves],
+        "hedgePortfolio": [_serialize_row(r) for r in hedges],
+        "developmentPhases": [_serialize_row(r) for r in dev_phases],
+        "investorAllocations": [_serialize_row(r) for r in investors],
+        "intercreditorTerms": _serialize_row(intercreditor) if intercreditor else None,
+        "financialTemplate": _serialize_row(fin_template) if fin_template else None,
+        "riskSummary": {r["risk_level"]: r["cnt"] for r in risk_summary},
+        "latestPeriods": [_serialize_row(r) for r in periods],
+        "latestActuals": [_serialize_row(r) for r in actuals],
+        "latestCovenantTests": [_serialize_row(r) for r in cov_tests],
     }
