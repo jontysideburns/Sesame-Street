@@ -6,6 +6,7 @@ import {
   type DurationCode,
 } from "../../lib/revenue-risk-template";
 import { getRiskTemplate, type DealClassification } from "../../api/plumbing";
+import DataArchitecture from "./data-architecture";
 
 const riskLevelTone: Record<string, string> = {
   very_low: "good",
@@ -75,6 +76,15 @@ export default async function PlumbingPage() {
             Reference templates and classification frameworks as currently configured.
           </p>
         </div>
+      </section>
+
+      {/* Data Architecture */}
+      <section className="panel section-panel">
+        <header className="panel-heading">
+          <p className="panel-eyebrow">Schema</p>
+          <h2 className="panel-title">Data architecture</h2>
+        </header>
+        <DataArchitecture />
       </section>
 
       {/* Portfolio classifications */}
