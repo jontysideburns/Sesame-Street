@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 
 type Memo = {
   id: number;
@@ -9,7 +9,9 @@ type Memo = {
   done: boolean;
 };
 
-const INITIAL_MEMOS: Memo[] = [
+const STORAGE_KEY = "sesame-todos";
+
+const DEFAULT_MEMOS: Memo[] = [
   {
     id: 1,
     text: "JPS to review/construct a reserve account architecture to allow the monitoring of reserve account balances.",
@@ -18,15 +20,35 @@ const INITIAL_MEMOS: Memo[] = [
   },
 ];
 
+function loadMemos(): Memo[] {
+  if (typeof window === "undefined") return DEFAULT_MEMOS;
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored) return JSON.parse(stored);
+  } catch { /* ignore */ }
+  return DEFAULT_MEMOS;
+}
+
 export default function TodosMemoBoard() {
-  const [memos, setMemos] = useState<Memo[]>(INITIAL_MEMOS);
+  const [memos, setMemos] = useState<Memo[]>(DEFAULT_MEMOS);
   const [draft, setDraft] = useState("");
+  const [hydrated, setHydrated] = useState(false);
+
+  useEffect(() => {
+    setMemos(loadMemos());
+    setHydrated(true);
+  }, []);
+
+  const persist = useCallback((next: Memo[]) => {
+    setMemos(next);
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+  }, []);
 
   function addMemo() {
     const trimmed = draft.trim();
     if (!trimmed) return;
-    setMemos((prev) => [
-      ...prev,
+    persist([
+      ...memos,
       {
         id: Date.now(),
         text: trimmed,
@@ -38,14 +60,14 @@ export default function TodosMemoBoard() {
   }
 
   function toggleDone(id: number) {
-    setMemos((prev) =>
-      prev.map((m) => (m.id === id ? { ...m, done: !m.done } : m))
-    );
+    persist(memos.map((m) => (m.id === id ? { ...m, done: !m.done } : m)));
   }
 
   function removeMemo(id: number) {
-    setMemos((prev) => prev.filter((m) => m.id !== id));
+    persist(memos.filter((m) => m.id !== id));
   }
+
+  if (!hydrated) return null;
 
   const pending = memos.filter((m) => !m.done);
   const completed = memos.filter((m) => m.done);
