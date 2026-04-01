@@ -28,6 +28,8 @@ type Deal = {
   internalCreditScore: string | null;
   organisations: string[];
   owners: string[];
+  performanceTrend: string | null;
+  performanceGrade: number | null;
 };
 
 type HierarchyOrg = { id: number; name: string; dealCount: number };
@@ -47,9 +49,26 @@ const EMPTY: Filters = { organisation: "", owner: "", sector: "", grade: "", wat
 /* ── Helpers ─────────────────────────────────────────────────────────── */
 
 function gradeTone(grade: string) {
-  if (grade.startsWith("1") || grade.startsWith("2")) return "good";
+  if (grade.startsWith("1")) return "good";
+  if (grade.startsWith("2")) return "neutral";
   if (grade.startsWith("3")) return "warning";
   return "critical";
+}
+
+const TREND_ARROWS: Record<string, string> = {
+  improving: "\u2191",
+  flat: "\u2192",
+  deteriorating: "\u2193",
+  deteriorating_rapidly: "\u2193\u2193",
+  new: "\u2605",
+};
+
+function trendTone(trend: string | null) {
+  if (!trend) return "neutral";
+  if (trend === "improving") return "good";
+  if (trend === "flat" || trend === "new") return "neutral";
+  if (trend === "deteriorating") return "warning";
+  return "critical"; // deteriorating_rapidly
 }
 
 function tierTone(status: string) {
@@ -268,6 +287,7 @@ export default function JpsFilterGrid({
                 <th style={{ ...th, textAlign: "right" }}>Exposure</th>
                 <th style={{ ...th, textAlign: "right" }}>Credit Score</th>
                 <th style={th}>Grade</th>
+                <th style={th}>Trend</th>
                 <th style={th}>Covenant</th>
                 <th style={th}>Last Financials</th>
                 <th style={{ ...th, textAlign: "right" }}>DSCR</th>
@@ -332,6 +352,18 @@ export default function JpsFilterGrid({
                       <span className={`badge ${gradeTone(deal.grade)} badge-sm`}>
                         {deal.grade}
                       </span>
+                    </td>
+
+                    {/* Trend — arrow + label */}
+                    <td style={td}>
+                      {deal.performanceTrend ? (
+                        <span className={`badge ${trendTone(deal.performanceTrend)} badge-sm`}>
+                          {TREND_ARROWS[deal.performanceTrend] ?? ""}{" "}
+                          {deal.performanceTrend.replace(/_/g, " ")}
+                        </span>
+                      ) : (
+                        <span style={{ color: "var(--ink-soft)" }}>—</span>
+                      )}
                     </td>
 
                     {/* Covenant performance — text, left */}

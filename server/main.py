@@ -2310,6 +2310,34 @@ def commit_document_proposal(conn, proposal_id: int, actor_name: str):
         committed_entity_type = "financial_period"
         committed_entity_id = financial_period_id
 
+        # Phase 9: Auto-compute performance assessment when metrics are committed
+        try:
+            from server.grade_engine import run_assessment as _run_assessment
+            _result = _run_assessment(conn, int(proposal["deal_id"]))
+            # Record any alerts (grade changes, watchlist flags)
+            alerts = _result.get("_alerts", [])
+            for alert in alerts:
+                try:
+                    record_activity_event(
+                        conn,
+                        source_domain="performance",
+                        event_type=alert["type"],
+                        entity_type="deal",
+                        entity_id=alert["deal_id"],
+                        actor_name=actor_name,
+                        actor_type="system",
+                        audit_how="automated",
+                        title=alert["title"],
+                        summary=alert["summary"],
+                        deep_link=alert["deep_link"],
+                        deal_id=alert["deal_id"],
+                        after_state={"grade": _result.get("performance_grade"), "trend": _result.get("performance_trend")},
+                    )
+                except Exception:
+                    pass
+        except Exception:
+            pass  # Performance assessment is best-effort; don't block the commit
+
     if proposal["commit_action"] == "upsert_obligation_fulfilment" and proposal["matched_obligation_id"]:
         fulfilment = conn.execute(
             """
@@ -10729,6 +10757,7 @@ def get_portfolio(
                 "exposure": 0,
                 "reportedDscr": as_number(row["current_value"]),
                 "covenantStatus": row["covenant_status"],
+                "headroomPct": as_number(row["headroom_pct"]),
                 "latestPeriodEnd": row["period_end"].isoformat() if row.get("period_end") else None,
                 "latestPeriodLabel": row.get("period_label"),
                 "distributionStatus": row["distribution_status"],
@@ -10752,6 +10781,8 @@ def get_portfolio(
                 "spRating": row.get("sp_rating"),
                 "fitchRating": row.get("fitch_rating"),
                 "internalCreditScore": row.get("internal_credit_score"),
+                "performanceTrend": None,
+                "performanceGrade": None,
                 "organisations": set(),
                 "owners": set(),
                 "accounts": set(),
@@ -10761,6 +10792,22 @@ def get_portfolio(
         deal_entry["organisations"].add(row["organisation_name"])
         deal_entry["owners"].add(row["owner_name"])
         deal_entry["accounts"].add(row["account_name"])
+
+    # Enrich deal rows with performance trend data
+    try:
+        with get_connection() as perf_conn:
+            perf_rows = perf_conn.execute(
+                """SELECT DISTINCT ON (deal_id) deal_id, performance_grade, performance_trend
+                   FROM performance_assessments ORDER BY deal_id, created_at DESC"""
+            ).fetchall()
+            perf_by_deal = {int(r["deal_id"]): r for r in perf_rows}
+            for entry in deal_rows_by_slug.values():
+                pa = perf_by_deal.get(int(entry["dealId"]))
+                if pa:
+                    entry["performanceTrend"] = pa["performance_trend"]
+                    entry["performanceGrade"] = int(pa["performance_grade"])
+    except Exception:
+        pass  # Table may not exist yet; degrade gracefully
 
     deal_rows = [
         {
@@ -11395,6 +11442,8 @@ def get_dashboard(
                 "spRating": row.get("sp_rating"),
                 "fitchRating": row.get("fitch_rating"),
                 "internalCreditScore": row.get("internal_credit_score"),
+                "performanceTrend": None,
+                "performanceGrade": None,
                 "organisations": set(),
                 "owners": set(),
                 "accounts": set(),
@@ -11404,6 +11453,22 @@ def get_dashboard(
         deal_entry["organisations"].add(row["organisation_name"])
         deal_entry["owners"].add(row["owner_name"])
         deal_entry["accounts"].add(row["account_name"])
+
+    # Enrich deal rows with performance trend data
+    try:
+        with get_connection() as perf_conn:
+            perf_rows = perf_conn.execute(
+                """SELECT DISTINCT ON (deal_id) deal_id, performance_grade, performance_trend
+                   FROM performance_assessments ORDER BY deal_id, created_at DESC"""
+            ).fetchall()
+            perf_by_deal = {int(r["deal_id"]): r for r in perf_rows}
+            for entry in deal_rows_by_slug.values():
+                pa = perf_by_deal.get(int(entry["dealId"]))
+                if pa:
+                    entry["performanceTrend"] = pa["performance_trend"]
+                    entry["performanceGrade"] = int(pa["performance_grade"])
+    except Exception:
+        pass  # Table may not exist yet; degrade gracefully
 
     deal_rows = [
         {
@@ -18837,6 +18902,181 @@ def three_case_comparison(slug: str, body: dict | None = None):
         "downsideBreaches": downside_breaches,
         "cases": case_results,
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# G.4 PERFORMANCE GRADE & TRENDING (headroom-based)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+from server.grade_engine import (
+    run_assessment,
+    get_latest_assessment,
+    get_assessment_history,
+    get_grade_distribution,
+    get_trend_distribution,
+    get_watchlist,
+)
+
+
+@app.get("/api/deals/{slug}/performance")
+def deal_performance(slug: str):
+    """Latest performance assessment (grade + trend + full breakdown)."""
+    with get_connection() as conn:
+        deal = conn.execute("SELECT id FROM deals WHERE slug = %s", [slug]).fetchone()
+        if not deal:
+            raise HTTPException(status_code=404, detail="Deal not found")
+        result = get_latest_assessment(conn, deal["id"])
+        if not result:
+            raise HTTPException(status_code=404, detail="No performance assessment found — run compute first")
+    return result
+
+
+@app.get("/api/deals/{slug}/performance/history")
+def deal_performance_history(slug: str):
+    """Time series of grade and trend assessments."""
+    with get_connection() as conn:
+        deal = conn.execute("SELECT id FROM deals WHERE slug = %s", [slug]).fetchone()
+        if not deal:
+            raise HTTPException(status_code=404, detail="Deal not found")
+        return get_assessment_history(conn, deal["id"])
+
+
+def _record_performance_alerts(conn, result: dict, actor: str = "system"):
+    """Record activity events for any alerts produced by a performance assessment."""
+    alerts = result.get("_alerts", [])
+    for alert in alerts:
+        try:
+            record_activity_event(
+                conn,
+                source_domain="performance",
+                event_type=alert["type"],
+                entity_type="deal",
+                entity_id=alert["deal_id"],
+                actor_name=actor,
+                actor_type="system",
+                audit_how="automated",
+                title=alert["title"],
+                summary=alert["summary"],
+                deep_link=alert["deep_link"],
+                deal_id=alert["deal_id"],
+                after_state={"grade": result.get("performance_grade"), "trend": result.get("performance_trend")},
+            )
+        except Exception:
+            pass  # Best-effort; don't fail the assessment
+
+
+@app.post("/api/deals/{slug}/performance/compute")
+def deal_performance_compute(slug: str):
+    """Trigger (re)computation of the performance assessment for a deal."""
+    with get_connection() as conn:
+        deal = conn.execute("SELECT id FROM deals WHERE slug = %s", [slug]).fetchone()
+        if not deal:
+            raise HTTPException(status_code=404, detail="Deal not found")
+        try:
+            result = run_assessment(conn, deal["id"])
+            _record_performance_alerts(conn, result)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+    return result
+
+
+@app.post("/api/portfolio/performance/compute-all")
+def portfolio_performance_compute_all():
+    """Compute performance assessments for all deals."""
+    with get_connection() as conn:
+        deals = conn.execute("SELECT id, slug FROM deals ORDER BY id").fetchall()
+        results = []
+        for deal in deals:
+            try:
+                result = run_assessment(conn, deal["id"])
+                _record_performance_alerts(conn, result)
+                results.append({"slug": deal["slug"], "grade": result["performance_grade"], "trend": result["performance_trend"]})
+            except Exception as e:
+                results.append({"slug": deal["slug"], "error": str(e)})
+    return {"assessments": results}
+
+
+@app.get("/api/portfolio/grade-distribution")
+def portfolio_grade_distribution():
+    """Count and exposure by grade (1/2/3/4) across portfolio."""
+    with get_connection() as conn:
+        return get_grade_distribution(conn)
+
+
+@app.get("/api/portfolio/trend-distribution")
+def portfolio_trend_distribution():
+    """Count by trend status across portfolio."""
+    with get_connection() as conn:
+        return get_trend_distribution(conn)
+
+
+@app.get("/api/portfolio/watchlist")
+def portfolio_watchlist():
+    """All deals with grade 3+ or deteriorating/rapidly trends."""
+    with get_connection() as conn:
+        return get_watchlist(conn)
+
+
+@app.post("/api/deals/{slug}/performance/override")
+def deal_performance_override(slug: str, body: dict):
+    """
+    HAM override of the performance grade.
+    Rules: max +1 grade improvement, mandatory rationale, mandatory expiry (max 6 months).
+    """
+    with get_connection() as conn:
+        deal = conn.execute("SELECT id FROM deals WHERE slug = %s", [slug]).fetchone()
+        if not deal:
+            raise HTTPException(status_code=404, detail="Deal not found")
+
+        latest = get_latest_assessment(conn, deal["id"])
+        if not latest:
+            raise HTTPException(status_code=400, detail="No assessment to override")
+
+        override_grade = body.get("overrideGrade")
+        rationale = body.get("rationale", "").strip()
+        override_by = body.get("overrideBy", "").strip()
+        expiry = body.get("expiry")  # ISO date string
+
+        if not override_grade or not rationale or not expiry:
+            raise HTTPException(status_code=400, detail="overrideGrade, rationale, and expiry are required")
+
+        current_grade = latest.get("performanceGrade")
+
+        # Can only override to a better (lower number) grade
+        if override_grade >= current_grade:
+            raise HTTPException(status_code=400, detail="Override must improve the grade (lower number)")
+
+        # Max 1 grade improvement
+        if current_grade - override_grade > 1:
+            raise HTTPException(status_code=400, detail="Override limited to +1 grade improvement")
+
+        # Update the latest assessment with override
+        conn.execute(
+            """UPDATE performance_assessments
+               SET override_active = TRUE,
+                   override_grade = %s,
+                   override_rationale = %s,
+                   override_by = %s,
+                   override_at = NOW(),
+                   override_expiry = %s
+               WHERE id = (
+                   SELECT id FROM performance_assessments
+                   WHERE deal_id = %s
+                   ORDER BY created_at DESC LIMIT 1
+               )""",
+            [override_grade, rationale, override_by, expiry, deal["id"]],
+        )
+
+        # Update deals.grade with the overridden grade
+        from server.grade_engine import GRADE_LABELS
+        new_label = f"{override_grade} - {GRADE_LABELS[override_grade]}"
+        conn.execute(
+            "UPDATE deals SET grade = %s, performance_grade = %s WHERE id = %s",
+            [new_label, override_grade, deal["id"]],
+        )
+        conn.connection.commit()
+
+    return {"ok": True, "overrideGrade": override_grade, "rationale": rationale}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

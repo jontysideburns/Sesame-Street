@@ -228,7 +228,18 @@ CREATE TABLE IF NOT EXISTS deals (
 
   -- F.17 Metadata
   model_version TEXT,
-  model_date DATE
+  model_date DATE,
+
+  -- G.4 Performance Grade & Trending configuration (per-deal)
+  grade_dscr_metric TEXT DEFAULT 'senior_annual_dscr',
+  grade_dscr_fallback TEXT DEFAULT 'senior_quarterly_dscr',
+  grade_collateral_metric TEXT DEFAULT 'senior_net_debt_ebitda',
+  grade_collateral_direction TEXT DEFAULT 'lower_is_better',
+  grade_dscr_threshold_pct DECIMAL DEFAULT 0.10,
+  grade_coll_threshold_pct DECIMAL DEFAULT 0.05,
+  trend_dscr_large_pp DECIMAL DEFAULT 5,
+  trend_coll_large_pp DECIMAL DEFAULT 2.5,
+  trend_small_pp DECIMAL DEFAULT 2.5
 );
 
 CREATE TABLE IF NOT EXISTS app_entitlements (
@@ -1293,6 +1304,31 @@ UPDATE deals SET moodys_rating = 'Baa1',  sp_rating = 'BBB+', fitch_rating = 'BB
 UPDATE deals SET moodys_rating = 'Baa2',  sp_rating = 'BBB',  fitch_rating = NULL,   internal_credit_score = 'BBB'  WHERE id = 6; -- Cobalt
 UPDATE deals SET moodys_rating = NULL,    sp_rating = 'BBB',  fitch_rating = 'BBB',  internal_credit_score = NULL   WHERE id = 7; -- Apollo
 
+-- G.4 Per-deal grade configuration (DSCR metric, collateral metric, thresholds)
+UPDATE deals SET grade_dscr_metric = 'seniorAnnualDscr', grade_dscr_fallback = 'seniorDscr', grade_collateral_metric = 'seniorNetDebtEbitda', grade_collateral_direction = 'lower_is_better';
+
+-- G.4 Covenant thresholds for headroom-based grading (DSCR + collateral per deal)
+-- DSCR thresholds (direction=min → higher is better, lockup/trigger/default are floors)
+INSERT INTO covenant_thresholds (id, deal_id, covenant_name, ratio_name, covenant_category, test_type, direction, test_frequency, lockup_level, trigger_level, default_level) VALUES
+(1, 1, 'Senior DSCR', 'seniorDscr', 'cash_flow_cover', 'hard_covenant', 'min', 'quarterly', 1.20, 1.10, 1.05),
+(2, 2, 'Senior DSCR', 'seniorDscr', 'cash_flow_cover', 'hard_covenant', 'min', 'quarterly', 1.20, 1.10, 1.05),
+(3, 3, 'Senior DSCR', 'seniorDscr', 'cash_flow_cover', 'hard_covenant', 'min', 'quarterly', 1.20, 1.10, 1.05),
+(4, 4, 'Senior DSCR', 'seniorDscr', 'cash_flow_cover', 'hard_covenant', 'min', 'quarterly', 1.20, 1.10, 1.05),
+(5, 5, 'Senior DSCR', 'seniorDscr', 'cash_flow_cover', 'hard_covenant', 'min', 'quarterly', 1.20, 1.10, 1.05),
+(6, 6, 'Senior DSCR', 'seniorDscr', 'cash_flow_cover', 'hard_covenant', 'min', 'quarterly', 1.20, 1.10, 1.05),
+(7, 7, 'Senior DSCR', 'seniorDscr', 'cash_flow_cover', 'hard_covenant', 'min', 'quarterly', 1.20, 1.10, 1.05)
+ON CONFLICT DO NOTHING;
+-- Net Debt / EBITDA thresholds (direction=max → lower is better, lockup/trigger/default are ceilings)
+INSERT INTO covenant_thresholds (id, deal_id, covenant_name, ratio_name, covenant_category, test_type, direction, test_frequency, lockup_level, trigger_level, default_level) VALUES
+(8,  1, 'Net Debt / EBITDA', 'seniorNetDebtEbitda', 'collateral_value', 'hard_covenant', 'max', 'quarterly', 7.00, 8.50, 10.00),
+(9,  2, 'Net Debt / EBITDA', 'seniorNetDebtEbitda', 'collateral_value', 'hard_covenant', 'max', 'quarterly', 7.00, 8.50, 10.00),
+(10, 3, 'Net Debt / EBITDA', 'seniorNetDebtEbitda', 'collateral_value', 'hard_covenant', 'max', 'quarterly', 7.00, 8.50, 10.00),
+(11, 4, 'Net Debt / EBITDA', 'seniorNetDebtEbitda', 'collateral_value', 'hard_covenant', 'max', 'quarterly', 11.50, 13.00, 15.00),
+(12, 5, 'Net Debt / EBITDA', 'seniorNetDebtEbitda', 'collateral_value', 'hard_covenant', 'max', 'quarterly', 7.00, 8.50, 10.00),
+(13, 6, 'Net Debt / EBITDA', 'seniorNetDebtEbitda', 'collateral_value', 'hard_covenant', 'max', 'quarterly', 7.00, 8.50, 10.00),
+(14, 7, 'Net Debt / EBITDA', 'seniorNetDebtEbitda', 'collateral_value', 'hard_covenant', 'max', 'quarterly', 7.00, 8.50, 10.00)
+ON CONFLICT DO NOTHING;
+
 INSERT INTO platform_clients (id, name, client_type, domicile) VALUES (1, 'Sesame Asset Management', 'asset_manager', 'United States');
 
 INSERT INTO organisations (id, platform_client_id, name, organisation_type, domicile, reporting_currency) VALUES (1, 1, 'County Pension Fund', 'pension_fund', 'United States', 'USD');
@@ -1448,6 +1484,35 @@ INSERT INTO financial_periods (id, deal_id, period_key, period_label, period_end
 INSERT INTO financial_periods (id, deal_id, period_key, period_label, period_end, source_document_id, status, summary, reported_metrics, expected_metrics) VALUES (6, 5, 'q2-2026', 'Q2 2026', '2026-06-30', 6, 'approved', 'Summit continued to outperform with strong occupancy and disciplined operating costs.', '{"revenue":14900000,"ebitda":8800000,"cfads":7600000,"debtService":5200000,"leasedCapacityPct":84,"constructionCompletionPct":100,"seniorDscr":1.46}'::jsonb, '{"revenue":14400000,"ebitda":8400000,"cfads":7440000,"debtService":5200000,"leasedCapacityPct":81,"constructionCompletionPct":100,"seniorDscr":1.43}'::jsonb);
 INSERT INTO financial_periods (id, deal_id, period_key, period_label, period_end, source_document_id, status, summary, reported_metrics, expected_metrics) VALUES (7, 6, 'q2-2026', 'Q2 2026', '2026-06-30', 7, 'approved', 'Cobalt remained within plan, though construction completion and leasing sat slightly behind the sponsor case.', '{"revenue":17100000,"ebitda":9500000,"cfads":8100000,"debtService":5900000,"leasedCapacityPct":58,"constructionCompletionPct":74,"seniorDscr":1.37}'::jsonb, '{"revenue":17600000,"ebitda":9800000,"cfads":8200000,"debtService":5890000,"leasedCapacityPct":61,"constructionCompletionPct":76,"seniorDscr":1.39}'::jsonb);
 INSERT INTO financial_periods (id, deal_id, period_key, period_label, period_end, source_document_id, status, summary, reported_metrics, expected_metrics) VALUES (8, 7, 'q2-2026', 'Q2 2026', '2026-06-30', 10, 'approved', 'Apollo Edge entered the monitored portfolio through onboarding activation with stable opening performance and no delivery exceptions.', '{"revenue":13200000,"ebitda":7600000,"cfads":6900000,"debtService":5100000,"leasedCapacityPct":67,"constructionCompletionPct":100,"seniorDscr":1.35}'::jsonb, '{"revenue":12900000,"ebitda":7400000,"cfads":6780000,"debtService":5100000,"leasedCapacityPct":64,"constructionCompletionPct":100,"seniorDscr":1.33}'::jsonb);
+
+-- G.4 Historical financial periods for trending (Q4 2025 and Q1 2026 for each deal)
+-- Aurora Q4 2025 (deal 1 — already has Q1 2026 as fp 1 and Q2 2026 as fp 2)
+INSERT INTO financial_periods (id, deal_id, period_key, period_label, period_end, status, summary, reported_metrics, expected_metrics) VALUES (9, 1, 'q4-2025', 'Q4 2025', '2025-12-31', 'approved', 'Aurora Q4 2025 — construction progressed on plan with coverage tracking close to the management case.', '{"revenue":21200000,"ebitda":11200000,"cfads":10600000,"debtService":8000000,"leasedCapacityPct":48,"constructionCompletionPct":55,"seniorDscr":1.38,"seniorNetDebtEbitda":5.50}'::jsonb, '{"revenue":21800000,"ebitda":11600000,"cfads":10900000,"debtService":8000000,"leasedCapacityPct":50,"constructionCompletionPct":57,"seniorDscr":1.43,"seniorNetDebtEbitda":5.40}'::jsonb);
+-- Granite Q4 2025 + Q1 2026 (deal 2 — has Q2 2026 as fp 3)
+INSERT INTO financial_periods (id, deal_id, period_key, period_label, period_end, status, summary, reported_metrics, expected_metrics) VALUES (10, 2, 'q4-2025', 'Q4 2025', '2025-12-31', 'approved', 'Granite Q4 2025 — occupancy ramp was slower than plan but still above lock-up.', '{"revenue":17200000,"ebitda":9800000,"cfads":8900000,"debtService":6280000,"leasedCapacityPct":70,"constructionCompletionPct":100,"seniorDscr":1.42,"seniorNetDebtEbitda":5.20}'::jsonb, '{"revenue":17800000,"ebitda":10100000,"cfads":9200000,"debtService":6280000,"leasedCapacityPct":73,"constructionCompletionPct":100,"seniorDscr":1.48,"seniorNetDebtEbitda":4.90}'::jsonb);
+INSERT INTO financial_periods (id, deal_id, period_key, period_label, period_end, status, summary, reported_metrics, expected_metrics) VALUES (11, 2, 'q1-2026', 'Q1 2026', '2026-03-31', 'approved', 'Granite Q1 2026 — occupancy rebounded and coverage moved back toward plan.', '{"revenue":18000000,"ebitda":10500000,"cfads":9400000,"debtService":6300000,"leasedCapacityPct":75,"constructionCompletionPct":100,"seniorDscr":1.48,"seniorNetDebtEbitda":4.85}'::jsonb, '{"revenue":18050000,"ebitda":10400000,"cfads":9350000,"debtService":6300000,"leasedCapacityPct":75,"constructionCompletionPct":100,"seniorDscr":1.49,"seniorNetDebtEbitda":4.90}'::jsonb);
+-- Meridian Q4 2025 + Q1 2026 (deal 3 — has Q2 2026 as fp 4)
+INSERT INTO financial_periods (id, deal_id, period_key, period_label, period_end, status, summary, reported_metrics, expected_metrics) VALUES (12, 3, 'q4-2025', 'Q4 2025', '2025-12-31', 'approved', 'Meridian Q4 2025 — energy costs weighed on EBITDA but occupancy held.', '{"revenue":15800000,"ebitda":8800000,"cfads":7500000,"debtService":5880000,"leasedCapacityPct":71,"constructionCompletionPct":100,"seniorDscr":1.31,"seniorNetDebtEbitda":6.60}'::jsonb, '{"revenue":16000000,"ebitda":9000000,"cfads":7700000,"debtService":5880000,"leasedCapacityPct":72,"constructionCompletionPct":100,"seniorDscr":1.33,"seniorNetDebtEbitda":6.50}'::jsonb);
+INSERT INTO financial_periods (id, deal_id, period_key, period_label, period_end, status, summary, reported_metrics, expected_metrics) VALUES (13, 3, 'q1-2026', 'Q1 2026', '2026-03-31', 'approved', 'Meridian Q1 2026 — stable performance with minor variance to plan.', '{"revenue":16000000,"ebitda":9000000,"cfads":7650000,"debtService":5890000,"leasedCapacityPct":72,"constructionCompletionPct":100,"seniorDscr":1.32,"seniorNetDebtEbitda":6.65}'::jsonb, '{"revenue":16200000,"ebitda":9200000,"cfads":7800000,"debtService":5890000,"leasedCapacityPct":73,"constructionCompletionPct":100,"seniorDscr":1.34,"seniorNetDebtEbitda":6.50}'::jsonb);
+-- Ion Harbor Q4 2025 + Q1 2026 (deal 4 — has Q2 2026 as fp 5)
+INSERT INTO financial_periods (id, deal_id, period_key, period_label, period_end, status, summary, reported_metrics, expected_metrics) VALUES (14, 4, 'q4-2025', 'Q4 2025', '2025-12-31', 'approved', 'Ion Harbor Q4 2025 — lease-up only slightly behind plan with manageable coverage.', '{"revenue":13400000,"ebitda":6400000,"cfads":5500000,"debtService":4080000,"leasedCapacityPct":54,"constructionCompletionPct":100,"seniorDscr":1.34,"seniorNetDebtEbitda":10.40}'::jsonb, '{"revenue":13700000,"ebitda":6550000,"cfads":5600000,"debtService":4080000,"leasedCapacityPct":56,"constructionCompletionPct":100,"seniorDscr":1.37,"seniorNetDebtEbitda":10.20}'::jsonb);
+INSERT INTO financial_periods (id, deal_id, period_key, period_label, period_end, status, summary, reported_metrics, expected_metrics) VALUES (15, 4, 'q1-2026', 'Q1 2026', '2026-03-31', 'approved', 'Ion Harbor Q1 2026 — lease-up continued to miss plan; coverage tightened.', '{"revenue":12800000,"ebitda":6100000,"cfads":5300000,"debtService":4090000,"leasedCapacityPct":52,"constructionCompletionPct":100,"seniorDscr":1.30,"seniorNetDebtEbitda":10.80}'::jsonb, '{"revenue":13800000,"ebitda":6600000,"cfads":5620000,"debtService":4090000,"leasedCapacityPct":56,"constructionCompletionPct":100,"seniorDscr":1.37,"seniorNetDebtEbitda":10.20}'::jsonb);
+-- Summit Q4 2025 + Q1 2026 (deal 5 — has Q2 2026 as fp 6)
+INSERT INTO financial_periods (id, deal_id, period_key, period_label, period_end, status, summary, reported_metrics, expected_metrics) VALUES (16, 5, 'q4-2025', 'Q4 2025', '2025-12-31', 'approved', 'Summit Q4 2025 — outperformance began with occupancy above plan.', '{"revenue":14100000,"ebitda":8300000,"cfads":7200000,"debtService":5180000,"leasedCapacityPct":80,"constructionCompletionPct":100,"seniorDscr":1.44,"seniorNetDebtEbitda":4.85}'::jsonb, '{"revenue":13900000,"ebitda":8100000,"cfads":7100000,"debtService":5180000,"leasedCapacityPct":79,"constructionCompletionPct":100,"seniorDscr":1.42,"seniorNetDebtEbitda":5.10}'::jsonb);
+INSERT INTO financial_periods (id, deal_id, period_key, period_label, period_end, status, summary, reported_metrics, expected_metrics) VALUES (17, 5, 'q1-2026', 'Q1 2026', '2026-03-31', 'approved', 'Summit Q1 2026 — continued outperformance with strong operating metrics.', '{"revenue":14500000,"ebitda":8600000,"cfads":7400000,"debtService":5190000,"leasedCapacityPct":82,"constructionCompletionPct":100,"seniorDscr":1.45,"seniorNetDebtEbitda":4.82}'::jsonb, '{"revenue":14300000,"ebitda":8300000,"cfads":7300000,"debtService":5190000,"leasedCapacityPct":81,"constructionCompletionPct":100,"seniorDscr":1.43,"seniorNetDebtEbitda":5.10}'::jsonb);
+-- Cobalt Q4 2025 + Q1 2026 (deal 6 — has Q2 2026 as fp 7)
+INSERT INTO financial_periods (id, deal_id, period_key, period_label, period_end, status, summary, reported_metrics, expected_metrics) VALUES (18, 6, 'q4-2025', 'Q4 2025', '2025-12-31', 'approved', 'Cobalt Q4 2025 — construction and leasing ran slightly ahead of plan.', '{"revenue":16800000,"ebitda":9400000,"cfads":8050000,"debtService":5880000,"leasedCapacityPct":56,"constructionCompletionPct":70,"seniorDscr":1.40,"seniorNetDebtEbitda":6.75}'::jsonb, '{"revenue":16600000,"ebitda":9200000,"cfads":7900000,"debtService":5870000,"leasedCapacityPct":55,"constructionCompletionPct":69,"seniorDscr":1.39,"seniorNetDebtEbitda":6.80}'::jsonb);
+INSERT INTO financial_periods (id, deal_id, period_key, period_label, period_end, status, summary, reported_metrics, expected_metrics) VALUES (19, 6, 'q1-2026', 'Q1 2026', '2026-03-31', 'approved', 'Cobalt Q1 2026 — leasing began to lag and coverage dipped slightly below plan.', '{"revenue":16900000,"ebitda":9400000,"cfads":8050000,"debtService":5885000,"leasedCapacityPct":57,"constructionCompletionPct":72,"seniorDscr":1.38,"seniorNetDebtEbitda":6.85}'::jsonb, '{"revenue":17200000,"ebitda":9600000,"cfads":8100000,"debtService":5885000,"leasedCapacityPct":59,"constructionCompletionPct":73,"seniorDscr":1.39,"seniorNetDebtEbitda":6.80}'::jsonb);
+
+-- Add seniorNetDebtEbitda to existing financial_periods (Q1 & Q2 2026 for Aurora, Q2 2026 for all)
+UPDATE financial_periods SET reported_metrics = reported_metrics || '{"seniorNetDebtEbitda":5.65}'::jsonb, expected_metrics = expected_metrics || '{"seniorNetDebtEbitda":5.40}'::jsonb WHERE id = 1;
+UPDATE financial_periods SET reported_metrics = reported_metrics || '{"seniorNetDebtEbitda":5.80}'::jsonb, expected_metrics = expected_metrics || '{"seniorNetDebtEbitda":5.40}'::jsonb WHERE id = 2;
+UPDATE financial_periods SET reported_metrics = reported_metrics || '{"seniorNetDebtEbitda":4.60}'::jsonb, expected_metrics = expected_metrics || '{"seniorNetDebtEbitda":4.90}'::jsonb WHERE id = 3;
+UPDATE financial_periods SET reported_metrics = reported_metrics || '{"seniorNetDebtEbitda":6.60}'::jsonb, expected_metrics = expected_metrics || '{"seniorNetDebtEbitda":6.50}'::jsonb WHERE id = 4;
+UPDATE financial_periods SET reported_metrics = reported_metrics || '{"seniorNetDebtEbitda":11.10}'::jsonb, expected_metrics = expected_metrics || '{"seniorNetDebtEbitda":10.20}'::jsonb WHERE id = 5;
+UPDATE financial_periods SET reported_metrics = reported_metrics || '{"seniorNetDebtEbitda":4.80}'::jsonb, expected_metrics = expected_metrics || '{"seniorNetDebtEbitda":5.10}'::jsonb WHERE id = 6;
+UPDATE financial_periods SET reported_metrics = reported_metrics || '{"seniorNetDebtEbitda":6.90}'::jsonb, expected_metrics = expected_metrics || '{"seniorNetDebtEbitda":6.80}'::jsonb WHERE id = 7;
+UPDATE financial_periods SET reported_metrics = reported_metrics || '{"seniorNetDebtEbitda":5.90}'::jsonb, expected_metrics = expected_metrics || '{"seniorNetDebtEbitda":6.10}'::jsonb WHERE id = 8;
 
 INSERT INTO financial_variances (id, financial_period_id, metric_key, metric_label, reported_value, expected_value, variance_value, variance_pct, direction, materiality, commentary) VALUES (1, 1, 'revenue', 'Revenue', 22600000, 23300000, -700000, -3.00, 'down', 'notable', 'Occupancy ramp was slightly slower than base case in Q1 2026.');
 INSERT INTO financial_variances (id, financial_period_id, metric_key, metric_label, reported_value, expected_value, variance_value, variance_pct, direction, materiality, commentary) VALUES (2, 1, 'ebitda', 'EBITDA', 11800000, 12100000, -300000, -2.48, 'down', 'minor', 'Operating spend was modestly above plan during commissioning.');
@@ -2613,6 +2678,571 @@ CREATE TABLE IF NOT EXISTS platform_todos (
 INSERT INTO platform_todos (text, done, created_at) VALUES
 ('JPS to review/construct a reserve account architecture to allow the monitoring of reserve account balances.', false, '2026-04-01')
 ON CONFLICT DO NOTHING;
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- G.4 Performance Assessments (headroom-based grade + trending)
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS performance_assessments (
+    id                          SERIAL PRIMARY KEY,
+    deal_id                     INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+    financial_period_id         INTEGER REFERENCES financial_periods(id) ON DELETE SET NULL,
+    assessment_period           TEXT NOT NULL,
+
+    -- GRADE
+    performance_grade           INTEGER NOT NULL CHECK (performance_grade BETWEEN 1 AND 4),
+    grade_label                 TEXT NOT NULL,
+    prior_grade                 INTEGER,
+    grade_changed               BOOLEAN NOT NULL DEFAULT FALSE,
+    grade_direction             TEXT,
+
+    -- DSCR Assessment
+    dscr_metric                 TEXT NOT NULL,
+    dscr_metric_source          TEXT,
+    dscr_management_case        DECIMAL,
+    dscr_default_level          DECIMAL,
+    dscr_lockup_level           DECIMAL,
+    dscr_actual                 DECIMAL,
+    dscr_expected_headroom      DECIMAL,
+    dscr_actual_headroom        DECIMAL,
+    dscr_erosion_abs            DECIMAL,
+    dscr_erosion_pct            DECIMAL,
+    dscr_component_grade        INTEGER,
+
+    -- Collateral Assessment
+    coll_metric                 TEXT NOT NULL,
+    coll_direction              TEXT NOT NULL,
+    coll_management_case        DECIMAL,
+    coll_default_level          DECIMAL,
+    coll_lockup_level           DECIMAL,
+    coll_actual                 DECIMAL,
+    coll_expected_headroom      DECIMAL,
+    coll_actual_headroom        DECIMAL,
+    coll_erosion_abs            DECIMAL,
+    coll_erosion_pct            DECIMAL,
+    coll_component_grade        INTEGER,
+
+    -- TREND
+    performance_trend           TEXT,
+    trend_label                 TEXT,
+    trend_periods               TEXT[],
+    dscr_erosion_series         DECIMAL[],
+    dscr_delta_1                DECIMAL,
+    dscr_delta_2                DECIMAL,
+    dscr_persistent_drift       BOOLEAN,
+    dscr_trend                  TEXT,
+    coll_erosion_series         DECIMAL[],
+    coll_delta_1                DECIMAL,
+    coll_delta_2                DECIMAL,
+    coll_persistent_drift       BOOLEAN,
+    coll_trend                  TEXT,
+
+    -- OVERRIDE
+    override_active             BOOLEAN DEFAULT FALSE,
+    override_grade              INTEGER,
+    override_rationale          TEXT,
+    override_by                 TEXT,
+    override_at                 TIMESTAMPTZ,
+    override_expiry             DATE,
+
+    -- CONFIG
+    dscr_threshold_pct          DECIMAL DEFAULT 0.10,
+    coll_threshold_pct          DECIMAL DEFAULT 0.05,
+    dscr_trend_large_pp         DECIMAL DEFAULT 5,
+    coll_trend_large_pp         DECIMAL DEFAULT 2.5,
+    trend_small_pp              DECIMAL DEFAULT 2.5,
+    determinative_ratio         TEXT,
+    flags                       TEXT[],
+
+    created_at                  TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_perf_assess_deal ON performance_assessments(deal_id);
+CREATE INDEX idx_perf_assess_period ON performance_assessments(assessment_period);
+CREATE INDEX idx_perf_assess_grade ON performance_assessments(performance_grade);
+CREATE INDEX idx_perf_assess_trend ON performance_assessments(performance_trend);
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- NORMALISED FINANCIAL LINE-ITEM STORAGE
+-- Replaces JSONB bags with one row per line item per period per deal
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+-- 1. Deal reporting schedule — defines each deal's reporting calendar
+CREATE TABLE IF NOT EXISTS deal_reporting_schedule (
+    id                      SERIAL PRIMARY KEY,
+    deal_id                 INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+    periodicity             TEXT NOT NULL,              -- monthly, quarterly, semi_annual, annual
+    first_period_start      DATE NOT NULL,              -- first reporting period start (may differ from origination)
+    final_period_end        DATE NOT NULL,              -- maturity or concession expiry
+    fiscal_year_end_month   INTEGER NOT NULL,            -- 1..12
+    reporting_lag_days      INTEGER NOT NULL DEFAULT 45, -- days after period_end until report expected
+    created_at              TIMESTAMPTZ DEFAULT NOW(),
+    updated_at              TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(deal_id)
+);
+
+-- 2. Deal reporting periods — materialised calendar of period slots
+CREATE TABLE IF NOT EXISTS deal_reporting_periods (
+    id                      SERIAL PRIMARY KEY,
+    deal_id                 INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+    period_flag             TEXT NOT NULL,              -- sort key: '2026Q1', '2025H1', '2026M03', '2026A'
+    period_label            TEXT NOT NULL,              -- display: 'Q1 2026', 'H1 2025', 'Sep 2025', 'FY 2026'
+    period_start            DATE NOT NULL,
+    period_end              DATE NOT NULL,
+    period_frequency        TEXT NOT NULL,              -- monthly, quarterly, semi_annual, annual
+    period_ordinal          INTEGER NOT NULL,            -- 1-based sequential position within deal's calendar
+    report_expected_by      DATE,                       -- period_end + reporting_lag_days
+    actual_period_id        INTEGER REFERENCES actual_periods(id) ON DELETE SET NULL,
+    data_status             TEXT NOT NULL DEFAULT 'awaiting',  -- awaiting, extracted, reviewed, approved, restatement
+    source_document_id      INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+    created_at              TIMESTAMPTZ DEFAULT NOW(),
+    updated_at              TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(deal_id, period_flag)
+);
+
+CREATE INDEX idx_drp_deal_flag ON deal_reporting_periods(deal_id, period_flag);
+CREATE INDEX idx_drp_deal_ordinal ON deal_reporting_periods(deal_id, period_ordinal);
+CREATE INDEX idx_drp_status ON deal_reporting_periods(data_status) WHERE data_status != 'approved';
+
+-- 3. Line item definitions — chart of accounts (67 generic rows + subcategory slots)
+CREATE TABLE IF NOT EXISTS line_item_definitions (
+    id                      SERIAL PRIMARY KEY,
+    line_key                TEXT NOT NULL UNIQUE,        -- 'total_revenue', 'ebitda', 'revenue_1', 'cost_3', etc.
+    section                 TEXT NOT NULL,               -- operating_cashflow, capex, working_capital, additional_sources,
+                                                        --   funding, cfads, senior_ds, junior_ds, shareholder_interco,
+                                                        --   fees, net_cashflow, covenant_core, covenant_project_finance,
+                                                        --   covenant_real_estate, covenant_regulated, covenant_social,
+                                                        --   sector_kpi, pnl
+    display_label           TEXT NOT NULL,               -- generic default label
+    row_order               INTEGER NOT NULL,            -- ordering within section
+    is_generic              BOOLEAN NOT NULL DEFAULT TRUE,  -- FALSE for subcategory slots (revenue_1, cost_2, etc.)
+    is_computed             BOOLEAN NOT NULL DEFAULT FALSE, -- TRUE for EBITDA, CFADS, ratios, etc.
+    computation_formula     TEXT,                        -- human-readable: 'total_revenue - total_operating_costs - ...'
+    sign_convention         TEXT NOT NULL DEFAULT 'natural',  -- natural, inflow_positive, outflow_negative
+    unit                    TEXT NOT NULL DEFAULT 'currency', -- currency, ratio, percentage, count, bps
+    parent_line_key         TEXT,                        -- for subcategory rollup: revenue_1 -> total_revenue
+    created_at              TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_lid_section_order ON line_item_definitions(section, row_order);
+CREATE INDEX idx_lid_parent ON line_item_definitions(parent_line_key) WHERE parent_line_key IS NOT NULL;
+
+-- 4. Period financial items — one row per line item per period (the core table)
+CREATE TABLE IF NOT EXISTS period_financial_items (
+    id                      BIGSERIAL PRIMARY KEY,
+    deal_id                 INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+    reporting_period_id     INTEGER NOT NULL REFERENCES deal_reporting_periods(id) ON DELETE CASCADE,
+    line_key                TEXT NOT NULL REFERENCES line_item_definitions(line_key),
+
+    -- Values
+    reported_value          NUMERIC(18, 4),             -- from document extraction / manual entry
+    computed_value          NUMERIC(18, 4),             -- platform-calculated
+    approved_value          NUMERIC(18, 4),             -- final golden value after review
+    forecast_value          NUMERIC(18, 4),             -- from active forecast case for comparison
+    variance_to_forecast    NUMERIC(18, 4),             -- approved - forecast (denormalised)
+    variance_pct            NUMERIC(10, 4),             -- variance as percentage
+
+    -- Provenance
+    value_origin            TEXT NOT NULL DEFAULT 'extracted',  -- extracted, computed, manual, override, interpolated
+    extraction_confidence   NUMERIC(5, 4),              -- 0.0000..1.0000
+    source_document_id      INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+    source_page             INTEGER,                    -- page number in source document
+    source_cell_ref         TEXT,                       -- e.g. 'C14' for spreadsheet extraction
+    source_hierarchy        TEXT,                       -- audited, certificate, unaudited, management, model
+
+    -- Review lifecycle
+    item_status             TEXT NOT NULL DEFAULT 'pending',  -- pending, auto_approved, flagged, reviewed, approved, disputed
+    reviewed_by             TEXT,
+    reviewed_at             TIMESTAMPTZ,
+    review_note             TEXT,
+
+    -- Audit
+    created_at              TIMESTAMPTZ DEFAULT NOW(),
+    updated_at              TIMESTAMPTZ DEFAULT NOW(),
+
+    UNIQUE(deal_id, reporting_period_id, line_key)
+);
+
+CREATE INDEX idx_pfi_period ON period_financial_items(reporting_period_id);
+CREATE INDEX idx_pfi_deal_line ON period_financial_items(deal_id, line_key);
+CREATE INDEX idx_pfi_deal_period ON period_financial_items(deal_id, reporting_period_id);
+CREATE INDEX idx_pfi_status ON period_financial_items(item_status) WHERE item_status IN ('pending', 'flagged');
+
+-- 5. Deal line item labels — per-deal display labels for subcategory slots
+--    Materialised from deal_financial_template JSONB arrays for easy JOINs
+CREATE TABLE IF NOT EXISTS deal_line_item_labels (
+    id                      SERIAL PRIMARY KEY,
+    deal_id                 INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+    line_key                TEXT NOT NULL REFERENCES line_item_definitions(line_key),
+    display_label           TEXT NOT NULL,               -- 'GPU/Compute Revenue', 'Cooling Cost', etc.
+    ordinal                 INTEGER NOT NULL,             -- position within subcategory group (1-based)
+    is_active               BOOLEAN NOT NULL DEFAULT TRUE,
+    UNIQUE(deal_id, line_key)
+);
+
+CREATE INDEX idx_dlil_deal ON deal_line_item_labels(deal_id);
+
+-- Bridge: link existing actual_periods to new normalised periods
+ALTER TABLE actual_periods ADD COLUMN IF NOT EXISTS reporting_period_id INTEGER REFERENCES deal_reporting_periods(id) ON DELETE SET NULL;
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- SEED: Line item definitions — 67 generic rows + subcategory slots
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+-- Operating Cash Flow
+INSERT INTO line_item_definitions (line_key, section, display_label, row_order, is_computed, computation_formula, unit) VALUES
+('total_revenue',             'operating_cashflow', 'Total Revenue',                    1, TRUE,  'SUM(revenue_1..revenue_N)',                              'currency'),
+('amort_deferred_income',     'operating_cashflow', 'Amortisation of Deferred Income',  2, FALSE, NULL,                                                     'currency'),
+('total_operating_costs',     'operating_cashflow', 'Total Operating Costs',            3, TRUE,  'SUM(cost_1..cost_N)',                                    'currency'),
+('disallowed_costs',          'operating_cashflow', 'Disallowed Costs',                 4, FALSE, NULL,                                                     'currency'),
+('exceptional_items',         'operating_cashflow', 'Exceptional Items',                5, FALSE, NULL,                                                     'currency'),
+('ebitda',                    'operating_cashflow', 'EBITDA',                           6, TRUE,  'total_revenue + amort_deferred_income - total_operating_costs - disallowed_costs - exceptional_items', 'currency')
+ON CONFLICT (line_key) DO NOTHING;
+
+-- Capital Expenditure
+INSERT INTO line_item_definitions (line_key, section, display_label, row_order, is_computed, computation_formula, unit) VALUES
+('capital_expenditure',           'capex', 'Capital Expenditure',             1, TRUE,  'SUM(capex_1..capex_N)',                       'currency'),
+('charger_replacement_costs',     'capex', 'Charger / Equipment Replacement', 2, FALSE, NULL,                                          'currency')
+ON CONFLICT (line_key) DO NOTHING;
+
+-- Working Capital, Reserves & Tax
+INSERT INTO line_item_definitions (line_key, section, display_label, row_order, is_computed, computation_formula, unit) VALUES
+('working_capital_movement',  'working_capital', 'Working Capital Movement',         1, FALSE, NULL,                                                        'currency'),
+('reserve_account_movements', 'working_capital', 'Reserve Account Movements',        2, FALSE, NULL,                                                        'currency'),
+('pre_finance_pre_tax_cf',    'working_capital', 'Pre-Finance, Pre-Tax Cash Flow',   3, TRUE,  'ebitda - capital_expenditure +/- working_capital +/- reserves', 'currency'),
+('tax_paid',                  'working_capital', 'Tax Paid',                         4, FALSE, NULL,                                                        'currency'),
+('pre_finance_post_tax_cf',   'working_capital', 'Pre-Finance, Post-Tax Cash Flow',  5, TRUE,  'pre_finance_pre_tax_cf - tax_paid',                         'currency')
+ON CONFLICT (line_key) DO NOTHING;
+
+-- Additional Sources / Income
+INSERT INTO line_item_definitions (line_key, section, display_label, row_order, is_computed, unit) VALUES
+('interest_on_cash',     'additional_sources', 'Interest on Cash Balances',  1, FALSE, 'currency'),
+('customer_prepayment',  'additional_sources', 'Customer Pre-Payments',      2, FALSE, 'currency'),
+('grant_income',         'additional_sources', 'Grant / Subsidy Income',     3, FALSE, 'currency')
+ON CONFLICT (line_key) DO NOTHING;
+
+-- Funding Sources
+INSERT INTO line_item_definitions (line_key, section, display_label, row_order, is_computed, computation_formula, unit) VALUES
+('senior_debt_drawdown',      'funding', 'Senior Debt Drawdown',              1, FALSE, NULL,                           'currency'),
+('capex_facility_drawdown',   'funding', 'Capex Facility Drawdown',           2, FALSE, NULL,                           'currency'),
+('junior_debt_drawdown',      'funding', 'Junior / Mezzanine Debt Drawdown',  3, FALSE, NULL,                           'currency'),
+('shareholder_loan_drawdown', 'funding', 'Shareholder Loan Drawdown',         4, FALSE, NULL,                           'currency'),
+('equity_drawdown',           'funding', 'Equity Drawdown',                   5, FALSE, NULL,                           'currency'),
+('total_funding',             'funding', 'Total Funding',                     6, TRUE,  'SUM(funding_1..funding_N) + generic funding lines', 'currency')
+ON CONFLICT (line_key) DO NOTHING;
+
+-- CFADS
+INSERT INTO line_item_definitions (line_key, section, display_label, row_order, is_computed, computation_formula, unit) VALUES
+('cfads', 'cfads', 'CFADS', 1, TRUE, 'pre_finance_post_tax_cf + additional_sources + total_funding', 'currency')
+ON CONFLICT (line_key) DO NOTHING;
+
+-- Senior Debt Service
+INSERT INTO line_item_definitions (line_key, section, display_label, row_order, is_computed, computation_formula, unit) VALUES
+('senior_interest',       'senior_ds', 'Senior Interest',              1, FALSE, NULL,                                          'currency'),
+('senior_principal',      'senior_ds', 'Senior Principal (Scheduled)', 2, FALSE, NULL,                                          'currency'),
+('senior_principal_sweep','senior_ds', 'Senior Principal (Cash Sweep)',3, FALSE, NULL,                                          'currency'),
+('senior_debt_service',   'senior_ds', 'Total Senior Debt Service',    4, TRUE,  'senior_interest + senior_principal + senior_principal_sweep', 'currency'),
+('cf_after_senior_ds',    'senior_ds', 'CF After Senior Debt Service', 5, TRUE,  'cfads - senior_debt_service',                 'currency')
+ON CONFLICT (line_key) DO NOTHING;
+
+-- Junior Debt Service
+INSERT INTO line_item_definitions (line_key, section, display_label, row_order, is_computed, computation_formula, unit) VALUES
+('junior_interest',      'junior_ds', 'Junior Interest',             1, FALSE, NULL,                                     'currency'),
+('junior_principal',     'junior_ds', 'Junior Principal',            2, FALSE, NULL,                                     'currency'),
+('junior_debt_service',  'junior_ds', 'Total Junior Debt Service',   3, TRUE,  'junior_interest + junior_principal',     'currency')
+ON CONFLICT (line_key) DO NOTHING;
+
+-- Shareholder & Intercompany
+INSERT INTO line_item_definitions (line_key, section, display_label, row_order, is_computed, unit) VALUES
+('shareholder_loan_interest',  'shareholder_interco', 'Shareholder Loan Interest',      1, FALSE, 'currency'),
+('shareholder_loan_repayment', 'shareholder_interco', 'Shareholder Loan Repayment',     2, FALSE, 'currency'),
+('intercompany_interest_net',  'shareholder_interco', 'Intercompany Interest (Net)',     3, FALSE, 'currency')
+ON CONFLICT (line_key) DO NOTHING;
+
+-- Other Fees & Costs
+INSERT INTO line_item_definitions (line_key, section, display_label, row_order, is_computed, unit) VALUES
+('ticking_commitment_fees',    'fees', 'Ticking / Commitment Fees',     1, FALSE, 'currency'),
+('debt_arrangement_fees',      'fees', 'Debt Arrangement Fees',         2, FALSE, 'currency'),
+('liquidity_facility_drawdown','fees', 'Liquidity Facility Drawdown',   3, FALSE, 'currency')
+ON CONFLICT (line_key) DO NOTHING;
+
+-- Net Cashflow & Closing
+INSERT INTO line_item_definitions (line_key, section, display_label, row_order, is_computed, computation_formula, unit) VALUES
+('net_cashflow',              'net_cashflow', 'Net Cashflow',              1, TRUE,  'cf_after_senior_ds - junior_ds - shl - interco - fees', 'currency'),
+('cash_bf',                   'net_cashflow', 'Opening Cash Balance',      2, FALSE, NULL,                                                    'currency'),
+('distributions',             'net_cashflow', 'Distributions',             3, FALSE, NULL,                                                    'currency'),
+('share_capital_redemption',  'net_cashflow', 'Share Capital Redemption',  4, FALSE, NULL,                                                    'currency'),
+('cash_cf',                   'net_cashflow', 'Closing Cash Balance',      5, TRUE,  'cash_bf + net_cashflow - distributions - share_capital_redemption', 'currency')
+ON CONFLICT (line_key) DO NOTHING;
+
+-- Core Covenant Ratios (all sectors)
+INSERT INTO line_item_definitions (line_key, section, display_label, row_order, is_computed, computation_formula, unit) VALUES
+('senior_dscr',        'covenant_core', 'Senior DSCR',                      1, TRUE, 'cfads / senior_debt_service',                              'ratio'),
+('senior_annual_dscr', 'covenant_core', 'Senior Annual DSCR',               2, TRUE, 'annualised_cfads / annualised_senior_ds',                  'ratio'),
+('net_debt_ebitda',    'covenant_core', 'Net Debt / EBITDA',                3, TRUE, 'net_debt / ebitda',                                       'ratio'),
+('icr',                'covenant_core', 'Interest Coverage Ratio (ICR)',    4, TRUE, 'ebitda / interest_expense',                                'ratio'),
+('fccr',               'covenant_core', 'Fixed Charge Coverage Ratio',     5, TRUE, 'ebitda / (interest + scheduled_principal + lease)',         'ratio')
+ON CONFLICT (line_key) DO NOTHING;
+
+-- Project Finance Ratios
+INSERT INTO line_item_definitions (line_key, section, display_label, row_order, is_computed, computation_formula, unit) VALUES
+('llcr', 'covenant_project_finance', 'Loan Life Coverage Ratio (LLCR)',    1, TRUE, 'NPV(projected_cf_to_maturity) / outstanding_debt', 'ratio'),
+('plcr', 'covenant_project_finance', 'Project Life Coverage Ratio (PLCR)', 2, TRUE, 'NPV(projected_cf_over_project_life) / outstanding_debt', 'ratio')
+ON CONFLICT (line_key) DO NOTHING;
+
+-- Real Estate Ratios
+INSERT INTO line_item_definitions (line_key, section, display_label, row_order, is_computed, computation_formula, unit) VALUES
+('ltv',              'covenant_real_estate', 'Loan-to-Value (LTV)',       1, TRUE, 'loan_balance / appraised_value',        'ratio'),
+('rental_coverage',  'covenant_real_estate', 'Rental Coverage Ratio',    2, TRUE, 'net_rental_income / debt_service',      'ratio'),
+('debt_yield',       'covenant_real_estate', 'Debt Yield',               3, TRUE, 'noi / loan_balance',                    'ratio')
+ON CONFLICT (line_key) DO NOTHING;
+
+-- Regulated Utility / WBS Ratios
+INSERT INTO line_item_definitions (line_key, section, display_label, row_order, is_computed, computation_formula, unit) VALUES
+('net_debt_rab',        'covenant_regulated', 'Net Debt / RAB',                   1, TRUE, 'net_senior_debt / rab',                                    'ratio'),
+('acr',                 'covenant_regulated', 'Asset Cover Ratio (ACR)',           2, TRUE, 'net_debt / rab (trigger & default tiers)',                  'ratio'),
+('pmicr',               'covenant_regulated', 'Post-Maintenance ICR (PMICR)',      3, TRUE, '(cfads - regulatory_depreciation) / senior_interest',      'ratio'),
+('senior_icr_reg_dep',  'covenant_regulated', 'Senior ICR (Regulatory Dep.)',      4, TRUE, 'ebitda_after_reg_dep / senior_interest',                   'ratio'),
+('senior_icr_2pct_rab', 'covenant_regulated', 'Senior ICR (2% RAB)',               5, TRUE, 'ebitda_after_2pct_rab_dep / senior_interest',              'ratio'),
+('class_a_debt_rab',    'covenant_regulated', 'Class A Net Debt / RAB',            6, TRUE, 'class_a_debt / rab',                                      'ratio'),
+('total_debt_rab',      'covenant_regulated', 'Total Debt / RAB',                  7, TRUE, 'total_debt / rab',                                        'ratio'),
+('solvency_ratio',      'covenant_regulated', 'Solvency Ratio',                   8, TRUE, 'total_assets / total_liabilities',                        'ratio')
+ON CONFLICT (line_key) DO NOTHING;
+
+-- Social Infrastructure / PPP Ratios
+INSERT INTO line_item_definitions (line_key, section, display_label, row_order, is_computed, computation_formula, unit) VALUES
+('annual_dscr_lockup',       'covenant_social', 'Annual DSCR (Lock-Up)',         1, TRUE, 'annual_cfads / ds (with lock-up tier)', 'ratio'),
+('lifecycle_reserve_cover',  'covenant_social', 'Lifecycle Reserve Cover',       2, TRUE, 'lifecycle_reserve / next_5yr_costs',    'ratio'),
+('mra_cover',                'covenant_social', 'Maintenance Reserve Cover',     3, TRUE, 'mra_balance / required_mra',            'ratio')
+ON CONFLICT (line_key) DO NOTHING;
+
+-- Supplementary P&L Items (non-cash)
+INSERT INTO line_item_definitions (line_key, section, display_label, row_order, is_computed, computation_formula, unit) VALUES
+('ebitda_margin',             'pnl', 'EBITDA Margin (%)',          1, TRUE,  'ebitda / total_revenue',                   'percentage'),
+('depreciation',              'pnl', 'Depreciation',               2, FALSE, NULL,                                       'currency'),
+('regulatory_depreciation',   'pnl', 'Regulatory Depreciation',    3, FALSE, NULL,                                       'currency'),
+('ebit',                      'pnl', 'EBIT',                       4, TRUE,  'ebitda - depreciation',                    'currency')
+ON CONFLICT (line_key) DO NOTHING;
+
+-- Sector subcategory slots — Revenue (up to 8)
+INSERT INTO line_item_definitions (line_key, section, display_label, row_order, is_generic, parent_line_key, unit) VALUES
+('revenue_1', 'operating_cashflow', 'Revenue Line 1', 101, FALSE, 'total_revenue', 'currency'),
+('revenue_2', 'operating_cashflow', 'Revenue Line 2', 102, FALSE, 'total_revenue', 'currency'),
+('revenue_3', 'operating_cashflow', 'Revenue Line 3', 103, FALSE, 'total_revenue', 'currency'),
+('revenue_4', 'operating_cashflow', 'Revenue Line 4', 104, FALSE, 'total_revenue', 'currency'),
+('revenue_5', 'operating_cashflow', 'Revenue Line 5', 105, FALSE, 'total_revenue', 'currency'),
+('revenue_6', 'operating_cashflow', 'Revenue Line 6', 106, FALSE, 'total_revenue', 'currency'),
+('revenue_7', 'operating_cashflow', 'Revenue Line 7', 107, FALSE, 'total_revenue', 'currency'),
+('revenue_8', 'operating_cashflow', 'Revenue Line 8', 108, FALSE, 'total_revenue', 'currency')
+ON CONFLICT (line_key) DO NOTHING;
+
+-- Sector subcategory slots — Operating Costs (up to 12)
+INSERT INTO line_item_definitions (line_key, section, display_label, row_order, is_generic, parent_line_key, unit) VALUES
+('cost_1',  'operating_cashflow', 'Cost Line 1',  201, FALSE, 'total_operating_costs', 'currency'),
+('cost_2',  'operating_cashflow', 'Cost Line 2',  202, FALSE, 'total_operating_costs', 'currency'),
+('cost_3',  'operating_cashflow', 'Cost Line 3',  203, FALSE, 'total_operating_costs', 'currency'),
+('cost_4',  'operating_cashflow', 'Cost Line 4',  204, FALSE, 'total_operating_costs', 'currency'),
+('cost_5',  'operating_cashflow', 'Cost Line 5',  205, FALSE, 'total_operating_costs', 'currency'),
+('cost_6',  'operating_cashflow', 'Cost Line 6',  206, FALSE, 'total_operating_costs', 'currency'),
+('cost_7',  'operating_cashflow', 'Cost Line 7',  207, FALSE, 'total_operating_costs', 'currency'),
+('cost_8',  'operating_cashflow', 'Cost Line 8',  208, FALSE, 'total_operating_costs', 'currency'),
+('cost_9',  'operating_cashflow', 'Cost Line 9',  209, FALSE, 'total_operating_costs', 'currency'),
+('cost_10', 'operating_cashflow', 'Cost Line 10', 210, FALSE, 'total_operating_costs', 'currency'),
+('cost_11', 'operating_cashflow', 'Cost Line 11', 211, FALSE, 'total_operating_costs', 'currency'),
+('cost_12', 'operating_cashflow', 'Cost Line 12', 212, FALSE, 'total_operating_costs', 'currency')
+ON CONFLICT (line_key) DO NOTHING;
+
+-- Sector subcategory slots — Capex (up to 5)
+INSERT INTO line_item_definitions (line_key, section, display_label, row_order, is_generic, parent_line_key, unit) VALUES
+('capex_1', 'capex', 'Capex Line 1', 101, FALSE, 'capital_expenditure', 'currency'),
+('capex_2', 'capex', 'Capex Line 2', 102, FALSE, 'capital_expenditure', 'currency'),
+('capex_3', 'capex', 'Capex Line 3', 103, FALSE, 'capital_expenditure', 'currency'),
+('capex_4', 'capex', 'Capex Line 4', 104, FALSE, 'capital_expenditure', 'currency'),
+('capex_5', 'capex', 'Capex Line 5', 105, FALSE, 'capital_expenditure', 'currency')
+ON CONFLICT (line_key) DO NOTHING;
+
+-- Sector subcategory slots — Funding (up to 4)
+INSERT INTO line_item_definitions (line_key, section, display_label, row_order, is_generic, parent_line_key, unit) VALUES
+('funding_1', 'funding', 'Funding Line 1', 101, FALSE, 'total_funding', 'currency'),
+('funding_2', 'funding', 'Funding Line 2', 102, FALSE, 'total_funding', 'currency'),
+('funding_3', 'funding', 'Funding Line 3', 103, FALSE, 'total_funding', 'currency'),
+('funding_4', 'funding', 'Funding Line 4', 104, FALSE, 'total_funding', 'currency')
+ON CONFLICT (line_key) DO NOTHING;
+
+-- Sector subcategory slots — Debt Service (up to 5)
+INSERT INTO line_item_definitions (line_key, section, display_label, row_order, is_generic, parent_line_key, unit) VALUES
+('ds_1', 'senior_ds', 'Debt Service Line 1', 101, FALSE, 'senior_debt_service', 'currency'),
+('ds_2', 'senior_ds', 'Debt Service Line 2', 102, FALSE, 'senior_debt_service', 'currency'),
+('ds_3', 'senior_ds', 'Debt Service Line 3', 103, FALSE, 'senior_debt_service', 'currency'),
+('ds_4', 'senior_ds', 'Debt Service Line 4', 104, FALSE, 'senior_debt_service', 'currency'),
+('ds_5', 'senior_ds', 'Debt Service Line 5', 105, FALSE, 'senior_debt_service', 'currency')
+ON CONFLICT (line_key) DO NOTHING;
+
+-- Sector subcategory slots — Equity (up to 4)
+INSERT INTO line_item_definitions (line_key, section, display_label, row_order, is_generic, parent_line_key, unit) VALUES
+('equity_1', 'net_cashflow', 'Equity Line 1', 101, FALSE, 'distributions', 'currency'),
+('equity_2', 'net_cashflow', 'Equity Line 2', 102, FALSE, 'distributions', 'currency'),
+('equity_3', 'net_cashflow', 'Equity Line 3', 103, FALSE, 'distributions', 'currency'),
+('equity_4', 'net_cashflow', 'Equity Line 4', 104, FALSE, 'distributions', 'currency')
+ON CONFLICT (line_key) DO NOTHING;
+
+-- Sector subcategory slots — Sector KPIs (up to 10)
+INSERT INTO line_item_definitions (line_key, section, display_label, row_order, is_generic, unit) VALUES
+('sector_kpi_1',  'sector_kpi', 'Sector KPI 1',  1, FALSE, 'count'),
+('sector_kpi_2',  'sector_kpi', 'Sector KPI 2',  2, FALSE, 'count'),
+('sector_kpi_3',  'sector_kpi', 'Sector KPI 3',  3, FALSE, 'count'),
+('sector_kpi_4',  'sector_kpi', 'Sector KPI 4',  4, FALSE, 'count'),
+('sector_kpi_5',  'sector_kpi', 'Sector KPI 5',  5, FALSE, 'count'),
+('sector_kpi_6',  'sector_kpi', 'Sector KPI 6',  6, FALSE, 'count'),
+('sector_kpi_7',  'sector_kpi', 'Sector KPI 7',  7, FALSE, 'count'),
+('sector_kpi_8',  'sector_kpi', 'Sector KPI 8',  8, FALSE, 'count'),
+('sector_kpi_9',  'sector_kpi', 'Sector KPI 9',  9, FALSE, 'count'),
+('sector_kpi_10', 'sector_kpi', 'Sector KPI 10', 10, FALSE, 'count')
+ON CONFLICT (line_key) DO NOTHING;
+
+-- Sector subcategory slots — Class Ratios (up to 4)
+INSERT INTO line_item_definitions (line_key, section, display_label, row_order, is_generic, unit) VALUES
+('class_ratio_1', 'covenant_core', 'Class Ratio 1', 101, FALSE, 'ratio'),
+('class_ratio_2', 'covenant_core', 'Class Ratio 2', 102, FALSE, 'ratio'),
+('class_ratio_3', 'covenant_core', 'Class Ratio 3', 103, FALSE, 'ratio'),
+('class_ratio_4', 'covenant_core', 'Class Ratio 4', 104, FALSE, 'ratio')
+ON CONFLICT (line_key) DO NOTHING;
+
+-- Sector subcategory slots — RAB / Leverage (up to 4)
+INSERT INTO line_item_definitions (line_key, section, display_label, row_order, is_generic, unit) VALUES
+('rab_leverage_1', 'covenant_regulated', 'RAB / Leverage 1', 101, FALSE, 'ratio'),
+('rab_leverage_2', 'covenant_regulated', 'RAB / Leverage 2', 102, FALSE, 'ratio'),
+('rab_leverage_3', 'covenant_regulated', 'RAB / Leverage 3', 103, FALSE, 'ratio'),
+('rab_leverage_4', 'covenant_regulated', 'RAB / Leverage 4', 104, FALSE, 'ratio')
+ON CONFLICT (line_key) DO NOTHING;
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- SEED: Deal reporting schedules for demo deals (all quarterly, fiscal year Dec)
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+INSERT INTO deal_reporting_schedule (deal_id, periodicity, first_period_start, final_period_end, fiscal_year_end_month, reporting_lag_days) VALUES
+(1, 'quarterly', '2023-04-01', '2033-03-15', 12, 45),  -- Aurora Prime
+(2, 'quarterly', '2022-07-01', '2032-06-30', 12, 45),  -- Granite Switchyard
+(3, 'quarterly', '2021-01-01', '2031-12-31', 12, 45),  -- Meridian Edge
+(4, 'quarterly', '2022-10-01', '2032-09-30', 12, 45),  -- Ion Harbor
+(5, 'quarterly', '2021-07-01', '2031-06-30', 12, 45),  -- Summit Loop
+(6, 'quarterly', '2023-01-01', '2033-12-31', 12, 45),  -- Cobalt Grid
+(7, 'quarterly', '2024-01-01', '2034-12-31', 12, 45)   -- Apollo Edge
+ON CONFLICT (deal_id) DO NOTHING;
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- SEED: Reporting periods for demo deals (last 4 quarters + current)
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+-- Aurora Prime — 5 most recent quarters
+INSERT INTO deal_reporting_periods (deal_id, period_flag, period_label, period_start, period_end, period_frequency, period_ordinal, report_expected_by, data_status) VALUES
+(1, '2025Q3', 'Q3 2025', '2025-07-01', '2025-09-30', 'quarterly', 10, '2025-11-14', 'approved'),
+(1, '2025Q4', 'Q4 2025', '2025-10-01', '2025-12-31', 'quarterly', 11, '2026-02-14', 'approved'),
+(1, '2026Q1', 'Q1 2026', '2026-01-01', '2026-03-31', 'quarterly', 12, '2026-05-15', 'approved'),
+(1, '2026Q2', 'Q2 2026', '2026-04-01', '2026-06-30', 'quarterly', 13, '2026-08-14', 'approved'),
+(1, '2026Q3', 'Q3 2026', '2026-07-01', '2026-09-30', 'quarterly', 14, '2026-11-14', 'awaiting')
+ON CONFLICT (deal_id, period_flag) DO NOTHING;
+
+-- Granite Switchyard — 5 most recent quarters
+INSERT INTO deal_reporting_periods (deal_id, period_flag, period_label, period_start, period_end, period_frequency, period_ordinal, report_expected_by, data_status) VALUES
+(2, '2025Q3', 'Q3 2025', '2025-07-01', '2025-09-30', 'quarterly', 13, '2025-11-14', 'approved'),
+(2, '2025Q4', 'Q4 2025', '2025-10-01', '2025-12-31', 'quarterly', 14, '2026-02-14', 'approved'),
+(2, '2026Q1', 'Q1 2026', '2026-01-01', '2026-03-31', 'quarterly', 15, '2026-05-15', 'approved'),
+(2, '2026Q2', 'Q2 2026', '2026-04-01', '2026-06-30', 'quarterly', 16, '2026-08-14', 'approved'),
+(2, '2026Q3', 'Q3 2026', '2026-07-01', '2026-09-30', 'quarterly', 17, '2026-11-14', 'awaiting')
+ON CONFLICT (deal_id, period_flag) DO NOTHING;
+
+-- Meridian Edge — 5 most recent quarters
+INSERT INTO deal_reporting_periods (deal_id, period_flag, period_label, period_start, period_end, period_frequency, period_ordinal, report_expected_by, data_status) VALUES
+(3, '2025Q3', 'Q3 2025', '2025-07-01', '2025-09-30', 'quarterly', 19, '2025-11-14', 'approved'),
+(3, '2025Q4', 'Q4 2025', '2025-10-01', '2025-12-31', 'quarterly', 20, '2026-02-14', 'approved'),
+(3, '2026Q1', 'Q1 2026', '2026-01-01', '2026-03-31', 'quarterly', 21, '2026-05-15', 'approved'),
+(3, '2026Q2', 'Q2 2026', '2026-04-01', '2026-06-30', 'quarterly', 22, '2026-08-14', 'approved'),
+(3, '2026Q3', 'Q3 2026', '2026-07-01', '2026-09-30', 'quarterly', 23, '2026-11-14', 'awaiting')
+ON CONFLICT (deal_id, period_flag) DO NOTHING;
+
+-- Ion Harbor — 5 most recent quarters
+INSERT INTO deal_reporting_periods (deal_id, period_flag, period_label, period_start, period_end, period_frequency, period_ordinal, report_expected_by, data_status) VALUES
+(4, '2025Q3', 'Q3 2025', '2025-07-01', '2025-09-30', 'quarterly', 12, '2025-11-14', 'approved'),
+(4, '2025Q4', 'Q4 2025', '2025-10-01', '2025-12-31', 'quarterly', 13, '2026-02-14', 'approved'),
+(4, '2026Q1', 'Q1 2026', '2026-01-01', '2026-03-31', 'quarterly', 14, '2026-05-15', 'approved'),
+(4, '2026Q2', 'Q2 2026', '2026-04-01', '2026-06-30', 'quarterly', 15, '2026-08-14', 'approved'),
+(4, '2026Q3', 'Q3 2026', '2026-07-01', '2026-09-30', 'quarterly', 16, '2026-11-14', 'awaiting')
+ON CONFLICT (deal_id, period_flag) DO NOTHING;
+
+-- Summit Loop — 5 most recent quarters
+INSERT INTO deal_reporting_periods (deal_id, period_flag, period_label, period_start, period_end, period_frequency, period_ordinal, report_expected_by, data_status) VALUES
+(5, '2025Q3', 'Q3 2025', '2025-07-01', '2025-09-30', 'quarterly', 17, '2025-11-14', 'approved'),
+(5, '2025Q4', 'Q4 2025', '2025-10-01', '2025-12-31', 'quarterly', 18, '2026-02-14', 'approved'),
+(5, '2026Q1', 'Q1 2026', '2026-01-01', '2026-03-31', 'quarterly', 19, '2026-05-15', 'approved'),
+(5, '2026Q2', 'Q2 2026', '2026-04-01', '2026-06-30', 'quarterly', 20, '2026-08-14', 'approved'),
+(5, '2026Q3', 'Q3 2026', '2026-07-01', '2026-09-30', 'quarterly', 21, '2026-11-14', 'awaiting')
+ON CONFLICT (deal_id, period_flag) DO NOTHING;
+
+-- Cobalt Grid — 5 most recent quarters
+INSERT INTO deal_reporting_periods (deal_id, period_flag, period_label, period_start, period_end, period_frequency, period_ordinal, report_expected_by, data_status) VALUES
+(6, '2025Q3', 'Q3 2025', '2025-07-01', '2025-09-30', 'quarterly', 11, '2025-11-14', 'approved'),
+(6, '2025Q4', 'Q4 2025', '2025-10-01', '2025-12-31', 'quarterly', 12, '2026-02-14', 'approved'),
+(6, '2026Q1', 'Q1 2026', '2026-01-01', '2026-03-31', 'quarterly', 13, '2026-05-15', 'approved'),
+(6, '2026Q2', 'Q2 2026', '2026-04-01', '2026-06-30', 'quarterly', 14, '2026-08-14', 'approved'),
+(6, '2026Q3', 'Q3 2026', '2026-07-01', '2026-09-30', 'quarterly', 15, '2026-11-14', 'awaiting')
+ON CONFLICT (deal_id, period_flag) DO NOTHING;
+
+-- Apollo Edge — 5 most recent quarters
+INSERT INTO deal_reporting_periods (deal_id, period_flag, period_label, period_start, period_end, period_frequency, period_ordinal, report_expected_by, data_status) VALUES
+(7, '2025Q3', 'Q3 2025', '2025-07-01', '2025-09-30', 'quarterly', 7, '2025-11-14', 'approved'),
+(7, '2025Q4', 'Q4 2025', '2025-10-01', '2025-12-31', 'quarterly', 8, '2026-02-14', 'approved'),
+(7, '2026Q1', 'Q1 2026', '2026-01-01', '2026-03-31', 'quarterly', 9, '2026-05-15', 'approved'),
+(7, '2026Q2', 'Q2 2026', '2026-04-01', '2026-06-30', 'quarterly', 10, '2026-08-14', 'approved'),
+(7, '2026Q3', 'Q3 2026', '2026-07-01', '2026-09-30', 'quarterly', 11, '2026-11-14', 'awaiting')
+ON CONFLICT (deal_id, period_flag) DO NOTHING;
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- SEED: Deal line item labels for Aurora Prime (deal_id = 1)
+-- Materialised from deal_financial_template revenue/cost/capex/kpi arrays
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+INSERT INTO deal_line_item_labels (deal_id, line_key, display_label, ordinal) VALUES
+-- Revenue (8 lines)
+(1, 'revenue_1', 'GPU/Compute Revenue',      1),
+(1, 'revenue_2', 'Colocation Revenue',        2),
+(1, 'revenue_3', 'Power Recharge',            3),
+(1, 'revenue_4', 'Connectivity Revenue',      4),
+(1, 'revenue_5', 'Managed Services',          5),
+(1, 'revenue_6', 'Storage Revenue',           6),
+(1, 'revenue_7', 'Edge Services',             7),
+(1, 'revenue_8', 'Other Revenue',             8),
+-- Operating Costs (12 lines)
+(1, 'cost_1',  'Power Cost',                              1),
+(1, 'cost_2',  'Cooling Cost',                            2),
+(1, 'cost_3',  'Network/Connectivity',                    3),
+(1, 'cost_4',  'Managed Infrastructure Platform (MIP)',   4),
+(1, 'cost_5',  'Facilities Management',                   5),
+(1, 'cost_6',  'Security & Access',                       6),
+(1, 'cost_7',  'Insurance',                               7),
+(1, 'cost_8',  'Land Lease / Rent',                       8),
+(1, 'cost_9',  'Management Fee',                          9),
+(1, 'cost_10', 'Marketing & Sales',                       10),
+(1, 'cost_11', 'General & Admin',                         11),
+(1, 'cost_12', 'Other Opex',                              12),
+-- Capex (5 lines)
+(1, 'capex_1', 'IT Infrastructure',         1),
+(1, 'capex_2', 'Power & Cooling Plant',     2),
+(1, 'capex_3', 'Building & Civil Works',    3),
+(1, 'capex_4', 'Network Equipment',         4),
+(1, 'capex_5', 'Other Capex',              5),
+-- Sector KPIs (10 lines)
+(1, 'sector_kpi_1',  'Contracted Capacity (MW)',            1),
+(1, 'sector_kpi_2',  'Leased Capacity (%)',                 2),
+(1, 'sector_kpi_3',  'PUE (Power Usage Effectiveness)',     3),
+(1, 'sector_kpi_4',  'Weighted Average Lease Term (yrs)',   4),
+(1, 'sector_kpi_5',  'Blended $/kW/month',                 5),
+(1, 'sector_kpi_6',  'GPU Utilisation (%)',                 6),
+(1, 'sector_kpi_7',  'Customer Concentration (top 3 %)',    7),
+(1, 'sector_kpi_8',  'Availability (% uptime)',             8),
+(1, 'sector_kpi_9',  'Carbon Intensity (tCO2e/MW)',         9),
+(1, 'sector_kpi_10', 'Capex per MW Installed',              10)
+ON CONFLICT (deal_id, line_key) DO NOTHING;
 
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- SEED DATA — Demo deal child records

@@ -6,7 +6,9 @@ import {
   type DurationCode,
 } from "../../lib/revenue-risk-template";
 import { getRiskTemplate, type DealClassification } from "../../api/plumbing";
+import { fetchJson } from "../../api/http";
 import DataArchitecture from "./data-architecture";
+import FinancialTemplatePreview, { type TemplateRow } from "./financial-template-preview";
 
 const riskLevelTone: Record<string, string> = {
   very_low: "good",
@@ -66,6 +68,50 @@ export default async function PlumbingPage() {
     classificationError = true;
   }
 
+  // Financial template preview — fetch all templates
+  let templates: TemplateRow[] = [];
+  let templateError = false;
+  try {
+    const deals = await fetchJson<{ deals: { dealSlug: string; dealName: string }[] }>("/api/portfolio");
+    const slugs = (deals.deals ?? []).map((d: { dealSlug: string }) => d.dealSlug);
+    for (const slug of slugs) {
+      try {
+        const resp = await fetchJson<{ dealSlug: string; template: Record<string, unknown> | null }>(
+          `/api/deals/${slug}/financial-template`
+        );
+        if (resp.template) {
+          const t = resp.template;
+          const categoryMap: [string, string][] = [
+            ["revenue_line_labels", "Revenue"],
+            ["cost_line_labels", "Operating Costs"],
+            ["capex_line_labels", "Capital Expenditure"],
+            ["funding_line_labels", "Funding / Debt"],
+            ["ds_line_labels", "Debt Service"],
+            ["equity_line_labels", "Equity Returns"],
+            ["sector_kpi_labels", "Sector KPIs"],
+            ["class_ratio_labels", "Class Ratios"],
+            ["rab_leverage_labels", "RAB / Leverage"],
+          ];
+          const categories = categoryMap
+            .map(([key, label]) => ({ key, label, lines: (t[key] as string[]) || [] }))
+            .filter((c) => c.lines.length > 0);
+          const totalLines = categories.reduce((sum, c) => sum + c.lines.length, 0);
+          templates.push({
+            dealSlug: slug,
+            dealName: (deals.deals ?? []).find((d: { dealSlug: string }) => d.dealSlug === slug)?.dealName ?? slug,
+            sectorTemplate: (t.sector_template as string) ?? "custom",
+            categories,
+            totalLines,
+          });
+        }
+      } catch {
+        // Skip deals without templates
+      }
+    }
+  } catch {
+    templateError = true;
+  }
+
   return (
     <main className="shell">
       <section className="hero">
@@ -85,6 +131,27 @@ export default async function PlumbingPage() {
           <h2 className="panel-title">Data architecture</h2>
         </header>
         <DataArchitecture />
+      </section>
+
+      {/* Financial Template Preview */}
+      <section className="panel section-panel">
+        <header className="panel-heading">
+          <p className="panel-eyebrow">Financial Model</p>
+          <h2 className="panel-title">Financial template preview</h2>
+        </header>
+        {templateError ? (
+          <article className="topsheet-note topsheet-note-info">
+            <strong>Backend unavailable</strong>
+            <p>Financial templates will appear here once the server is running.</p>
+          </article>
+        ) : templates.length === 0 ? (
+          <article className="topsheet-note topsheet-note-info">
+            <strong>No templates configured</strong>
+            <p>No deals have a financial template configured yet. Templates define the revenue, cost, capex, and KPI line items that will be recorded for each reporting period.</p>
+          </article>
+        ) : (
+          <FinancialTemplatePreview templates={templates} />
+        )}
       </section>
 
       {/* Portfolio classifications */}
