@@ -15,6 +15,11 @@ type Deal = {
   exposure: number;
   reportedDscr: number | null;
   covenantStatus: string;
+  performanceScore: number | null;
+  headroomPct: number | null;
+  pendingReviews: number;
+  overdueObligations: number;
+  openRequests: number;
   organisations: string[];
   owners: string[];
 };
@@ -47,13 +52,20 @@ function tierTone(status: string) {
   return "good";
 }
 
+function scoreTone(score: number | null) {
+  if (score == null) return "neutral";
+  if (score >= 80) return "good";
+  if (score >= 60) return "warning";
+  return "critical";
+}
+
 function fmt(n: number) {
   return new Intl.NumberFormat("en-US", {
     style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 0,
   }).format(n);
 }
 
-/* ── Select style (shared) ───────────────────────────────────────────── */
+/* ── Shared styles ───────────────────────────────────────────────────── */
 
 const sel: React.CSSProperties = {
   padding: "0.58rem 0.7rem",
@@ -62,6 +74,25 @@ const sel: React.CSSProperties = {
   background: "var(--panel-strong)",
   color: "var(--ink)",
   fontSize: "0.82rem",
+};
+
+const th: React.CSSProperties = {
+  padding: "10px 12px",
+  textAlign: "left",
+  fontWeight: 700,
+  fontSize: "0.76rem",
+  textTransform: "uppercase",
+  letterSpacing: "0.1em",
+  color: "var(--accent)",
+  borderBottom: "2px solid var(--line)",
+  whiteSpace: "nowrap",
+};
+
+const td: React.CSSProperties = {
+  padding: "12px 12px",
+  fontSize: "0.86rem",
+  borderBottom: "1px solid var(--line)",
+  verticalAlign: "middle",
 };
 
 /* ── Component ───────────────────────────────────────────────────────── */
@@ -164,37 +195,117 @@ export default function JpsFilterGrid({
         </span>
       </div>
 
-      {/* ── Deal grid ───────────────────────────────────────────────── */}
+      {/* ── Deal table ──────────────────────────────────────────────── */}
       {filtered.length === 0 ? (
         <article className="topsheet-note topsheet-note-info">
           <strong>No deals match</strong>
           <p>Try adjusting your filters or clearing them to see all deals.</p>
         </article>
       ) : (
-        <div className="jps-deal-grid">
-          {filtered.map((deal) => (
-            <Link key={deal.dealSlug} href={`/jps/${deal.dealSlug}`} className="jps-deal-card">
-              <div className="jps-deal-card-header">
-                <strong className="jps-deal-name">{deal.dealName}</strong>
-                <span className={`badge ${gradeTone(deal.grade)}`}>{deal.grade}</span>
-              </div>
-              <p className="jps-deal-borrower">{deal.borrower}</p>
-              <dl className="jps-deal-meta">
-                <div><dt>Sector</dt><dd>{deal.sector}</dd></div>
-                <div><dt>Exposure</dt><dd>{fmt(deal.exposure)}</dd></div>
-                <div><dt>DSCR</dt><dd>{deal.reportedDscr != null ? `${deal.reportedDscr.toFixed(2)}x` : "—"}</dd></div>
-                <div>
-                  <dt>Covenant</dt>
-                  <dd><span className={`badge ${tierTone(deal.covenantStatus)} badge-sm`}>{deal.covenantStatus.replace(/_/g, " ")}</span></dd>
-                </div>
-                <div>
-                  <dt>Watchlist</dt>
-                  <dd>{deal.watchlist ? <span className="badge warning badge-sm">On watchlist</span> : <span className="badge good badge-sm">Standard</span>}</dd>
-                </div>
-              </dl>
-              <p className="jps-deal-cta">View analytics →</p>
-            </Link>
-          ))}
+        <div style={{ overflowX: "auto", borderRadius: 16, border: "1px solid var(--line)" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ background: "var(--accent-soft)" }}>
+                <th style={th}>Deal</th>
+                <th style={th}>Sector</th>
+                <th style={{ ...th, textAlign: "right" }}>Exposure</th>
+                <th style={{ ...th, textAlign: "center" }}>Credit Score</th>
+                <th style={{ ...th, textAlign: "center" }}>Grade</th>
+                <th style={{ ...th, textAlign: "center" }}>Covenant</th>
+                <th style={{ ...th, textAlign: "right" }}>DSCR</th>
+                <th style={{ ...th, textAlign: "right" }}>Headroom</th>
+                <th style={{ ...th, textAlign: "center" }}>To-do&apos;s</th>
+                <th style={{ ...th, textAlign: "center" }}>Watchlist</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((deal) => {
+                const todos = (deal.pendingReviews ?? 0) + (deal.overdueObligations ?? 0) + (deal.openRequests ?? 0);
+                return (
+                  <tr
+                    key={deal.dealSlug}
+                    style={{ cursor: "pointer" }}
+                    onClick={() => { window.location.href = `/jps/${deal.dealSlug}`; }}
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLTableRowElement).style.background = "var(--accent-soft)"; }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLTableRowElement).style.background = ""; }}
+                  >
+                    {/* Deal name */}
+                    <td style={td}>
+                      <Link href={`/jps/${deal.dealSlug}`} style={{ color: "var(--ink)", textDecoration: "none" }}>
+                        <strong style={{ display: "block", fontSize: "0.88rem" }}>{deal.dealName}</strong>
+                        <span style={{ fontSize: "0.78rem", color: "var(--ink-soft)" }}>{deal.borrower}</span>
+                      </Link>
+                    </td>
+
+                    {/* Sector */}
+                    <td style={{ ...td, fontSize: "0.84rem", color: "var(--ink-soft)" }}>
+                      {deal.sector}
+                    </td>
+
+                    {/* Exposure */}
+                    <td style={{ ...td, textAlign: "right", fontWeight: 600 }}>
+                      {fmt(deal.exposure)}
+                    </td>
+
+                    {/* Credit score */}
+                    <td style={{ ...td, textAlign: "center" }}>
+                      {deal.performanceScore != null ? (
+                        <span className={`badge ${scoreTone(deal.performanceScore)} badge-sm`}>
+                          {deal.performanceScore}
+                        </span>
+                      ) : (
+                        <span style={{ color: "var(--ink-soft)" }}>—</span>
+                      )}
+                    </td>
+
+                    {/* Performance grade */}
+                    <td style={{ ...td, textAlign: "center" }}>
+                      <span className={`badge ${gradeTone(deal.grade)} badge-sm`}>
+                        {deal.grade}
+                      </span>
+                    </td>
+
+                    {/* Covenant performance */}
+                    <td style={{ ...td, textAlign: "center" }}>
+                      <span className={`badge ${tierTone(deal.covenantStatus)} badge-sm`}>
+                        {deal.covenantStatus.replace(/_/g, " ")}
+                      </span>
+                    </td>
+
+                    {/* DSCR */}
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 600 }}>
+                      {deal.reportedDscr != null ? `${deal.reportedDscr.toFixed(2)}x` : "—"}
+                    </td>
+
+                    {/* Headroom (collateral ratio proxy) */}
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>
+                      {deal.headroomPct != null ? `${deal.headroomPct.toFixed(1)}%` : "—"}
+                    </td>
+
+                    {/* To-do's outstanding */}
+                    <td style={{ ...td, textAlign: "center" }}>
+                      {todos > 0 ? (
+                        <span className={`badge ${todos >= 5 ? "critical" : todos >= 2 ? "warning" : "neutral"} badge-sm`}>
+                          {todos}
+                        </span>
+                      ) : (
+                        <span className="badge good badge-sm">0</span>
+                      )}
+                    </td>
+
+                    {/* Watchlist */}
+                    <td style={{ ...td, textAlign: "center" }}>
+                      {deal.watchlist ? (
+                        <span className="badge warning badge-sm">Yes</span>
+                      ) : (
+                        <span style={{ color: "var(--ink-soft)", fontSize: "0.82rem" }}>—</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
     </>
