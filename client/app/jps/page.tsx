@@ -34,11 +34,6 @@ export default async function JpsPage() {
       </section>
 
       <section className="panel section-panel">
-        <header className="panel-heading">
-          <p className="panel-eyebrow">Deals</p>
-          <h2 className="panel-title">Select a deal</h2>
-        </header>
-
         {loadError ? (
           <article className="topsheet-note topsheet-note-info">
             <strong>Backend unavailable</strong>

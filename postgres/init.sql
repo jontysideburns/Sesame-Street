@@ -3253,7 +3253,25 @@ ON CONFLICT (deal_id, line_key) DO NOTHING;
 INSERT INTO capital_structure_instruments (deal_id, instrument_name, instrument_type, waterfall_priority, enforcement_class, committed_amount, drawn_amount, currency, start_date, maturity_date, interest_type, base_rate, margin_bps, repayment_type, our_holding, our_holding_pct, dsra_months, status) VALUES
 (1, 'Senior Term Loan A', 'senior_term', 1, 'Senior', 180000000, 180000000, 'GBP', '2023-03-15', '2033-03-15', 'floating', 'SONIA', 225, 'sculpted', 45000000, 25.0, 6, 'active'),
 (1, 'Senior RCF', 'senior_rcf', 2, 'Senior', 20000000, 0, 'GBP', '2023-03-15', '2028-03-15', 'floating', 'SONIA', 200, 'bullet', 5000000, 25.0, NULL, 'active'),
-(1, 'Capex Facility', 'capex_facility', 3, 'Senior', 30000000, 15000000, 'GBP', '2023-03-15', '2031-03-15', 'floating', 'SONIA', 275, 'amortising', 7500000, 25.0, NULL, 'active')
+(1, 'Capex Facility', 'capex_facility', 3, 'Senior', 30000000, 15000000, 'GBP', '2023-03-15', '2031-03-15', 'floating', 'SONIA', 275, 'amortising', 7500000, 25.0, NULL, 'active'),
+-- Granite Switchyard (deal 2)
+(2, 'Senior Term Loan', 'senior_term', 1, 'Senior', 200000000, 195000000, 'USD', '2022-07-01', '2032-06-30', 'floating', 'SOFR', 200, 'sculpted', 52000000, 26.0, 6, 'active'),
+(2, 'Senior RCF', 'senior_rcf', 2, 'Senior', 15000000, 0, 'USD', '2022-07-01', '2027-06-30', 'floating', 'SOFR', 175, 'bullet', 3750000, 25.0, NULL, 'active'),
+-- Meridian Edge (deal 3)
+(3, 'Senior Term Loan', 'senior_term', 1, 'Senior', 250000000, 240000000, 'EUR', '2021-01-15', '2031-12-31', 'floating', 'Euribor 3m', 250, 'amortising', 64000000, 25.6, 6, 'active'),
+(3, 'Capex Facility', 'capex_facility', 2, 'Senior', 25000000, 12000000, 'EUR', '2021-01-15', '2029-12-31', 'floating', 'Euribor 3m', 300, 'amortising', 6250000, 25.0, NULL, 'active'),
+-- Ion Harbor (deal 4)
+(4, 'Senior Term Loan', 'senior_term', 1, 'Senior', 220000000, 210000000, 'USD', '2022-10-01', '2032-09-30', 'floating', 'SOFR', 275, 'sculpted', 47000000, 21.4, 6, 'active'),
+(4, 'Mezzanine Facility', 'mezzanine', 2, 'Junior', 40000000, 35000000, 'USD', '2022-10-01', '2033-09-30', 'floating', 'SOFR', 550, 'bullet', 10000000, 25.0, NULL, 'active'),
+-- Summit Loop (deal 5)
+(5, 'Senior Term Loan', 'senior_term', 1, 'Senior', 190000000, 185000000, 'USD', '2021-07-01', '2031-06-30', 'floating', 'SOFR', 190, 'sculpted', 36000000, 18.9, 6, 'active'),
+(5, 'Senior RCF', 'senior_rcf', 2, 'Senior', 15000000, 0, 'USD', '2021-07-01', '2026-06-30', 'floating', 'SOFR', 165, 'bullet', 3750000, 25.0, NULL, 'active'),
+-- Cobalt Grid (deal 6)
+(6, 'Senior Term Loan A', 'senior_term', 1, 'Senior', 270000000, 260000000, 'USD', '2023-01-15', '2033-12-31', 'floating', 'SOFR', 235, 'sculpted', 73000000, 27.0, 6, 'active'),
+(6, 'Capex Facility', 'capex_facility', 2, 'Senior', 40000000, 20000000, 'USD', '2023-01-15', '2031-12-31', 'floating', 'SOFR', 285, 'amortising', 10000000, 25.0, NULL, 'active'),
+-- Apollo Edge (deal 7)
+(7, 'Senior Term Loan', 'senior_term', 1, 'Senior', 175000000, 170000000, 'USD', '2024-01-15', '2034-12-31', 'floating', 'SOFR', 210, 'sculpted', 42000000, 24.0, 6, 'active'),
+(7, 'Senior RCF', 'senior_rcf', 2, 'Senior', 12000000, 0, 'USD', '2024-01-15', '2029-12-31', 'floating', 'SOFR', 185, 'bullet', 3000000, 25.0, NULL, 'active')
 ON CONFLICT DO NOTHING;
 
 -- Enforcement classes for Aurora Prime

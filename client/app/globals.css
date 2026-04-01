@@ -3626,3 +3626,49 @@ blockquote {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* ── JPS Portfolio Summary Grid ─────────────────────────────────── */
+
+.jps-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 10px;
+}
+
+.jps-summary-kpi     { grid-column: span 2; }
+.jps-chart-panel     { grid-column: span 6; }
+.jps-attention-panel { grid-column: span 4; }
+
+@media (max-width: 1100px) {
+  .jps-chart-panel     { grid-column: span 12; }
+  .jps-attention-panel { grid-column: span 12; }
+  .jps-summary-kpi     { grid-column: span 4; }
+}
+
+@media (max-width: 700px) {
+  .jps-summary-kpi { grid-column: span 6; }
+}
+
+/* ── Print — A4 Landscape ───────────────────────────────────────── */
+
+@media print {
+  @page { size: A4 landscape; margin: 12mm; }
+
+  .sidebar, .hero, nav, header { display: none !important; }
+
+  .jps-summary-grid {
+    break-inside: avoid;
+    gap: 8px;
+  }
+
+  .jps-chart-panel .recharts-responsive-container {
+    height: 160px !important;
+  }
+
+  .panel, .metric-card, .jps-summary-kpi,
+  .jps-chart-panel, .jps-attention-panel {
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+    border: 1px solid #ccc !important;
+  }
+}

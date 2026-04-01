@@ -1,0 +1,420 @@
+"use client";
+
+import { useMemo } from "react";
+import Link from "next/link";
+import {
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
+  PieChart, Pie, Cell, Treemap, Legend,
+} from "recharts";
+import type { Deal } from "./jps-filter-grid";
+
+/* ── Colours ─────────────────────────────────────────────────────── */
+
+const C = {
+  good: "#2f8b72",
+  warning: "#c97f1f",
+  critical: "#d65454",
+  accent: "#1f6fa5",
+  neutral: "#45617a",
+  muted: "#8fa3b8",
+};
+
+const GRADE_COLORS: Record<string, string> = {
+  good: C.good,
+  neutral: C.accent,
+  warning: C.warning,
+  critical: C.critical,
+};
+
+function gradeTone(grade: string) {
+  if (grade.startsWith("1")) return "good";
+  if (grade.startsWith("2")) return "neutral";
+  if (grade.startsWith("3")) return "warning";
+  return "critical";
+}
+
+const TREND_COLORS: Record<string, string> = {
+  improving: C.good,
+  flat: C.accent,
+  new: C.neutral,
+  deteriorating: C.warning,
+  deteriorating_rapidly: C.critical,
+};
+
+const COVENANT_COLORS: Record<string, string> = {
+  performing: C.good,
+  distribution_lockup: C.warning,
+  trigger_event: C.critical,
+  event_of_default: "#a03030",
+};
+
+/* ── Formatters ──────────────────────────────────────────────────── */
+
+function fmtCompact(n: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 1,
+  }).format(n);
+}
+
+function fmtPct(n: number | null) {
+  if (n == null) return "\u2014";
+  return `${n.toFixed(1)}%`;
+}
+
+/* ── Custom Tooltip ──────────────────────────────────────────────── */
+
+function ChartTooltip({ active, payload, label }: { active?: boolean; payload?: { value: number; name: string; payload?: { fill?: string } }[]; label?: string }) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div style={{
+      background: "var(--panel-strong)", border: "1px solid var(--line)",
+      borderRadius: 12, padding: "8px 12px", fontSize: "0.82rem",
+      boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+    }}>
+      {label && <div style={{ fontWeight: 700, marginBottom: 4 }}>{label}</div>}
+      {payload.map((p, i) => (
+        <div key={i} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={{ width: 8, height: 8, borderRadius: "50%", background: p.payload?.fill ?? C.accent, display: "inline-block" }} />
+          <span>{p.name}: <strong>{typeof p.value === "number" ? fmtCompact(p.value) : p.value}</strong></span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ── Treemap Content ─────────────────────────────────────────────── */
+
+function TreemapContent(props: {
+  x: number; y: number; width: number; height: number;
+  name: string; value: number; fill: string;
+}) {
+  const { x, y, width, height, name, value, fill } = props;
+  if (width < 50 || height < 30) return null;
+  return (
+    <g>
+      <rect x={x} y={y} width={width} height={height} rx={6}
+        style={{ fill, stroke: "rgba(255,255,255,0.4)", strokeWidth: 1 }} />
+      <text x={x + width / 2} y={y + height / 2 - 7} textAnchor="middle"
+        style={{ fontSize: width < 80 ? 10 : 12, fill: "#fff", fontWeight: 700 }}>
+        {name}
+      </text>
+      <text x={x + width / 2} y={y + height / 2 + 10} textAnchor="middle"
+        style={{ fontSize: width < 80 ? 9 : 11, fill: "rgba(255,255,255,0.8)" }}>
+        {fmtCompact(value)}
+      </text>
+    </g>
+  );
+}
+
+/* ── Donut Centre Label ──────────────────────────────────────────── */
+
+function DonutCentreLabel({ viewBox, value }: { viewBox?: { cx: number; cy: number }; value: string }) {
+  if (!viewBox) return null;
+  return (
+    <text x={viewBox.cx} y={viewBox.cy} textAnchor="middle" dominantBaseline="central"
+      style={{ fontSize: 22, fontWeight: 800, fill: "var(--ink)" }}>
+      {value}
+    </text>
+  );
+}
+
+/* ── Main Component ──────────────────────────────────────────────── */
+
+export default function PortfolioSummary({ deals }: { deals: Deal[] }) {
+  const stats = useMemo(() => {
+    const totalExposure = deals.reduce((s, d) => s + d.exposure, 0);
+    const dealCount = deals.length;
+
+    // Weighted avg DSCR
+    let dscrNum = 0, dscrDen = 0;
+    for (const d of deals) {
+      if (d.reportedDscr != null) { dscrNum += d.exposure * d.reportedDscr; dscrDen += d.exposure; }
+    }
+    const weightedDscr = dscrDen > 0 ? dscrNum / dscrDen : null;
+
+    // Weighted avg headroom
+    let hdrNum = 0, hdrDen = 0;
+    for (const d of deals) {
+      if (d.headroomPct != null) { hdrNum += d.exposure * d.headroomPct; hdrDen += d.exposure; }
+    }
+    const avgHeadroom = hdrDen > 0 ? hdrNum / hdrDen : null;
+
+    // Weighted avg spread (exposure-weighted)
+    let spreadNum = 0, spreadDen = 0;
+    for (const d of deals) {
+      if (d.spreadBps != null) { spreadNum += d.exposure * d.spreadBps; spreadDen += d.exposure; }
+    }
+    const waSpread = spreadDen > 0 ? Math.round(spreadNum / spreadDen) : null;
+
+    const watchlistCount = deals.filter((d) => d.watchlist).length;
+    const overdueCount = deals.reduce((s, d) => s + (d.overdueObligations ?? 0), 0);
+
+    // Grade distribution
+    const gradeMap: Record<string, { grade: string; count: number; exposure: number }> = {};
+    for (const d of deals) {
+      if (!gradeMap[d.grade]) gradeMap[d.grade] = { grade: d.grade, count: 0, exposure: 0 };
+      gradeMap[d.grade].count++;
+      gradeMap[d.grade].exposure += d.exposure;
+    }
+    const gradeData = Object.values(gradeMap)
+      .sort((a, b) => a.grade.localeCompare(b.grade))
+      .map((g) => ({ ...g, fill: GRADE_COLORS[gradeTone(g.grade)] ?? C.neutral }));
+
+    // Sector concentration
+    const sectorMap: Record<string, { name: string; value: number; count: number }> = {};
+    for (const d of deals) {
+      if (!sectorMap[d.sector]) sectorMap[d.sector] = { name: d.sector, value: 0, count: 0 };
+      sectorMap[d.sector].value += d.exposure;
+      sectorMap[d.sector].count++;
+    }
+    const sectorData = Object.values(sectorMap)
+      .sort((a, b) => b.value - a.value)
+      .map((s, i) => ({ ...s, fill: `hsl(205, 55%, ${35 + i * 8}%)` }));
+
+    // Trend distribution
+    const trendMap: Record<string, { name: string; value: number }> = {};
+    for (const d of deals) {
+      const t = d.performanceTrend ?? "unknown";
+      if (!trendMap[t]) trendMap[t] = { name: t.replace(/_/g, " "), value: 0 };
+      trendMap[t].value++;
+    }
+    const trendData = Object.entries(trendMap).map(([key, val]) => ({
+      ...val,
+      fill: TREND_COLORS[key] ?? C.muted,
+    }));
+
+    // Covenant status
+    const covMap: Record<string, { name: string; value: number }> = {};
+    for (const d of deals) {
+      const s = d.covenantStatus;
+      if (!covMap[s]) covMap[s] = { name: s.replace(/_/g, " "), value: 0 };
+      covMap[s].value++;
+    }
+    const covenantData = Object.entries(covMap).map(([key, val]) => ({
+      ...val,
+      fill: COVENANT_COLORS[key] ?? C.muted,
+    }));
+
+    // Attention lists
+    const watchlistDeals = deals.filter((d) => d.watchlist).slice(0, 5);
+    const deterioratingDeals = deals
+      .filter((d) => d.performanceTrend === "deteriorating" || d.performanceTrend === "deteriorating_rapidly")
+      .slice(0, 5);
+    const breachedDeals = deals
+      .filter((d) => d.covenantStatus === "trigger_event" || d.covenantStatus === "event_of_default")
+      .slice(0, 5);
+
+    return {
+      totalExposure, dealCount, waSpread, weightedDscr, avgHeadroom,
+      watchlistCount, overdueCount,
+      gradeData, sectorData, trendData, covenantData,
+      watchlistDeals, deterioratingDeals, breachedDeals,
+      totalWatchlist: deals.filter((d) => d.watchlist).length,
+      totalDeteriorating: deals.filter((d) => d.performanceTrend === "deteriorating" || d.performanceTrend === "deteriorating_rapidly").length,
+      totalBreached: deals.filter((d) => d.covenantStatus === "trigger_event" || d.covenantStatus === "event_of_default").length,
+    };
+  }, [deals]);
+
+  if (deals.length === 0) return null;
+
+  return (
+    <div className="jps-summary-grid" style={{ marginBottom: 14 }}>
+
+      {/* ── Row 1: KPI Cards ───────────────────────────────────── */}
+      <KpiCard label="Exposure" value={fmtCompact(stats.totalExposure)} />
+      <KpiCard label="Deals" value={String(stats.dealCount)} />
+      <KpiCard
+        label="WA Spread"
+        value={stats.waSpread != null ? `${stats.waSpread}bp` : "\u2014"}
+      />
+      <KpiCard
+        label="Wtd DSCR"
+        value={stats.weightedDscr != null ? `${stats.weightedDscr.toFixed(2)}x` : "\u2014"}
+        tone={stats.weightedDscr != null ? (stats.weightedDscr < 1.0 ? "critical" : stats.weightedDscr < 1.2 ? "warning" : "good") : undefined}
+      />
+      <KpiCard
+        label="Headroom"
+        value={fmtPct(stats.avgHeadroom)}
+        tone={stats.avgHeadroom != null ? (stats.avgHeadroom < 5 ? "critical" : stats.avgHeadroom < 15 ? "warning" : "good") : undefined}
+      />
+      <KpiCard
+        label="Watchlist"
+        value={String(stats.watchlistCount)}
+        tone={stats.watchlistCount > 0 ? "warning" : "good"}
+      />
+
+      {/* ── Row 2: Grade Distribution + Sector Exposure ────────── */}
+      <div className="jps-chart-panel" style={{ borderRadius: 14, border: "1px solid var(--line)", background: "var(--panel)", padding: "10px 14px" }}>
+        <h3 style={{ fontSize: "0.72rem", fontWeight: 700, marginBottom: 6, color: "var(--ink-soft)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+          Grade Distribution
+        </h3>
+        <ResponsiveContainer width="100%" height={160}>
+          <BarChart data={stats.gradeData} margin={{ top: 4, right: 8, bottom: 4, left: 8 }}>
+            <XAxis dataKey="grade" tick={{ fontSize: 11 }} />
+            <YAxis tickFormatter={(v: number) => fmtCompact(v)} tick={{ fontSize: 10 }} width={50} />
+            <Tooltip content={<ChartTooltip />} />
+            <Bar dataKey="exposure" name="Exposure" radius={[6, 6, 0, 0]}>
+              {stats.gradeData.map((entry, i) => (
+                <Cell key={i} fill={entry.fill} />
+              ))}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+
+      <div className="jps-chart-panel" style={{ borderRadius: 14, border: "1px solid var(--line)", background: "var(--panel)", padding: "10px 14px" }}>
+        <h3 style={{ fontSize: "0.72rem", fontWeight: 700, marginBottom: 6, color: "var(--ink-soft)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+          Sector Exposure
+        </h3>
+        <ResponsiveContainer width="100%" height={160}>
+          <Treemap
+            data={stats.sectorData}
+            dataKey="value"
+            aspectRatio={4 / 3}
+            stroke="none"
+            content={<TreemapContent x={0} y={0} width={0} height={0} name="" value={0} fill="" />}
+          />
+        </ResponsiveContainer>
+      </div>
+
+      {/* ── Row 3: Trend Distribution + Covenant Status ─────────── */}
+      <div className="jps-chart-panel" style={{ borderRadius: 14, border: "1px solid var(--line)", background: "var(--panel)", padding: "10px 14px" }}>
+        <h3 style={{ fontSize: "0.72rem", fontWeight: 700, marginBottom: 6, color: "var(--ink-soft)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+          Performance Trend
+        </h3>
+        <ResponsiveContainer width="100%" height={160}>
+          <PieChart>
+            <Pie
+              data={stats.trendData}
+              dataKey="value"
+              nameKey="name"
+              cx="50%" cy="50%"
+              innerRadius={38} outerRadius={62}
+              paddingAngle={2}
+              label={false}
+            >
+              {stats.trendData.map((entry, i) => (
+                <Cell key={i} fill={entry.fill} />
+              ))}
+            </Pie>
+            <Tooltip />
+            <Legend wrapperStyle={{ fontSize: "0.68rem" }} iconSize={8} />
+          </PieChart>
+        </ResponsiveContainer>
+      </div>
+
+      <div className="jps-chart-panel" style={{ borderRadius: 14, border: "1px solid var(--line)", background: "var(--panel)", padding: "10px 14px" }}>
+        <h3 style={{ fontSize: "0.72rem", fontWeight: 700, marginBottom: 6, color: "var(--ink-soft)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+          Covenant Status
+        </h3>
+        <ResponsiveContainer width="100%" height={160}>
+          <PieChart>
+            <Pie
+              data={stats.covenantData}
+              dataKey="value"
+              nameKey="name"
+              cx="50%" cy="50%"
+              innerRadius={38} outerRadius={62}
+              paddingAngle={2}
+              label={false}
+            >
+              {stats.covenantData.map((entry, i) => (
+                <Cell key={i} fill={entry.fill} />
+              ))}
+            </Pie>
+            <Tooltip />
+            <Legend wrapperStyle={{ fontSize: "0.68rem" }} iconSize={8} />
+          </PieChart>
+        </ResponsiveContainer>
+      </div>
+
+      {/* ── Row 4: Attention Lists ──────────────────────────────── */}
+      <AttentionPanel
+        title="Watchlist Deals"
+        tone="warning"
+        count={stats.totalWatchlist}
+        items={stats.watchlistDeals}
+        badgeKey="grade"
+      />
+      <AttentionPanel
+        title="Deteriorating Trends"
+        tone="warning"
+        count={stats.totalDeteriorating}
+        items={stats.deterioratingDeals}
+        badgeKey="trend"
+      />
+      <AttentionPanel
+        title="Covenant Breaches"
+        tone="critical"
+        count={stats.totalBreached}
+        items={stats.breachedDeals}
+        badgeKey="covenant"
+      />
+    </div>
+  );
+}
+
+/* ── Sub-components ──────────────────────────────────────────────── */
+
+function KpiCard({ label, value, tone }: { label: string; value: string; tone?: string }) {
+  const color = tone === "critical" ? C.critical : tone === "warning" ? C.warning : tone === "good" ? C.good : undefined;
+  return (
+    <div className="jps-summary-kpi" style={{
+      borderRadius: 14, border: "1px solid var(--line)",
+      background: "var(--panel)", padding: "8px 10px", textAlign: "center",
+    }}>
+      <div style={{ fontSize: "0.62rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--ink-soft)", marginBottom: 2 }}>
+        {label}
+      </div>
+      <div style={{ fontSize: "1.15rem", fontWeight: 800, color: color ?? "var(--ink)", fontFamily: "monospace" }}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function AttentionPanel({ title, tone, count, items, badgeKey }: {
+  title: string;
+  tone: "warning" | "critical";
+  count: number;
+  items: Deal[];
+  badgeKey: "grade" | "trend" | "covenant";
+}) {
+  return (
+    <div className="jps-attention-panel" style={{
+      borderRadius: 14, border: "1px solid var(--line)",
+      background: "var(--panel)", padding: "8px 12px", overflow: "hidden",
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+        <h3 style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--ink-soft)", margin: 0, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+          {title}
+        </h3>
+        <span className={`badge ${tone} badge-sm`}>{count}</span>
+      </div>
+      {items.length === 0 ? (
+        <div style={{ fontSize: "0.75rem", color: "var(--ink-soft)", fontStyle: "italic" }}>None</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {items.map((d) => (
+            <div key={d.dealSlug} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, fontSize: "0.73rem" }}>
+              <Link href={`/deals/${d.dealSlug}`} style={{ color: "var(--accent)", textDecoration: "none", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {d.dealName}
+              </Link>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                {badgeKey === "grade" && <span className={`badge ${gradeTone(d.grade)} badge-sm`}>{d.grade}</span>}
+                {badgeKey === "trend" && <span className={`badge ${d.performanceTrend === "deteriorating_rapidly" ? "critical" : "warning"} badge-sm`}>{(d.performanceTrend ?? "").replace(/_/g, " ")}</span>}
+                {badgeKey === "covenant" && <span className={`badge critical badge-sm`}>{d.covenantStatus.replace(/_/g, " ")}</span>}
+                <span style={{ fontSize: "0.75rem", color: "var(--ink-soft)", fontFamily: "monospace" }}>{fmtCompact(d.exposure)}</span>
+              </div>
+            </div>
+          ))}
+          {count > 5 && (
+            <div style={{ fontSize: "0.75rem", color: "var(--ink-soft)", fontStyle: "italic" }}>
+              and {count - 5} more
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}

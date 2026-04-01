@@ -10783,6 +10783,7 @@ def get_portfolio(
                 "internalCreditScore": row.get("internal_credit_score"),
                 "performanceTrend": None,
                 "performanceGrade": None,
+                "spreadBps": None,
                 "organisations": set(),
                 "owners": set(),
                 "accounts": set(),
@@ -10806,6 +10807,24 @@ def get_portfolio(
                 if pa:
                     entry["performanceTrend"] = pa["performance_trend"]
                     entry["performanceGrade"] = int(pa["performance_grade"])
+    except Exception:
+        pass  # Table may not exist yet; degrade gracefully
+
+    # Enrich deal rows with weighted average spread from capital structure
+    try:
+        with get_connection() as spread_conn:
+            spread_rows = spread_conn.execute(
+                """SELECT deal_id,
+                          ROUND(SUM(drawn_amount * margin_bps) / NULLIF(SUM(drawn_amount), 0))::int AS wa_spread_bps
+                   FROM capital_structure_instruments
+                   WHERE status = 'active' AND margin_bps IS NOT NULL AND drawn_amount > 0
+                   GROUP BY deal_id"""
+            ).fetchall()
+            spread_by_deal = {int(r["deal_id"]): int(r["wa_spread_bps"]) for r in spread_rows if r["wa_spread_bps"] is not None}
+            for entry in deal_rows_by_slug.values():
+                s = spread_by_deal.get(int(entry["dealId"]))
+                if s is not None:
+                    entry["spreadBps"] = s
     except Exception:
         pass  # Table may not exist yet; degrade gracefully
 
@@ -11444,6 +11463,7 @@ def get_dashboard(
                 "internalCreditScore": row.get("internal_credit_score"),
                 "performanceTrend": None,
                 "performanceGrade": None,
+                "spreadBps": None,
                 "organisations": set(),
                 "owners": set(),
                 "accounts": set(),
@@ -11467,6 +11487,24 @@ def get_dashboard(
                 if pa:
                     entry["performanceTrend"] = pa["performance_trend"]
                     entry["performanceGrade"] = int(pa["performance_grade"])
+    except Exception:
+        pass  # Table may not exist yet; degrade gracefully
+
+    # Enrich deal rows with weighted average spread from capital structure
+    try:
+        with get_connection() as spread_conn:
+            spread_rows = spread_conn.execute(
+                """SELECT deal_id,
+                          ROUND(SUM(drawn_amount * margin_bps) / NULLIF(SUM(drawn_amount), 0))::int AS wa_spread_bps
+                   FROM capital_structure_instruments
+                   WHERE status = 'active' AND margin_bps IS NOT NULL AND drawn_amount > 0
+                   GROUP BY deal_id"""
+            ).fetchall()
+            spread_by_deal = {int(r["deal_id"]): int(r["wa_spread_bps"]) for r in spread_rows if r["wa_spread_bps"] is not None}
+            for entry in deal_rows_by_slug.values():
+                s = spread_by_deal.get(int(entry["dealId"]))
+                if s is not None:
+                    entry["spreadBps"] = s
     except Exception:
         pass  # Table may not exist yet; degrade gracefully
 

@@ -2,10 +2,11 @@
 
 import { useState, useMemo } from "react";
 import Link from "next/link";
+import PortfolioSummary from "./portfolio-summary";
 
 /* ── Types ───────────────────────────────────────────────────────────── */
 
-type Deal = {
+export type Deal = {
   dealSlug: string;
   dealName: string;
   borrower: string;
@@ -30,6 +31,7 @@ type Deal = {
   owners: string[];
   performanceTrend: string | null;
   performanceGrade: number | null;
+  spreadBps: number | null;
 };
 
 type HierarchyOrg = { id: number; name: string; dealCount: number };
@@ -45,6 +47,10 @@ type Filters = {
 };
 
 const EMPTY: Filters = { organisation: "", owner: "", sector: "", grade: "", watchlist: "", search: "" };
+
+type SortKey = "dealName" | "sector" | "rating" | "exposure" | "performanceScore" | "grade" | "performanceTrend" | "covenantStatus" | "latestPeriodEnd" | "reportedDscr" | "headroomPct" | "todos" | "watchlist";
+type SortDir = "asc" | "desc";
+type SortState = { key: SortKey; dir: SortDir } | null;
 
 /* ── Helpers ─────────────────────────────────────────────────────────── */
 
@@ -188,6 +194,14 @@ export default function JpsFilterGrid({
   const [filters, setFilters] = useState<Filters>(EMPTY);
   const set = (partial: Partial<Filters>) => setFilters((prev) => ({ ...prev, ...partial }));
 
+  const [sort, setSort] = useState<SortState>(null);
+  const toggleSort = (key: SortKey) => {
+    setSort((prev) => {
+      if (prev?.key === key) return prev.dir === "desc" ? { key, dir: "asc" } : null;
+      return { key, dir: "desc" };
+    });
+  };
+
   const filteredOwners = filters.organisation
     ? owners.filter((o) => o.organisationName === filters.organisation)
     : owners;
@@ -213,6 +227,37 @@ export default function JpsFilterGrid({
     return r;
   }, [deals, filters]);
 
+  const sorted = useMemo(() => {
+    if (!sort) return filtered;
+    const { key, dir } = sort;
+    const m = dir === "asc" ? 1 : -1;
+    return [...filtered].sort((a, b) => {
+      let av: string | number | boolean | null;
+      let bv: string | number | boolean | null;
+      switch (key) {
+        case "dealName": av = a.dealName; bv = b.dealName; break;
+        case "sector": av = a.sector; bv = b.sector; break;
+        case "rating": av = displayRating(a); bv = displayRating(b); break;
+        case "exposure": av = a.exposure; bv = b.exposure; break;
+        case "performanceScore": av = a.performanceScore; bv = b.performanceScore; break;
+        case "grade": av = a.grade; bv = b.grade; break;
+        case "performanceTrend": av = a.performanceTrend; bv = b.performanceTrend; break;
+        case "covenantStatus": av = a.covenantStatus; bv = b.covenantStatus; break;
+        case "latestPeriodEnd": av = a.latestPeriodEnd; bv = b.latestPeriodEnd; break;
+        case "reportedDscr": av = a.reportedDscr; bv = b.reportedDscr; break;
+        case "headroomPct": av = a.headroomPct; bv = b.headroomPct; break;
+        case "todos": av = (a.pendingReviews ?? 0) + (a.overdueObligations ?? 0) + (a.openRequests ?? 0); bv = (b.pendingReviews ?? 0) + (b.overdueObligations ?? 0) + (b.openRequests ?? 0); break;
+        case "watchlist": av = a.watchlist ? 1 : 0; bv = b.watchlist ? 1 : 0; break;
+        default: return 0;
+      }
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      if (typeof av === "string" && typeof bv === "string") return av.localeCompare(bv) * m;
+      return ((av as number) - (bv as number)) * m;
+    });
+  }, [filtered, sort]);
+
   const hasFilters = Object.values(filters).some((v) => v !== "");
 
   return (
@@ -226,6 +271,9 @@ export default function JpsFilterGrid({
           border: "1px solid var(--line)",
         }}
       >
+        <span style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", color: "var(--accent)", whiteSpace: "nowrap" }}>
+          Filters
+        </span>
         <input
           type="text"
           placeholder="Search deals…"
@@ -270,6 +318,9 @@ export default function JpsFilterGrid({
         </span>
       </div>
 
+      {/* ── Portfolio Summary ──────────────────────────────────────── */}
+      <PortfolioSummary deals={filtered} />
+
       {/* ── Deal table ──────────────────────────────────────────────── */}
       {filtered.length === 0 ? (
         <article className="topsheet-note topsheet-note-info">
@@ -281,23 +332,23 @@ export default function JpsFilterGrid({
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ background: "var(--accent-soft)" }}>
-                <th style={th}>Deal</th>
-                <th style={th}>Sector</th>
-                <th style={th}>Rating</th>
-                <th style={{ ...th, textAlign: "right" }}>Exposure</th>
-                <th style={{ ...th, textAlign: "right" }}>Credit Score</th>
-                <th style={th}>Grade</th>
-                <th style={th}>Trend</th>
-                <th style={th}>Covenant</th>
-                <th style={th}>Last Financials</th>
-                <th style={{ ...th, textAlign: "right" }}>DSCR</th>
-                <th style={{ ...th, textAlign: "right" }}>Headroom</th>
-                <th style={{ ...th, textAlign: "right" }}>To-do&apos;s</th>
-                <th style={th}>Watchlist</th>
+                <SortTh k="dealName" label="Deal" sort={sort} onSort={toggleSort} />
+                <SortTh k="sector" label="Sector" sort={sort} onSort={toggleSort} />
+                <SortTh k="rating" label="Rating" sort={sort} onSort={toggleSort} />
+                <SortTh k="exposure" label="Exposure" sort={sort} onSort={toggleSort} align="right" />
+                <SortTh k="performanceScore" label="Credit Score" sort={sort} onSort={toggleSort} align="right" />
+                <SortTh k="grade" label="Grade" sort={sort} onSort={toggleSort} />
+                <SortTh k="performanceTrend" label="Trend" sort={sort} onSort={toggleSort} />
+                <SortTh k="covenantStatus" label="Covenant" sort={sort} onSort={toggleSort} />
+                <SortTh k="latestPeriodEnd" label="Last Financials" sort={sort} onSort={toggleSort} />
+                <SortTh k="reportedDscr" label="DSCR" sort={sort} onSort={toggleSort} align="right" />
+                <SortTh k="headroomPct" label="Headroom" sort={sort} onSort={toggleSort} align="right" />
+                <SortTh k="todos" label="To-do's" sort={sort} onSort={toggleSort} align="right" />
+                <SortTh k="watchlist" label="Watchlist" sort={sort} onSort={toggleSort} />
               </tr>
             </thead>
             <tbody>
-              {filtered.map((deal) => {
+              {sorted.map((deal) => {
                 const todos = (deal.pendingReviews ?? 0) + (deal.overdueObligations ?? 0) + (deal.openRequests ?? 0);
                 return (
                   <tr
@@ -417,5 +468,33 @@ export default function JpsFilterGrid({
         </div>
       )}
     </>
+  );
+}
+
+/* ── Sortable table header ──────────────────────────────────────── */
+
+function SortTh({ k, label, sort, onSort, align }: {
+  k: SortKey;
+  label: string;
+  sort: SortState;
+  onSort: (key: SortKey) => void;
+  align?: "right" | "left";
+}) {
+  const active = sort?.key === k;
+  const arrow = active ? (sort.dir === "desc" ? " \u25BC" : " \u25B2") : "";
+  return (
+    <th
+      style={{
+        ...th,
+        textAlign: align ?? "left",
+        cursor: "pointer",
+        userSelect: "none",
+        background: active ? "rgba(31,111,165,0.08)" : undefined,
+      }}
+      onClick={() => onSort(k)}
+      title={`Sort by ${label}`}
+    >
+      {label}{arrow}
+    </th>
   );
 }
