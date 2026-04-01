@@ -17,6 +17,8 @@ type Deal = {
   covenantStatus: string;
   performanceScore: number | null;
   headroomPct: number | null;
+  latestPeriodEnd: string | null;
+  latestPeriodLabel: string | null;
   pendingReviews: number;
   overdueObligations: number;
   openRequests: number;
@@ -212,6 +214,7 @@ export default function JpsFilterGrid({
                 <th style={{ ...th, textAlign: "center" }}>Credit Score</th>
                 <th style={{ ...th, textAlign: "center" }}>Grade</th>
                 <th style={{ ...th, textAlign: "center" }}>Covenant</th>
+                <th style={{ ...th, textAlign: "center" }}>Last Financials</th>
                 <th style={{ ...th, textAlign: "right" }}>DSCR</th>
                 <th style={{ ...th, textAlign: "right" }}>Headroom</th>
                 <th style={{ ...th, textAlign: "center" }}>To-do&apos;s</th>
@@ -270,6 +273,13 @@ export default function JpsFilterGrid({
                       <span className={`badge ${tierTone(deal.covenantStatus)} badge-sm`}>
                         {deal.covenantStatus.replace(/_/g, " ")}
                       </span>
+                    </td>
+
+                    {/* Last Financials */}
+                    <td style={{ ...td, textAlign: "center", fontSize: "0.84rem" }}>
+                      {deal.latestPeriodEnd ? (
+                        new Date(deal.latestPeriodEnd).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
+                      ) : "—"}
                     </td>
 
                     {/* DSCR */}
