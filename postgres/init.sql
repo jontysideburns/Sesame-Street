@@ -2601,6 +2601,19 @@ CREATE TABLE IF NOT EXISTS deal_financial_template (
     UNIQUE(deal_id)
 );
 
+-- ─── Platform To Dos (memo board) ───────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS platform_todos (
+    id          SERIAL PRIMARY KEY,
+    text        TEXT NOT NULL,
+    done        BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+INSERT INTO platform_todos (text, done, created_at) VALUES
+('JPS to review/construct a reserve account architecture to allow the monitoring of reserve account balances.', false, '2026-04-01')
+ON CONFLICT DO NOTHING;
+
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- SEED DATA — Demo deal child records
 -- Populates the new child tables for the Aurora Prime Data Campus demo deal

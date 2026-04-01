@@ -5,72 +5,87 @@ import { useState, useEffect, useCallback } from "react";
 type Memo = {
   id: number;
   text: string;
-  createdAt: string;
   done: boolean;
+  createdAt: string;
+  updatedAt: string;
 };
 
-const STORAGE_KEY = "sesame-todos";
+const API = "/api/todos";
 
-const DEFAULT_MEMOS: Memo[] = [
-  {
-    id: 1,
-    text: "JPS to review/construct a reserve account architecture to allow the monitoring of reserve account balances.",
-    createdAt: "2026-04-01",
-    done: false,
-  },
-];
-
-function loadMemos(): Memo[] {
-  if (typeof window === "undefined") return DEFAULT_MEMOS;
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) return JSON.parse(stored);
-  } catch { /* ignore */ }
-  return DEFAULT_MEMOS;
+async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(path, init);
+  if (!res.ok) throw new Error(`${res.status}`);
+  return res.json() as Promise<T>;
 }
 
 export default function TodosMemoBoard() {
-  const [memos, setMemos] = useState<Memo[]>(DEFAULT_MEMOS);
+  const [memos, setMemos] = useState<Memo[]>([]);
   const [draft, setDraft] = useState("");
-  const [hydrated, setHydrated] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    setMemos(loadMemos());
-    setHydrated(true);
+  const load = useCallback(async () => {
+    try {
+      const data = await apiFetch<Memo[]>(API);
+      setMemos(data);
+      setError(null);
+    } catch {
+      setError("Could not load memos — is the backend running?");
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const persist = useCallback((next: Memo[]) => {
-    setMemos(next);
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); } catch { /* ignore */ }
-  }, []);
+  useEffect(() => { load(); }, [load]);
 
-  function addMemo() {
+  async function addMemo() {
     const trimmed = draft.trim();
     if (!trimmed) return;
-    persist([
-      ...memos,
-      {
-        id: Date.now(),
-        text: trimmed,
-        createdAt: new Date().toISOString().slice(0, 10),
-        done: false,
-      },
-    ]);
-    setDraft("");
+    try {
+      const created = await apiFetch<Memo>(API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: trimmed }),
+      });
+      setMemos((prev) => [...prev, created]);
+      setDraft("");
+    } catch {
+      setError("Failed to add memo");
+    }
   }
 
-  function toggleDone(id: number) {
-    persist(memos.map((m) => (m.id === id ? { ...m, done: !m.done } : m)));
+  async function toggleDone(memo: Memo) {
+    try {
+      const updated = await apiFetch<Memo>(`${API}/${memo.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ done: !memo.done }),
+      });
+      setMemos((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
+    } catch {
+      setError("Failed to update memo");
+    }
   }
 
-  function removeMemo(id: number) {
-    persist(memos.filter((m) => m.id !== id));
+  async function removeMemo(id: number) {
+    try {
+      await apiFetch<{ ok: boolean }>(`${API}/${id}`, { method: "DELETE" });
+      setMemos((prev) => prev.filter((m) => m.id !== id));
+    } catch {
+      setError("Failed to remove memo");
+    }
   }
-
-  if (!hydrated) return null;
 
   const pending = memos.filter((m) => !m.done);
   const completed = memos.filter((m) => m.done);
+
+  if (loading) {
+    return (
+      <section className="panel section-panel">
+        <p style={{ padding: 24, color: "var(--ink-soft)", fontSize: "0.85rem" }}>Loading memos...</p>
+      </section>
+    );
+  }
 
   return (
     <section className="panel section-panel">
@@ -80,6 +95,10 @@ export default function TodosMemoBoard() {
           <h2 className="panel-title">Memo Board</h2>
         </div>
       </header>
+
+      {error && (
+        <p style={{ color: "var(--critical)", fontSize: "0.82rem", padding: "8px 0" }}>{error}</p>
+      )}
 
       {/* Add new memo */}
       <div
@@ -115,7 +134,7 @@ export default function TodosMemoBoard() {
 
       {/* Pending memos */}
       <div style={{ marginTop: 16 }}>
-        {pending.length === 0 && (
+        {pending.length === 0 && !error && (
           <p style={{ color: "var(--ink-soft)", fontSize: "0.85rem", padding: "12px 0" }}>
             No open memos. Add one above.
           </p>
@@ -132,7 +151,7 @@ export default function TodosMemoBoard() {
             }}
           >
             <button
-              onClick={() => toggleDone(memo.id)}
+              onClick={() => toggleDone(memo)}
               style={{
                 width: 22,
                 height: 22,
@@ -148,7 +167,7 @@ export default function TodosMemoBoard() {
             <div style={{ flex: 1 }}>
               <p style={{ fontSize: "0.88rem", lineHeight: 1.5, margin: 0 }}>{memo.text}</p>
               <p style={{ fontSize: "0.72rem", color: "var(--ink-soft)", margin: "4px 0 0" }}>
-                Added {memo.createdAt}
+                Added {memo.createdAt?.slice(0, 10)}
               </p>
             </div>
             <button
@@ -190,7 +209,7 @@ export default function TodosMemoBoard() {
               }}
             >
               <button
-                onClick={() => toggleDone(memo.id)}
+                onClick={() => toggleDone(memo)}
                 style={{
                   width: 22,
                   height: 22,
@@ -223,7 +242,7 @@ export default function TodosMemoBoard() {
                   {memo.text}
                 </p>
                 <p style={{ fontSize: "0.72rem", color: "var(--ink-soft)", margin: "4px 0 0" }}>
-                  Added {memo.createdAt}
+                  Added {memo.createdAt?.slice(0, 10)}
                 </p>
               </div>
               <button

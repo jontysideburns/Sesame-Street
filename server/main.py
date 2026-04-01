@@ -18837,3 +18837,88 @@ def three_case_comparison(slug: str, body: dict | None = None):
         "downsideBreaches": downside_breaches,
         "cases": case_results,
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PLATFORM TO-DOS (memo board)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/todos")
+def list_todos():
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT id, text, done, created_at, updated_at FROM platform_todos ORDER BY created_at"
+        ).fetchall()
+    return [
+        {
+            "id": r["id"],
+            "text": r["text"],
+            "done": r["done"],
+            "createdAt": r["created_at"].isoformat() if r["created_at"] else None,
+            "updatedAt": r["updated_at"].isoformat() if r["updated_at"] else None,
+        }
+        for r in rows
+    ]
+
+
+@app.post("/api/todos")
+def create_todo(body: dict):
+    text = body.get("text", "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text is required")
+    with get_connection() as conn:
+        row = conn.execute(
+            "INSERT INTO platform_todos (text) VALUES (%s) RETURNING id, text, done, created_at, updated_at",
+            [text],
+        ).fetchone()
+        conn.connection.commit()
+    return {
+        "id": row["id"],
+        "text": row["text"],
+        "done": row["done"],
+        "createdAt": row["created_at"].isoformat(),
+        "updatedAt": row["updated_at"].isoformat(),
+    }
+
+
+@app.patch("/api/todos/{todo_id}")
+def update_todo(todo_id: int, body: dict):
+    with get_connection() as conn:
+        existing = conn.execute("SELECT id FROM platform_todos WHERE id = %s", [todo_id]).fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="Todo not found")
+        sets = []
+        params = []
+        if "text" in body:
+            sets.append("text = %s")
+            params.append(body["text"])
+        if "done" in body:
+            sets.append("done = %s")
+            params.append(body["done"])
+        if not sets:
+            raise HTTPException(status_code=400, detail="Nothing to update")
+        sets.append("updated_at = NOW()")
+        params.append(todo_id)
+        row = conn.execute(
+            f"UPDATE platform_todos SET {', '.join(sets)} WHERE id = %s RETURNING id, text, done, created_at, updated_at",
+            params,
+        ).fetchone()
+        conn.connection.commit()
+    return {
+        "id": row["id"],
+        "text": row["text"],
+        "done": row["done"],
+        "createdAt": row["created_at"].isoformat(),
+        "updatedAt": row["updated_at"].isoformat(),
+    }
+
+
+@app.delete("/api/todos/{todo_id}")
+def delete_todo(todo_id: int):
+    with get_connection() as conn:
+        existing = conn.execute("SELECT id FROM platform_todos WHERE id = %s", [todo_id]).fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="Todo not found")
+        conn.execute("DELETE FROM platform_todos WHERE id = %s", [todo_id])
+        conn.connection.commit()
+    return {"ok": True}
