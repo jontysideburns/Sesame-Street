@@ -73,6 +73,13 @@ export type DealResponse = {
   watchlist: boolean;
   status: string;
   revenueRisk: string;
+  moodysRating: string | null;
+  moodysOutlook: string | null;
+  spRating: string | null;
+  spOutlook: string | null;
+  fitchRating: string | null;
+  fitchOutlook: string | null;
+  internalCreditScore: string | null;
   summary: string;
   phase: string;
   dealOverview: string;

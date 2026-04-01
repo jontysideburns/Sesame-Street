@@ -163,6 +163,16 @@ function PlumbingIcon(className?: string) {
   );
 }
 
+function TodosIcon(className?: string) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <rect x="4" y="4" width="16" height="16" rx="2" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M8 9.5h8M8 13h8M8 16.5h5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M4 8h16" stroke="currentColor" strokeWidth="1.2" opacity="0.3" />
+    </svg>
+  );
+}
+
 function DotsIcon(className?: string) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -244,6 +254,12 @@ const primaryNavItems: NavItem[] = [
     label: "Configuration",
     matches: (pathname) => pathname.startsWith("/configuration"),
     icon: ConfigurationIcon
+  },
+  {
+    href: "/todos",
+    label: "To Dos",
+    matches: (pathname) => pathname.startsWith("/todos"),
+    icon: TodosIcon
   }
 ];
 

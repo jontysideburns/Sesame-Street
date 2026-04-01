@@ -22,6 +22,10 @@ type Deal = {
   pendingReviews: number;
   overdueObligations: number;
   openRequests: number;
+  moodysRating: string | null;
+  spRating: string | null;
+  fitchRating: string | null;
+  internalCreditScore: string | null;
   organisations: string[];
   owners: string[];
 };
@@ -61,6 +65,56 @@ function scoreTone(score: number | null) {
   return "critical";
 }
 
+// S&P-equivalent rating scale for sorting: lower index = better
+const RATING_SCALE = [
+  "AAA", "AA+", "AA", "AA-",
+  "A+", "A", "A-",
+  "BBB+", "BBB", "BBB-",
+  "BB+", "BB", "BB-",
+  "B+", "B", "B-",
+  "CCC+", "CCC", "CCC-", "CC", "C", "D",
+];
+
+// Moody's → S&P equivalent
+const MOODYS_MAP: Record<string, string> = {
+  Aaa: "AAA", Aa1: "AA+", Aa2: "AA", Aa3: "AA-",
+  A1: "A+", A2: "A", A3: "A-",
+  Baa1: "BBB+", Baa2: "BBB", Baa3: "BBB-",
+  Ba1: "BB+", Ba2: "BB", Ba3: "BB-",
+  B1: "B+", B2: "B", B3: "B-",
+  Caa1: "CCC+", Caa2: "CCC", Caa3: "CCC-", Ca: "CC", C: "C",
+};
+
+function toSpEquiv(rating: string): string {
+  return MOODYS_MAP[rating] ?? rating;
+}
+
+function displayRating(deal: Deal): string | null {
+  // Internal credit score takes priority
+  if (deal.internalCreditScore) return deal.internalCreditScore;
+
+  const externals = [deal.moodysRating, deal.spRating, deal.fitchRating]
+    .filter((r): r is string => r != null)
+    .map((r) => { const sp = toSpEquiv(r); return { raw: sp, idx: RATING_SCALE.indexOf(sp) }; })
+    .filter((r) => r.idx >= 0)
+    .sort((a, b) => a.idx - b.idx); // best first
+
+  if (externals.length === 0) return null;
+  if (externals.length === 1) return externals[0].raw;
+  if (externals.length === 2) return externals[1].raw; // lower of two
+  return externals[1].raw; // middle of three
+}
+
+function ratingTone(rating: string | null) {
+  if (!rating) return "neutral";
+  const idx = RATING_SCALE.indexOf(rating);
+  if (idx < 0) return "neutral";
+  if (idx <= 6) return "good";      // A- and above
+  if (idx <= 9) return "good";      // BBB range
+  if (idx <= 12) return "warning";  // BB range
+  return "critical";                // B and below
+}
+
 function fmt(n: number) {
   return new Intl.NumberFormat("en-US", {
     style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 0,
@@ -79,10 +133,10 @@ const sel: React.CSSProperties = {
 };
 
 const th: React.CSSProperties = {
-  padding: "10px 12px",
+  padding: "4px 8px",
   textAlign: "left",
   fontWeight: 700,
-  fontSize: "0.76rem",
+  fontSize: "0.70rem",
   textTransform: "uppercase",
   letterSpacing: "0.1em",
   color: "var(--accent)",
@@ -91,8 +145,8 @@ const th: React.CSSProperties = {
 };
 
 const td: React.CSSProperties = {
-  padding: "12px 12px",
-  fontSize: "0.86rem",
+  padding: "4px 8px",
+  fontSize: "0.78rem",
   borderBottom: "1px solid var(--line)",
   verticalAlign: "middle",
 };
@@ -210,15 +264,16 @@ export default function JpsFilterGrid({
               <tr style={{ background: "var(--accent-soft)" }}>
                 <th style={th}>Deal</th>
                 <th style={th}>Sector</th>
+                <th style={th}>Rating</th>
                 <th style={{ ...th, textAlign: "right" }}>Exposure</th>
-                <th style={{ ...th, textAlign: "center" }}>Credit Score</th>
-                <th style={{ ...th, textAlign: "center" }}>Grade</th>
-                <th style={{ ...th, textAlign: "center" }}>Covenant</th>
-                <th style={{ ...th, textAlign: "center" }}>Last Financials</th>
+                <th style={{ ...th, textAlign: "right" }}>Credit Score</th>
+                <th style={th}>Grade</th>
+                <th style={th}>Covenant</th>
+                <th style={th}>Last Financials</th>
                 <th style={{ ...th, textAlign: "right" }}>DSCR</th>
                 <th style={{ ...th, textAlign: "right" }}>Headroom</th>
-                <th style={{ ...th, textAlign: "center" }}>To-do&apos;s</th>
-                <th style={{ ...th, textAlign: "center" }}>Watchlist</th>
+                <th style={{ ...th, textAlign: "right" }}>To-do&apos;s</th>
+                <th style={th}>Watchlist</th>
               </tr>
             </thead>
             <tbody>
@@ -228,30 +283,41 @@ export default function JpsFilterGrid({
                   <tr
                     key={deal.dealSlug}
                     style={{ cursor: "pointer" }}
-                    onClick={() => { window.location.href = `/jps/${deal.dealSlug}`; }}
+                    onClick={() => { window.location.href = `/deals/${deal.dealSlug}`; }}
                     onMouseEnter={(e) => { (e.currentTarget as HTMLTableRowElement).style.background = "var(--accent-soft)"; }}
                     onMouseLeave={(e) => { (e.currentTarget as HTMLTableRowElement).style.background = ""; }}
                   >
                     {/* Deal name */}
                     <td style={td}>
-                      <Link href={`/jps/${deal.dealSlug}`} style={{ color: "var(--ink)", textDecoration: "none" }}>
-                        <strong style={{ display: "block", fontSize: "0.88rem" }}>{deal.dealName}</strong>
-                        <span style={{ fontSize: "0.78rem", color: "var(--ink-soft)" }}>{deal.borrower}</span>
+                      <Link href={`/deals/${deal.dealSlug}`} style={{ color: "var(--ink)", textDecoration: "none", fontWeight: 600 }}>
+                        {deal.dealName}
                       </Link>
                     </td>
 
-                    {/* Sector */}
-                    <td style={{ ...td, fontSize: "0.84rem", color: "var(--ink-soft)" }}>
+                    {/* Sector — text, left */}
+                    <td style={{ ...td, color: "var(--ink-soft)" }}>
                       {deal.sector}
                     </td>
 
-                    {/* Exposure */}
+                    {/* Credit Rating — text, left */}
+                    <td style={td}>
+                      {(() => {
+                        const r = displayRating(deal);
+                        return r ? (
+                          <span className={`badge ${ratingTone(r)} badge-sm`}>{r}</span>
+                        ) : (
+                          <span style={{ color: "var(--ink-soft)" }}>—</span>
+                        );
+                      })()}
+                    </td>
+
+                    {/* Exposure — number, right */}
                     <td style={{ ...td, textAlign: "right", fontWeight: 600 }}>
                       {fmt(deal.exposure)}
                     </td>
 
-                    {/* Credit score */}
-                    <td style={{ ...td, textAlign: "center" }}>
+                    {/* Credit score — number, right */}
+                    <td style={{ ...td, textAlign: "right" }}>
                       {deal.performanceScore != null ? (
                         <span className={`badge ${scoreTone(deal.performanceScore)} badge-sm`}>
                           {deal.performanceScore}
@@ -261,39 +327,39 @@ export default function JpsFilterGrid({
                       )}
                     </td>
 
-                    {/* Performance grade */}
-                    <td style={{ ...td, textAlign: "center" }}>
+                    {/* Performance grade — text, left */}
+                    <td style={td}>
                       <span className={`badge ${gradeTone(deal.grade)} badge-sm`}>
                         {deal.grade}
                       </span>
                     </td>
 
-                    {/* Covenant performance */}
-                    <td style={{ ...td, textAlign: "center" }}>
+                    {/* Covenant performance — text, left */}
+                    <td style={td}>
                       <span className={`badge ${tierTone(deal.covenantStatus)} badge-sm`}>
                         {deal.covenantStatus.replace(/_/g, " ")}
                       </span>
                     </td>
 
-                    {/* Last Financials */}
-                    <td style={{ ...td, textAlign: "center", fontSize: "0.84rem" }}>
+                    {/* Last Financials — text (date), left */}
+                    <td style={td}>
                       {deal.latestPeriodEnd ? (
                         new Date(deal.latestPeriodEnd).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
                       ) : "—"}
                     </td>
 
-                    {/* DSCR */}
+                    {/* DSCR — number, right */}
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 600 }}>
                       {deal.reportedDscr != null ? `${deal.reportedDscr.toFixed(2)}x` : "—"}
                     </td>
 
-                    {/* Headroom (collateral ratio proxy) */}
+                    {/* Headroom — number, right */}
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>
                       {deal.headroomPct != null ? `${deal.headroomPct.toFixed(1)}%` : "—"}
                     </td>
 
-                    {/* To-do's outstanding */}
-                    <td style={{ ...td, textAlign: "center" }}>
+                    {/* To-do's — number, right */}
+                    <td style={{ ...td, textAlign: "right" }}>
                       {todos > 0 ? (
                         <span className={`badge ${todos >= 5 ? "critical" : todos >= 2 ? "warning" : "neutral"} badge-sm`}>
                           {todos}
@@ -303,12 +369,12 @@ export default function JpsFilterGrid({
                       )}
                     </td>
 
-                    {/* Watchlist */}
-                    <td style={{ ...td, textAlign: "center" }}>
+                    {/* Watchlist — text, left */}
+                    <td style={td}>
                       {deal.watchlist ? (
                         <span className="badge warning badge-sm">Yes</span>
                       ) : (
-                        <span style={{ color: "var(--ink-soft)", fontSize: "0.82rem" }}>—</span>
+                        <span style={{ color: "var(--ink-soft)" }}>—</span>
                       )}
                     </td>
                   </tr>

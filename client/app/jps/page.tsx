@@ -25,7 +25,7 @@ export default async function JpsPage() {
       <section className="hero">
         <div className="hero-body">
           <p className="section-eyebrow">JPS</p>
-          <h1 className="hero-title">Analytics Workbench</h1>
+          <h1 className="hero-title">Portfolio Summary</h1>
           <p className="hero-sub">
             TopSheet import, covenant testing, variance analysis and ratio
             reconciliation. Select a deal to view its analytics.

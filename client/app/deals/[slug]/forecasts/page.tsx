@@ -98,6 +98,13 @@ export default async function DealForecastsPage({
                 </div>
               </div>
               <p>{forecastCase.summary}</p>
+              <Link
+                className="mini-button subtle"
+                href={`/deals/${slug}/forecasts/${forecastCase.id}`}
+                style={{ alignSelf: "flex-start", marginTop: 4 }}
+              >
+                View charts &rarr;
+              </Link>
               <div className="stack compact-stack">
                 {forecastCase.versions.map((version) => (
                   <div key={version.id} className="mini-card">

@@ -85,6 +85,16 @@ export default async function DealPage({
     const activeAmendmentCount = deal.amendmentHistory.filter(
       (item) => item.amendmentStatus === "active"
     ).length;
+    // Determine collateral ratio — pick whichever is available
+    const collateralRatio = (() => {
+      const rm = latestPeriod.reportedMetrics;
+      const em = latestPeriod.expectedMetrics;
+      if (rm.ltv_npv != null) return { label: "LTV (NPV)", actualVal: rm.ltv_npv, baseVal: em.ltv_npv, suffix: "x" };
+      if (rm.senior_net_debt_ebitda != null) return { label: "Net Debt / EBITDA", actualVal: rm.senior_net_debt_ebitda, baseVal: em.senior_net_debt_ebitda, suffix: "x" };
+      if (rm.total_net_debt_ebitda != null) return { label: "Net Debt / EBITDA", actualVal: rm.total_net_debt_ebitda, baseVal: em.total_net_debt_ebitda, suffix: "x" };
+      return null;
+    })();
+
     const currentPeriodRows = [
       {
         label: "Senior DSCR",
@@ -93,6 +103,14 @@ export default async function DealPage({
         lockup: metricValue(deal.covenant.thresholdLockup, "x"),
         defaultLevel: metricValue(deal.covenant.thresholdTrigger, "x"),
         tone: toneForStatus(deal.covenant.status)
+      },
+      {
+        label: collateralRatio ? collateralRatio.label : "Collateral Ratio",
+        actual: collateralRatio ? metricValue(collateralRatio.actualVal, collateralRatio.suffix) : "Not specified",
+        baseCase: collateralRatio ? metricValue(collateralRatio.baseVal, collateralRatio.suffix) : "—",
+        lockup: "—",
+        defaultLevel: "—",
+        tone: "neutral"
       },
       {
         label: "Revenue",
@@ -246,7 +264,7 @@ export default async function DealPage({
               </article>
 
               <article className="topsheet-note">
-                <strong>Key Metrics</strong>
+                <strong>Deal Summary</strong>
                 <dl className="topsheet-key-metrics">
                   <div>
                     <dt>Exposure</dt>
@@ -315,7 +333,38 @@ export default async function DealPage({
               </article>
 
               <article className="topsheet-card">
-                <strong>Credit Metrics</strong>
+                <strong>Key Metrics</strong>
+
+                {/* Credit ratings */}
+                {(deal.moodysRating || deal.spRating || deal.fitchRating || deal.internalCreditScore) && (
+                  <dl className="topsheet-dl" style={{ marginBottom: 12 }}>
+                    {deal.internalCreditScore && (
+                      <div className="topsheet-dl-row">
+                        <dt>Internal Rating</dt>
+                        <dd><span className="badge good badge-sm">{deal.internalCreditScore}</span></dd>
+                      </div>
+                    )}
+                    {deal.moodysRating && (
+                      <div className="topsheet-dl-row">
+                        <dt>Moody&apos;s</dt>
+                        <dd>{deal.moodysRating}{deal.moodysOutlook ? ` (${deal.moodysOutlook})` : ""}</dd>
+                      </div>
+                    )}
+                    {deal.spRating && (
+                      <div className="topsheet-dl-row">
+                        <dt>S&amp;P</dt>
+                        <dd>{deal.spRating}{deal.spOutlook ? ` (${deal.spOutlook})` : ""}</dd>
+                      </div>
+                    )}
+                    {deal.fitchRating && (
+                      <div className="topsheet-dl-row">
+                        <dt>Fitch</dt>
+                        <dd>{deal.fitchRating}{deal.fitchOutlook ? ` (${deal.fitchOutlook})` : ""}</dd>
+                      </div>
+                    )}
+                  </dl>
+                )}
+
                 <table className="topsheet-table">
                   <thead>
                     <tr>

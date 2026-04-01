@@ -66,6 +66,29 @@ export async function getDealForecasts(slug: string) {
   return fetchJson<DealForecastsResponse>(`/api/deals/${slug}/forecasts`);
 }
 
+export type ForecastCaseDetail = {
+  dealSlug: string;
+  caseId: number;
+  caseName: string;
+  caseType: string;
+  comparisonPriority: number;
+  drivesMonitoring: boolean;
+  ownerName: string;
+  summary: string;
+  versionLabel: string | null;
+  versionStatus: string | null;
+  periodSeries: Array<{
+    periodKey: string;
+    periodLabel: string;
+    forecast: Record<string, number> | null;
+    actuals: Record<string, number> | null;
+  }>;
+};
+
+export async function getForecastCaseDetail(slug: string, caseId: number) {
+  return fetchJson<ForecastCaseDetail>(`/api/deals/${slug}/forecasts/${caseId}`);
+}
+
 export async function activateForecastVersionRequest(
   versionId: number,
   payload: { activatedBy: string }

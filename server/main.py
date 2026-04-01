@@ -9706,6 +9706,10 @@ def get_portfolio(
               d.watchlist,
               d.phase,
               d.region,
+              d.moodys_rating,
+              d.sp_rating,
+              d.fitch_rating,
+              d.internal_credit_score,
               c.code AS covenant_code,
               c.name AS covenant_name,
               COALESCE(ch.dscr, c.current_value) AS current_value,
@@ -10744,6 +10748,10 @@ def get_portfolio(
                 "highPriorityRequests": int(request_summary["highPriorityRequests"]),
                 "requestsWithOpposition": oppose_votes,
                 "governanceSummary": " · ".join(governance_parts),
+                "moodysRating": row.get("moodys_rating"),
+                "spRating": row.get("sp_rating"),
+                "fitchRating": row.get("fitch_rating"),
+                "internalCreditScore": row.get("internal_credit_score"),
                 "organisations": set(),
                 "owners": set(),
                 "accounts": set(),
@@ -11083,6 +11091,10 @@ def get_dashboard(
               d.borrower,
               COALESCE(go.override_grade, d.grade) AS effective_grade,
               d.watchlist,
+              d.moodys_rating,
+              d.sp_rating,
+              d.fitch_rating,
+              d.internal_credit_score,
               c.current_value,
               c.status AS covenant_status,
               dist.distribution_status,
@@ -11379,6 +11391,10 @@ def get_dashboard(
                 "highPriorityRequests": int(request_summary["highPriorityRequests"]),
                 "requestsWithOpposition": oppose_votes,
                 "governanceSummary": " · ".join(governance_parts),
+                "moodysRating": row.get("moodys_rating"),
+                "spRating": row.get("sp_rating"),
+                "fitchRating": row.get("fitch_rating"),
+                "internalCreditScore": row.get("internal_credit_score"),
                 "organisations": set(),
                 "owners": set(),
                 "accounts": set(),
@@ -13144,6 +13160,13 @@ def get_deal(slug: str, viewer: str | None = None):
         "summary": deal["summary"],
         "phase": deal["phase"],
         "dealOverview": deal["deal_overview"],
+        "moodysRating": deal.get("moodys_rating"),
+        "moodysOutlook": deal.get("moodys_outlook"),
+        "spRating": deal.get("sp_rating"),
+        "spOutlook": deal.get("sp_outlook"),
+        "fitchRating": deal.get("fitch_rating"),
+        "fitchOutlook": deal.get("fitch_outlook"),
+        "internalCreditScore": deal.get("internal_credit_score"),
         "latestPeriodLabel": deal["latest_period_label"],
         "latestPeriodEnd": deal["latest_period_end"].isoformat(),
         "latestReportedAt": deal["latest_reported_at"].isoformat(),
@@ -13597,6 +13620,93 @@ def get_deal_forecasts(slug: str):
         "dealGrade": deal["effective_grade"],
         "summary": summary,
         "cases": cases,
+    }
+
+
+@app.get("/api/deals/{slug}/forecasts/{case_id}")
+def get_forecast_case_detail(slug: str, case_id: int):
+    """Return a single forecast case with all period data and matching actuals for charting."""
+    with get_connection() as conn:
+        deal_id = _get_deal_id(conn, slug)
+        fc = conn.execute(
+            "SELECT * FROM forecast_cases WHERE id = %s AND deal_id = %s",
+            (case_id, deal_id),
+        ).fetchone()
+        if not fc:
+            raise HTTPException(status_code=404, detail="Forecast case not found")
+
+        # Get active version periods
+        version = conn.execute(
+            """SELECT fcv.* FROM forecast_case_versions fcv
+               WHERE fcv.forecast_case_id = %s AND fcv.is_active = TRUE
+               LIMIT 1""",
+            (case_id,),
+        ).fetchone()
+        if not version:
+            version = conn.execute(
+                """SELECT fcv.* FROM forecast_case_versions fcv
+                   WHERE fcv.forecast_case_id = %s
+                   ORDER BY fcv.version_number DESC LIMIT 1""",
+                (case_id,),
+            ).fetchone()
+
+        periods = []
+        if version:
+            periods = conn.execute(
+                """SELECT * FROM forecast_case_periods
+                   WHERE forecast_case_version_id = %s
+                   ORDER BY period_key""",
+                (version["id"],),
+            ).fetchall()
+
+        # Get all actuals for the deal
+        actuals = conn.execute(
+            """SELECT period_flag, period_label, actual_metrics, borrower_reported_ratios
+               FROM actual_periods WHERE deal_id = %s ORDER BY period_flag""",
+            (deal_id,),
+        ).fetchall()
+        actuals_by_flag = {a["period_flag"]: a for a in actuals}
+
+        # Build period series — forecast + actuals overlay
+        period_series = []
+        for p in periods:
+            fm = p["scenario_metrics"] or {}
+            actual = actuals_by_flag.get(p["period_key"])
+            am = (actual["actual_metrics"] if actual else None) or {}
+            ar = (actual["borrower_reported_ratios"] if actual else None) or {}
+            period_series.append({
+                "periodKey": p["period_key"],
+                "periodLabel": p["period_label"],
+                "forecast": fm,
+                "actuals": {**am, **ar} if actual else None,
+            })
+
+        # Also include any actuals for periods beyond the forecast range
+        forecast_keys = {p["period_key"] for p in periods}
+        for a in actuals:
+            if a["period_flag"] not in forecast_keys:
+                am = a["actual_metrics"] or {}
+                ar = a["borrower_reported_ratios"] or {}
+                period_series.append({
+                    "periodKey": a["period_flag"],
+                    "periodLabel": a["period_label"],
+                    "forecast": None,
+                    "actuals": {**am, **ar},
+                })
+        period_series.sort(key=lambda x: x["periodKey"])
+
+    return {
+        "dealSlug": slug,
+        "caseId": fc["id"],
+        "caseName": fc["case_name"],
+        "caseType": fc["case_type"],
+        "comparisonPriority": fc["comparison_priority"],
+        "drivesMonitoring": fc["drives_monitoring"],
+        "ownerName": fc["owner_name"],
+        "summary": fc["summary"],
+        "versionLabel": version["version_label"] if version else None,
+        "versionStatus": version["version_status"] if version else None,
+        "periodSeries": period_series,
     }
 
 
