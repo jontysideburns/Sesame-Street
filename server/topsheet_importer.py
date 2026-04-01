@@ -12,9 +12,9 @@ Supported sheets:
   9. Risk Register          → risk_register_entries table
   10. Stress Config         → deals.stress_parameters (JSONB)
   14. Key Outputs           → deals table (direct columns)
-  16. Base Case             → forecast_case_periods (scenario: base)
-  17. Management Case       → forecast_case_periods (scenario: management)
-  18. Downside Case         → forecast_case_periods (scenario: downside)
+  16. Base Case             → forecast_case_periods (management_case, priority 1, drives grade)
+  17. Management Case       → forecast_case_periods (lender_case, priority 2, secondary)
+  18. Downside Case         → forecast_case_periods (combined_downside, priority 3, floor/alarm)
   19. Actuals               → actual_periods table
   23. Metadata              → deals table (direct columns)
 """
@@ -157,9 +157,15 @@ LINE_ITEM_KEYS = {
 }
 
 SCENARIO_MAP = {
-    "16. Base Case": "base",
-    "17. Management Case": "management",
-    "18. Downside Case": "downside",
+    "16. Base Case": "management_case",       # Management Case (priority 1, drives grade)
+    "17. Management Case": "lender_case",     # Lender Case (priority 2, secondary comparator)
+    "18. Downside Case": "combined_downside", # Combined Downside (priority 3, floor/alarm)
+}
+
+CASE_TYPE_PRIORITY = {
+    "management_case": 1,
+    "lender_case": 2,
+    "combined_downside": 3,
 }
 
 
@@ -1015,19 +1021,22 @@ def _upsert_forecast_periods(conn, deal_id: int, scenario: str,
 
     # Find or create forecast_case
     case_key = f"{deal_id}-{scenario}"
-    case_type = scenario  # 'base', 'management', 'downside'
-    drives_monitoring = scenario == "base"
+    case_type = scenario  # 'management_case', 'lender_case', 'combined_downside'
+    priority = CASE_TYPE_PRIORITY.get(case_type, 1)
+    drives_monitoring = case_type == "management_case"
 
     case = conn.execute(
         "SELECT id FROM forecast_cases WHERE deal_id=%s AND case_type=%s",
         (deal_id, case_type),
     ).fetchone()
     if not case:
+        display_name = case_type.replace("_", " ").title()
         conn.execute(
             """INSERT INTO forecast_cases
-               (deal_id, case_key, case_name, case_type, drives_monitoring, owner_name, summary, created_at)
-               VALUES (%s,%s,%s,%s,%s,'TopSheet Import','Imported from TopSheet template',NOW())""",
-            (deal_id, case_key, f"{case_type.title()} Case", case_type, drives_monitoring),
+               (deal_id, case_key, case_name, case_type, comparison_priority,
+                drives_monitoring, owner_name, summary, created_at)
+               VALUES (%s,%s,%s,%s,%s,%s,'TopSheet Import','Imported from TopSheet template',NOW())""",
+            (deal_id, case_key, display_name, case_type, priority, drives_monitoring),
         )
         case = conn.execute(
             "SELECT id FROM forecast_cases WHERE deal_id=%s AND case_type=%s",

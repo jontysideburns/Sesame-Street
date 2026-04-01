@@ -17941,17 +17941,29 @@ def run_variance_analysis(slug: str, body: dict | None = None):
         if not ap:
             raise HTTPException(status_code=404, detail="No actual period found")
 
-        # Find matching forecast period from the active base-case version
+        # Find matching forecast period from the active management case (priority 1)
         fp = conn.execute(
             """SELECT fcp.scenario_metrics, fcp.period_label
                FROM forecast_case_periods fcp
                JOIN forecast_case_versions fcv ON fcp.forecast_case_version_id = fcv.id
                JOIN forecast_cases fc ON fcv.forecast_case_id = fc.id
-               WHERE fc.deal_id = %s AND fc.drives_monitoring = TRUE AND fcv.is_active = TRUE
+               WHERE fc.deal_id = %s AND fc.case_type = 'management_case' AND fcv.is_active = TRUE
                  AND fcp.period_key = %s
                LIMIT 1""",
             (deal_id, ap["period_flag"]),
         ).fetchone()
+        # Fallback to any drives_monitoring case if no management_case found
+        if not fp:
+            fp = conn.execute(
+                """SELECT fcp.scenario_metrics, fcp.period_label
+                   FROM forecast_case_periods fcp
+                   JOIN forecast_case_versions fcv ON fcp.forecast_case_version_id = fcv.id
+                   JOIN forecast_cases fc ON fcv.forecast_case_id = fc.id
+                   WHERE fc.deal_id = %s AND fc.drives_monitoring = TRUE AND fcv.is_active = TRUE
+                     AND fcp.period_key = %s
+                   LIMIT 1""",
+                (deal_id, ap["period_flag"]),
+            ).fetchone()
 
         actual_metrics = ap["actual_metrics"] or {}
         forecast_metrics = (fp["scenario_metrics"] if fp else {}) or {}
@@ -18181,23 +18193,56 @@ def compute_deal_grade(slug: str):
         else:
             covenant_score = 20  # no data = assume ok
 
-        # 2. Variance score (0-25) — from latest financial_variances
+        # 2. Variance score (0-25) — from management case comparison (primary driver)
+        #    Falls back to financial_variances if no management case is configured.
         latest_fp = conn.execute(
-            "SELECT id FROM financial_periods WHERE deal_id = %s ORDER BY period_end DESC LIMIT 1",
+            "SELECT id, period_key FROM financial_periods WHERE deal_id = %s ORDER BY period_end DESC LIMIT 1",
             (deal_id,),
         ).fetchone()
+        variance_score = 22  # default
         if latest_fp:
-            var_rows = conn.execute(
-                "SELECT variance_pct, materiality FROM financial_variances WHERE financial_period_id = %s",
-                (latest_fp["id"],),
-            ).fetchall()
-            if var_rows:
-                material_pct = sum(1 for v in var_rows if v["materiality"] == "material") / len(var_rows)
-                variance_score = round(25 * (1 - material_pct))
+            # Try management case variance first (priority 1 = primary)
+            mgmt_forecast = conn.execute(
+                """SELECT fcp.scenario_metrics
+                   FROM forecast_cases fc
+                   JOIN forecast_case_versions fcv ON fcv.forecast_case_id = fc.id AND fcv.is_active = TRUE
+                   JOIN forecast_case_periods fcp ON fcp.forecast_case_version_id = fcv.id
+                        AND fcp.period_key = %s
+                   WHERE fc.deal_id = %s AND fc.case_type = 'management_case'
+                   LIMIT 1""",
+                (latest_fp["period_key"], deal_id),
+            ).fetchone()
+            latest_actual = conn.execute(
+                "SELECT actual_metrics FROM actual_periods WHERE deal_id = %s ORDER BY period_end DESC LIMIT 1",
+                (deal_id,),
+            ).fetchone()
+            if mgmt_forecast and latest_actual:
+                fm = mgmt_forecast["scenario_metrics"] or {}
+                am = (latest_actual["actual_metrics"] or {})
+                compared = 0
+                material_count = 0
+                for k, av_raw in am.items():
+                    fv_raw = fm.get(k)
+                    if av_raw is None or fv_raw is None:
+                        continue
+                    try:
+                        av_f, fv_f = float(av_raw), float(fv_raw)
+                    except (ValueError, TypeError):
+                        continue
+                    compared += 1
+                    if fv_f != 0 and abs((av_f - fv_f) / fv_f) >= 0.10:
+                        material_count += 1
+                if compared > 0:
+                    variance_score = round(25 * (1 - material_count / compared))
             else:
-                variance_score = 22
-        else:
-            variance_score = 22
+                # Fallback to financial_variances table
+                var_rows = conn.execute(
+                    "SELECT variance_pct, materiality FROM financial_variances WHERE financial_period_id = %s",
+                    (latest_fp["id"],),
+                ).fetchall()
+                if var_rows:
+                    material_pct = sum(1 for v in var_rows if v["materiality"] == "material") / len(var_rows)
+                    variance_score = round(25 * (1 - material_pct))
 
         # 3. Risk score (0-25) — from risk register
         risk_rows = conn.execute(
@@ -18227,6 +18272,36 @@ def compute_deal_grade(slug: str):
             compliance_score = 25  # no obligations = fully compliant
 
         overall_score = covenant_score + variance_score + risk_score + compliance_score
+
+        # 5. Downside floor breach penalty — if actuals breach combined_downside, cap grade
+        downside_breach = False
+        if latest_fp and latest_actual:
+            ds_forecast = conn.execute(
+                """SELECT fcp.scenario_metrics
+                   FROM forecast_cases fc
+                   JOIN forecast_case_versions fcv ON fcv.forecast_case_id = fc.id AND fcv.is_active = TRUE
+                   JOIN forecast_case_periods fcp ON fcp.forecast_case_version_id = fcv.id
+                        AND fcp.period_key = %s
+                   WHERE fc.deal_id = %s AND fc.case_type = 'combined_downside'
+                   LIMIT 1""",
+                (latest_fp["period_key"], deal_id),
+            ).fetchone()
+            if ds_forecast:
+                ds_m = ds_forecast["scenario_metrics"] or {}
+                am_ds = latest_actual["actual_metrics"] or {}
+                for k, av_raw in am_ds.items():
+                    fv_raw = ds_m.get(k)
+                    if av_raw is None or fv_raw is None:
+                        continue
+                    try:
+                        av_f, fv_f = float(av_raw), float(fv_raw)
+                    except (ValueError, TypeError):
+                        continue
+                    if fv_f != 0 and ((av_f - fv_f) / fv_f) <= -0.05:
+                        downside_breach = True
+                        break
+            if downside_breach:
+                overall_score = min(overall_score, 49)  # cap at grade 6
 
         # Grade: 90-100=1, 80-89=2, 70-79=3, 60-69=4, 50-59=5, <50=6
         if overall_score >= 90:
@@ -18290,6 +18365,7 @@ def compute_deal_grade(slug: str):
             "risk": risk_score,
             "compliance": compliance_score,
         },
+        "downsideBreach": downside_breach,
         "watchlistRecommendation": watchlist_rec,
         "escalationLevel": escalation,
     }
@@ -18496,4 +18572,158 @@ def detect_trends(slug: str, body: dict | None = None):
         "dealSlug": slug,
         "periodsAnalysed": len(actuals),
         "trends": sorted(trends, key=lambda t: abs(t["totalChangePct"]), reverse=True),
+    }
+
+
+# ── 4G. Three-Case Comparison Engine ─────────────────────────────────────────
+# Compares actuals against all 3 forecast tiers with tiered signals:
+#   management_case (priority 1) → primary, drives grade
+#   lender_case     (priority 2) → secondary comparator
+#   combined_downside (priority 3) → floor, breach = alarm
+
+@app.post("/api/deals/{slug}/analytics/three-case-comparison")
+def three_case_comparison(slug: str, body: dict | None = None):
+    """Compare actuals vs all 3 forecast cases for the latest (or specified) period.
+    Body can include {"periodFlag": "2026Q2"}.
+    Returns per-metric variance against each case with tiered severity signals."""
+    with get_connection() as conn:
+        deal_id = _get_deal_id(conn, slug)
+
+        period_flag = (body or {}).get("periodFlag")
+        if period_flag:
+            ap = conn.execute(
+                "SELECT * FROM actual_periods WHERE deal_id = %s AND period_flag = %s ORDER BY source_hierarchy LIMIT 1",
+                (deal_id, period_flag),
+            ).fetchone()
+        else:
+            ap = conn.execute(
+                "SELECT * FROM actual_periods WHERE deal_id = %s ORDER BY period_end DESC LIMIT 1",
+                (deal_id,),
+            ).fetchone()
+        if not ap:
+            raise HTTPException(status_code=404, detail="No actual period found")
+
+        actual_metrics = ap["actual_metrics"] or {}
+
+        # Fetch all 3 cases ordered by comparison_priority
+        cases = conn.execute(
+            """SELECT fc.id, fc.case_type, fc.case_name, fc.comparison_priority,
+                      fc.drives_monitoring, fcp.scenario_metrics
+               FROM forecast_cases fc
+               JOIN forecast_case_versions fcv ON fcv.forecast_case_id = fc.id AND fcv.is_active = TRUE
+               JOIN forecast_case_periods fcp ON fcp.forecast_case_version_id = fcv.id
+                    AND fcp.period_key = %s
+               WHERE fc.deal_id = %s
+               ORDER BY fc.comparison_priority""",
+            (ap["period_flag"], deal_id),
+        ).fetchall()
+
+        case_results = []
+        downside_breaches = []
+
+        for case in cases:
+            forecast = case["scenario_metrics"] or {}
+            variances = []
+            material_count = 0
+            adverse_count = 0
+
+            for key, actual_val in actual_metrics.items():
+                if actual_val is None:
+                    continue
+                try:
+                    av = float(actual_val)
+                except (ValueError, TypeError):
+                    continue
+                fv_raw = forecast.get(key)
+                if fv_raw is None:
+                    continue
+                try:
+                    fv = float(fv_raw)
+                except (ValueError, TypeError):
+                    continue
+
+                var_value = round(av - fv, 2)
+                var_pct = round((var_value / fv) * 100, 2) if fv != 0 else 0.0
+                direction = "favourable" if var_value >= 0 else "adverse"
+                abs_pct = abs(var_pct)
+                if abs_pct >= 10:
+                    materiality = "material"
+                    material_count += 1
+                elif abs_pct >= 5:
+                    materiality = "notable"
+                else:
+                    materiality = "immaterial"
+
+                if direction == "adverse":
+                    adverse_count += 1
+
+                variances.append({
+                    "metricKey": key,
+                    "actualValue": av,
+                    "forecastValue": fv,
+                    "varianceValue": var_value,
+                    "variancePct": var_pct,
+                    "direction": direction,
+                    "materiality": materiality,
+                })
+
+                # Track downside breaches — actuals falling below the floor
+                if case["case_type"] == "combined_downside" and direction == "adverse" and materiality in ("material", "notable"):
+                    downside_breaches.append({
+                        "metricKey": key,
+                        "actualValue": av,
+                        "floorValue": fv,
+                        "shortfall": var_value,
+                        "shortfallPct": var_pct,
+                    })
+
+            # Signal tier based on case type
+            if case["case_type"] == "management_case":
+                signal_role = "primary"
+                signal_note = "Drives grade and monitoring actions"
+            elif case["case_type"] == "lender_case":
+                signal_role = "secondary"
+                signal_note = "Lender/borrower comparator — informational"
+            else:
+                signal_role = "floor"
+                signal_note = "Breach below this case triggers alarm escalation"
+
+            case_results.append({
+                "caseType": case["case_type"],
+                "caseName": case["case_name"],
+                "comparisonPriority": case["comparison_priority"],
+                "signalRole": signal_role,
+                "signalNote": signal_note,
+                "drivesMonitoring": case["drives_monitoring"],
+                "totalMetrics": len(variances),
+                "materialCount": material_count,
+                "adverseCount": adverse_count,
+                "variances": sorted(variances, key=lambda x: abs(x["variancePct"]), reverse=True),
+            })
+
+        # Determine overall signal
+        mgmt_case = next((c for c in case_results if c["caseType"] == "management_case"), None)
+        has_downside_breach = len(downside_breaches) > 0
+
+        if has_downside_breach:
+            overall_signal = "alarm"
+            signal_summary = f"Actuals have breached the combined downside on {len(downside_breaches)} metric(s) — escalation recommended."
+        elif mgmt_case and mgmt_case["materialCount"] > 0:
+            overall_signal = "warning"
+            signal_summary = f"Management case shows {mgmt_case['materialCount']} material adverse variance(s) — grade impact likely."
+        elif mgmt_case and mgmt_case["adverseCount"] > 0:
+            overall_signal = "monitor"
+            signal_summary = "Minor adverse variances vs management case — continue monitoring."
+        else:
+            overall_signal = "clear"
+            signal_summary = "Actuals are tracking at or above all forecast cases."
+
+    return {
+        "dealSlug": slug,
+        "periodLabel": ap["period_label"],
+        "periodFlag": ap["period_flag"],
+        "overallSignal": overall_signal,
+        "signalSummary": signal_summary,
+        "downsideBreaches": downside_breaches,
+        "cases": case_results,
     }
