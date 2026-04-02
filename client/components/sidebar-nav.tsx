@@ -149,6 +149,16 @@ function JpsIcon(className?: string) {
   );
 }
 
+function DanIcon(className?: string) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M12 2l1.09 3.26L16.36 6l-3.27 1.09L12 10.36l-1.09-3.27L7.64 6l3.27-1.09L12 2z" stroke="currentColor" strokeWidth="1.5" fill="currentColor" opacity="0.6" />
+      <path d="M5 15l.54 1.63L7.17 17.17 5.54 17.71 5 19.34l-.54-1.63L2.83 17.17l1.63-.54L5 15z" stroke="currentColor" strokeWidth="1.5" fill="currentColor" opacity="0.6" />
+      <path d="M19 12l.54 1.63 1.63.54-1.63.54L19 16.34l-.54-1.63-1.63-.54 1.63-.54L19 12z" stroke="currentColor" strokeWidth="1.5" fill="currentColor" opacity="0.6" />
+    </svg>
+  );
+}
+
 function AnalyticsIcon(className?: string) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -278,6 +288,12 @@ const bottomNavItems: NavItem[] = [
     label: "Templates",
     matches: (pathname) => pathname.startsWith("/plumbing"),
     icon: PlumbingIcon
+  },
+  {
+    href: "/dan",
+    label: "Dan",
+    matches: (pathname) => pathname.startsWith("/dan"),
+    icon: DanIcon
   },
   {
     href: "/analytics",
