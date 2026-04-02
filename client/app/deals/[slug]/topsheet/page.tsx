@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { fetchJson } from "../../../../api/http";
 import { getDeal } from "../../../../api/deals";
+import ForecastGrid from "./forecast-grid";
 
 /* ── Helpers ─────────────────────────────────────────────────────── */
 
@@ -377,6 +378,45 @@ export default async function TopSheetPage({ params }: { params: Promise<{ slug:
         ) : <EmptyState message="No financial template configured." />}
       </Section>
 
+      {/* ═══ F.8: Forecast Scenarios ═══════════════════════════════ */}
+      <Section eyebrow="F.8" title="Forecast Scenarios">
+        {deal.forecastSummary?.scenarioCount > 0 ? (
+          <>
+            <p style={{ fontSize: "0.82rem", color: "var(--ink-soft)", marginBottom: 12 }}>
+              {deal.forecastSummary.scenarioCount} scenario{deal.forecastSummary.scenarioCount !== 1 ? "s" : ""} configured.
+            </p>
+            <div className="jps-table-wrap">
+              <table className="jps-table" style={{ marginBottom: 0 }}>
+                <thead><tr><th style={thStyle}>Scenario</th><th style={thStyle}>Type</th><th style={thR}>Revenue Delta</th><th style={thR}>DSCR Delta</th></tr></thead>
+                <tbody>
+                  {deal.forecastSummary.scenarios?.map((s: any, i: number) => (
+                    <tr key={i}>
+                      <td style={tdBold}>{s.caseName}</td>
+                      <td style={td}><span className={`badge neutral badge-sm`}>{clean(s.caseType)}</span></td>
+                      <td style={tdR}>{s.deltaToMonitoring?.revenue != null ? fmt(s.deltaToMonitoring.revenue) : "\u2014"}</td>
+                      <td style={tdR}>{s.deltaToMonitoring?.dscr != null ? `${fmtDec(s.deltaToMonitoring.dscr)}x` : "\u2014"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        ) : <EmptyState message="No forecast scenarios configured." />}
+      </Section>
+
+      {/* ═══ F.5.2: Forecast Grid with Case Selector ═══════════════ */}
+      {ts.reportingPeriods?.length > 0 && ts.lineItemDefinitions?.length > 0 && (
+        <Section eyebrow="F.5.2" title="Financial Forecast Grid">
+          <ForecastGrid
+            periods={ts.reportingPeriods}
+            lineItems={ts.lineItemDefinitions}
+            dealLabels={ts.dealLineLabels ?? {}}
+            forecastItems={ts.forecastItems ?? []}
+            actualItems={ts.actualItems ?? []}
+          />
+        </Section>
+      )}
+
       {/* ═══ SECTION 6: Financial Performance ══════════════════════ */}
       <Section eyebrow="F.5.2" title="Financial Performance">
         <h3 style={{ fontSize: "0.80rem", fontWeight: 700, marginBottom: 8, color: "var(--accent)" }}>Key Metrics</h3>
@@ -545,31 +585,6 @@ export default async function TopSheetPage({ params }: { params: Promise<{ slug:
         )}
       </Section>
 
-      {/* ═══ SECTION 10: Forecast Scenarios ════════════════════════ */}
-      <Section eyebrow="F.8" title="Forecast Scenarios">
-        {deal.forecastSummary?.scenarioCount > 0 ? (
-          <>
-            <p style={{ fontSize: "0.82rem", color: "var(--ink-soft)", marginBottom: 12 }}>
-              {deal.forecastSummary.scenarioCount} scenario{deal.forecastSummary.scenarioCount !== 1 ? "s" : ""} configured.
-            </p>
-            <div className="jps-table-wrap">
-              <table className="jps-table" style={{ marginBottom: 0 }}>
-                <thead><tr><th style={thStyle}>Scenario</th><th style={thStyle}>Type</th><th style={thR}>Revenue Delta</th><th style={thR}>DSCR Delta</th></tr></thead>
-                <tbody>
-                  {deal.forecastSummary.scenarios?.map((s: any, i: number) => (
-                    <tr key={i}>
-                      <td style={tdBold}>{s.caseName}</td>
-                      <td style={td}><span className={`badge neutral badge-sm`}>{clean(s.caseType)}</span></td>
-                      <td style={tdR}>{s.deltaToMonitoring?.revenue != null ? fmt(s.deltaToMonitoring.revenue) : "\u2014"}</td>
-                      <td style={tdR}>{s.deltaToMonitoring?.dscr != null ? `${fmtDec(s.deltaToMonitoring.dscr)}x` : "\u2014"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </>
-        ) : <EmptyState message="No forecast scenarios configured." />}
-      </Section>
     </main>
   );
 }

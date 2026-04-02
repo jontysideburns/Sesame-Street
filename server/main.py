@@ -18152,6 +18152,51 @@ def get_deal_topsheet(slug: str):
             (deal_id,),
         ).fetchall()
 
+        # Full reporting period calendar (for forecast grid)
+        all_periods = conn.execute(
+            """SELECT id, period_flag, period_label, period_start, period_end,
+                      period_frequency, period_ordinal, period_type, data_status
+               FROM deal_reporting_periods WHERE deal_id = %s
+               ORDER BY period_ordinal""",
+            (deal_id,),
+        ).fetchall()
+
+        # Line item definitions (chart of accounts)
+        line_items = conn.execute(
+            """SELECT line_key, section, display_label, row_order, is_generic,
+                      is_computed, unit, parent_line_key
+               FROM line_item_definitions
+               ORDER BY section, row_order""",
+        ).fetchall()
+
+        # Deal line item labels (sector-specific names)
+        deal_labels = conn.execute(
+            """SELECT line_key, display_label, ordinal
+               FROM deal_line_item_labels WHERE deal_id = %s
+               ORDER BY ordinal""",
+            (deal_id,),
+        ).fetchall()
+
+        # Forecast period items (if any frozen forecasts exist)
+        forecast_items = conn.execute(
+            """SELECT fpi.forecast_case_version_id, fpi.reporting_period_id,
+                      fpi.line_key, fpi.value
+               FROM forecast_period_items fpi
+               WHERE fpi.deal_id = %s
+               ORDER BY fpi.forecast_case_version_id, fpi.reporting_period_id""",
+            (deal_id,),
+        ).fetchall()
+
+        # Actual period items (reported data)
+        actual_items = conn.execute(
+            """SELECT pfi.reporting_period_id, pfi.line_key,
+                      pfi.reported_value, pfi.approved_value, pfi.item_status
+               FROM period_financial_items pfi
+               WHERE pfi.deal_id = %s
+               ORDER BY pfi.reporting_period_id""",
+            (deal_id,),
+        ).fetchall()
+
     deal = _serialize_row(deal_row, skip_deal_id=False)
 
     return {
@@ -18170,6 +18215,11 @@ def get_deal_topsheet(slug: str):
         "latestPeriods": [_serialize_row(r) for r in periods],
         "latestActuals": [_serialize_row(r) for r in actuals],
         "latestCovenantTests": [_serialize_row(r) for r in cov_tests],
+        "reportingPeriods": [_serialize_row(r) for r in all_periods],
+        "lineItemDefinitions": [_serialize_row(r) for r in line_items],
+        "dealLineLabels": {r["line_key"]: r["display_label"] for r in deal_labels},
+        "forecastItems": [_serialize_row(r) for r in forecast_items],
+        "actualItems": [_serialize_row(r) for r in actual_items],
     }
 
 
@@ -18997,7 +19047,7 @@ def detect_trends(slug: str, body: dict | None = None):
 # ── 4G. Three-Case Comparison Engine ─────────────────────────────────────────
 # Compares actuals against all 3 forecast tiers with tiered signals:
 #   management_case (priority 1) → primary, drives grade
-#   lender_case     (priority 2) → secondary comparator
+#   credit_case     (priority 2) → secondary comparator
 #   combined_downside (priority 3) → floor, breach = alarm
 
 @app.post("/api/deals/{slug}/analytics/three-case-comparison")
@@ -19100,7 +19150,7 @@ def three_case_comparison(slug: str, body: dict | None = None):
             if case["case_type"] == "management_case":
                 signal_role = "primary"
                 signal_note = "Drives grade and monitoring actions"
-            elif case["case_type"] == "lender_case":
+            elif case["case_type"] == "credit_case":
                 signal_role = "secondary"
                 signal_note = "Lender/borrower comparator — informational"
             else:

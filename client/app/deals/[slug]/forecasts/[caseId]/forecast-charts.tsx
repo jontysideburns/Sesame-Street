@@ -431,7 +431,7 @@ export default function ForecastCharts({ periodSeries, caseName, caseType, hasAc
       {/* Controls */}
       <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 24, flexWrap: "wrap" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span className={`badge ${caseType === "management_case" ? "good" : caseType === "lender_case" ? "neutral" : "warning"}`}>
+          <span className={`badge ${caseType === "management_case" ? "good" : caseType === "credit_case" ? "neutral" : "warning"}`}>
             {caseType.replace(/_/g, " ")}
           </span>
           <span style={{ fontSize: "0.82rem", color: "var(--ink-soft)" }}>
