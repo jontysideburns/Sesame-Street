@@ -72,24 +72,57 @@ docker exec docker-postgres-1 psql -U sesame -d sesamestreet -f //migrations//mi
 - Every sector has: Other Revenue, Other Opex, Power Cost
 
 ### Normalised Financial Data Architecture
-- `deal_reporting_schedule` — per-deal reporting calendar
-- `deal_reporting_periods` — materialised period slots (5 quarters seeded per deal)
-- `line_item_definitions` — chart of accounts (67 generic + 56 subcategory slots = 123 total)
-- `period_financial_items` — one row per line item per period (ready for ingestion engine)
+- `deal_reporting_schedule` — per-deal reporting calendar (with forecast horizon extension)
+- `deal_reporting_periods` — materialised period slots with `period_type` (historical/current/forecast)
+- `line_item_definitions` — chart of accounts (181 total: cashflow + covenants + P&L + balance sheet + Moody's ratios)
+- `period_financial_items` — one row per line item per period for ACTUALS from borrower reporting
 - `deal_line_item_labels` — per-deal display names from template JSONB
+
+### Life-of-Investment Forecast Storage
+- `forecast_period_items` — write-once grid: (scenario version × period × line item) = value
+  - Frozen at IC approval, immutable after ingestion
+  - Supports 500 deals × 60 periods × 181 items × 3 cases = ~16.3M rows (~1.9GB)
+- `forecast_model_metadata` — source model provenance (name, date, assumptions, who approved)
+- Forecast cases: management_case, lender_case, combined_downside
+- Reforecasting: PM creates a new `forecast_case_version` — old version stays frozen as historical record
+- Variance = `period_financial_items.approved_value - forecast_period_items.value`
+
+### Multi-Tranche Holdings & Jurisdiction
+- `account_instrument_allocations` — which account holds which specific tranche
+- `deal_jurisdiction_splits` — multi-country revenue/operations proportions
+- Pari-passu grouping, issuing entity linkage, instrument format on capital structure
+
+### IC Memo KPI Monitoring
+- `deal_kpi_targets` — base case and stress case KPI expectations from IC memo
+- `deal_kpi_observations` — actual KPI values with `deviation_to_stress` (0% = at base, 100% = at stress)
+
+### Moody's Financial Ratios
+- FFO, RCF, Total Debt Service as computed building blocks
+- 12 Moody's ratios: FFO/Net Debt, RCF/Net Debt, AICR, Total DSCR, ADSCR Break-Even, etc.
+- Standard adjustment inputs: operating leases, pension deficit, hybrid debt, securitisations
 
 ### Credit Ratings & Spread
 - External ratings (Moody's, S&P, Fitch) + internal credit score on deals
 - Capital structure instruments seeded for all 7 deals with margin_bps
 - WA Spread computed from exposure-weighted instrument margins
 
+### Deal TopSheet Visualisation
+- Full-page single-scroll view at `/deals/[slug]/topsheet`
+- 10 sections: Identity, Capital Structure, Counterparties, Reserves, KPIs, Performance, Risk, Development, Distribution, Forecasts
+- Accessed via "View Full TopSheet" button on deal page
+
+### Documentation
+- `docs/topsheet-spec-project-finance.md` — complete PF TopSheet field inventory
+- `docs/moodys-ratio-definitions.md` — Moody's ratios mapped to our line items
+- `docs/nim-model-topsheet-gap-analysis.md` — NIM financial model analysis
+
 ## What's Next
-- **Ingestion engine**: Extract financial data from uploaded documents into `period_financial_items`
-- **Period generation**: Auto-generate `deal_reporting_periods` from schedule
-- **Computed rows**: EBITDA, CFADS, ratios calculated from component line items
-- **Variance analysis**: Line-level forecast vs actual comparison
+- **Ingestion engine**: Extract financial data from uploaded models into `forecast_period_items` + `period_financial_items`
+- **Period generation**: Auto-generate full life-of-deal `deal_reporting_periods` from schedule
+- **Computed rows**: Auto-calculate EBITDA, CFADS, FFO, ratios from component line items
+- **Variance analysis**: Line-level actual vs frozen forecast comparison
+- **Corporate TopSheet**: Separate template for holdco/corporate investments (vs PF/SPV)
 - **Multi-sector portfolio**: Add non-data-centre deals to demonstrate sector diversity
-- **Deal classifications**: Revenue risk codes (P/V/D) need completing for all deals
 
 ## Branch Info
 - Main development branch: `claude/romantic-tu`

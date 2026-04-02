@@ -178,6 +178,9 @@ export default async function DealPage({
               <Link className="button secondary" href="/portfolio">
                 Back to Portfolio
               </Link>
+              <Link className="button secondary" href={`/deals/${deal.slug}/topsheet`} style={{ fontWeight: 700, background: "var(--accent)", color: "white", border: "none" }}>
+                View Full TopSheet
+              </Link>
               <Link className="button secondary" href={`/deals/${deal.slug}/periods/latest`}>
                 Period View
               </Link>

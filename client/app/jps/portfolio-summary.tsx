@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import Link from "next/link";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, Treemap, Legend,
+  PieChart, Pie, Cell, Treemap,
 } from "recharts";
 import type { Deal } from "./jps-filter-grid";
 
@@ -333,39 +333,15 @@ export default function PortfolioSummary({ deals }: { deals: Deal[] }) {
       </ChartPanel>
 
       <ChartPanel title="Country">
-        <ResponsiveContainer width="100%" height={140}>
-          <PieChart>
-            <Pie data={stats.countryData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={30} outerRadius={52} paddingAngle={2} label={false}>
-              {stats.countryData.map((e, i) => <Cell key={i} fill={e.fill} />)}
-            </Pie>
-            <Tooltip />
-            <Legend wrapperStyle={{ fontSize: "0.62rem" }} iconSize={7} />
-          </PieChart>
-        </ResponsiveContainer>
+        <DonutWithLegend data={stats.countryData} />
       </ChartPanel>
 
       <ChartPanel title="Security Ranking">
-        <ResponsiveContainer width="100%" height={140}>
-          <PieChart>
-            <Pie data={stats.securityData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={30} outerRadius={52} paddingAngle={2} label={false}>
-              {stats.securityData.map((e, i) => <Cell key={i} fill={e.fill} />)}
-            </Pie>
-            <Tooltip />
-            <Legend wrapperStyle={{ fontSize: "0.62rem" }} iconSize={7} />
-          </PieChart>
-        </ResponsiveContainer>
+        <DonutWithLegend data={stats.securityData} />
       </ChartPanel>
 
       <ChartPanel title="Format">
-        <ResponsiveContainer width="100%" height={140}>
-          <PieChart>
-            <Pie data={stats.formatData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={30} outerRadius={52} paddingAngle={2} label={false}>
-              {stats.formatData.map((e, i) => <Cell key={i} fill={e.fill} />)}
-            </Pie>
-            <Tooltip />
-            <Legend wrapperStyle={{ fontSize: "0.62rem" }} iconSize={7} />
-          </PieChart>
-        </ResponsiveContainer>
+        <DonutWithLegend data={stats.formatData} />
       </ChartPanel>
 
       {/* ── Row 3: Performance (Rating, Grade, Trend, Covenant) ── */}
@@ -396,27 +372,11 @@ export default function PortfolioSummary({ deals }: { deals: Deal[] }) {
       </ChartPanel>
 
       <ChartPanel title="Trend">
-        <ResponsiveContainer width="100%" height={140}>
-          <PieChart>
-            <Pie data={stats.trendData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={30} outerRadius={52} paddingAngle={2} label={false}>
-              {stats.trendData.map((e, i) => <Cell key={i} fill={e.fill} />)}
-            </Pie>
-            <Tooltip />
-            <Legend wrapperStyle={{ fontSize: "0.62rem" }} iconSize={7} />
-          </PieChart>
-        </ResponsiveContainer>
+        <DonutWithLegend data={stats.trendData} />
       </ChartPanel>
 
       <ChartPanel title="Covenant Status">
-        <ResponsiveContainer width="100%" height={140}>
-          <PieChart>
-            <Pie data={stats.covenantData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={30} outerRadius={52} paddingAngle={2} label={false}>
-              {stats.covenantData.map((e, i) => <Cell key={i} fill={e.fill} />)}
-            </Pie>
-            <Tooltip />
-            <Legend wrapperStyle={{ fontSize: "0.62rem" }} iconSize={7} />
-          </PieChart>
-        </ResponsiveContainer>
+        <DonutWithLegend data={stats.covenantData} />
       </ChartPanel>
 
       {/* ── Row 4: Attention Lists ──────────────────────────────── */}
@@ -446,6 +406,35 @@ export default function PortfolioSummary({ deals }: { deals: Deal[] }) {
 }
 
 /* ── Sub-components ──────────────────────────────────────────────── */
+
+function DonutWithLegend({ data, height = 130 }: { data: { name: string; value: number; fill: string }[]; height?: number }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 4, height }}>
+      {/* Legend on left */}
+      <div style={{ flex: "0 0 auto", minWidth: 0, maxWidth: "50%", overflow: "hidden" }}>
+        {data.map((entry, i) => (
+          <div key={i} style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 3, fontSize: "0.62rem", lineHeight: 1.2 }}>
+            <span style={{ width: 7, height: 7, borderRadius: "50%", background: entry.fill, flexShrink: 0, display: "inline-block" }} />
+            <span style={{ color: "var(--ink-soft)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {entry.name} <strong style={{ color: "var(--ink)" }}>({entry.value >= 1000 ? fmtCompact(entry.value) : entry.value})</strong>
+            </span>
+          </div>
+        ))}
+      </div>
+      {/* Donut on right */}
+      <div style={{ flex: 1, minWidth: 0, height: "100%" }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart>
+            <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={28} outerRadius={50} paddingAngle={2} label={false}>
+              {data.map((e, i) => <Cell key={i} fill={e.fill} />)}
+            </Pie>
+            <Tooltip />
+          </PieChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
 
 function ChartPanel({ title, children }: { title: string; children: React.ReactNode }) {
   return (

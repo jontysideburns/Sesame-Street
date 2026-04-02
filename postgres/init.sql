@@ -3571,6 +3571,48 @@ INSERT INTO deal_financial_template (deal_id, sector_template, revenue_line_labe
 ON CONFLICT DO NOTHING;
 
 -- ═══════════════════════════════════════════════════════════════════════════════
+-- Full life-of-investment forecast storage
+ALTER TABLE deal_reporting_periods ADD COLUMN IF NOT EXISTS period_type TEXT NOT NULL DEFAULT 'historical';
+ALTER TABLE deal_reporting_schedule ADD COLUMN IF NOT EXISTS forecast_end_date DATE;
+ALTER TABLE deal_reporting_schedule ADD COLUMN IF NOT EXISTS model_periods_count INTEGER;
+
+CREATE TABLE IF NOT EXISTS forecast_period_items (
+    id                          BIGSERIAL PRIMARY KEY,
+    deal_id                     INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+    forecast_case_version_id    INTEGER NOT NULL REFERENCES forecast_case_versions(id) ON DELETE CASCADE,
+    reporting_period_id         INTEGER NOT NULL REFERENCES deal_reporting_periods(id) ON DELETE CASCADE,
+    line_key                    TEXT NOT NULL REFERENCES line_item_definitions(line_key),
+    value                       NUMERIC(18, 4),
+    created_at                  TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(forecast_case_version_id, reporting_period_id, line_key)
+);
+CREATE INDEX idx_fpi_deal_version ON forecast_period_items(deal_id, forecast_case_version_id);
+CREATE INDEX idx_fpi_deal_line ON forecast_period_items(deal_id, line_key);
+CREATE INDEX idx_fpi_version_period ON forecast_period_items(forecast_case_version_id, reporting_period_id);
+
+CREATE TABLE IF NOT EXISTS forecast_model_metadata (
+    id                          SERIAL PRIMARY KEY,
+    deal_id                     INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+    forecast_case_version_id    INTEGER REFERENCES forecast_case_versions(id) ON DELETE SET NULL,
+    model_name                  TEXT NOT NULL,
+    model_date                  DATE NOT NULL,
+    model_source                TEXT,
+    model_periodicity           TEXT NOT NULL,
+    model_start_date            DATE NOT NULL,
+    model_end_date              DATE NOT NULL,
+    model_periods               INTEGER NOT NULL,
+    model_currency              VARCHAR(3) NOT NULL,
+    base_rate_assumption        TEXT,
+    inflation_assumption        TEXT,
+    prepared_by                 TEXT,
+    approved_by                 TEXT,
+    approved_at                 TIMESTAMPTZ,
+    source_document_id          INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+    notes                       TEXT,
+    created_at                  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX idx_fmm_deal ON forecast_model_metadata(deal_id);
+
 -- SEED: IC Memo KPI targets and observations for Aurora Prime (deal_id = 1)
 -- ═══════════════════════════════════════════════════════════════════════════════
 

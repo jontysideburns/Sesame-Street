@@ -433,6 +433,55 @@ INSERT INTO line_item_definitions (line_key, section, display_label, row_order, 
 ('adj_net_debt_ebitda',      'moodys_ratios', 'Adj Net Debt / EBITDA (Moody''s)',     12, TRUE,  'moodys_adjusted_net_debt / ebitda',                 'ratio')
 ON CONFLICT (line_key) DO NOTHING;
 
+-- ── Full life-of-investment forecast storage ─────────────────────────────────
+
+-- Period type discriminator (historical, current, forecast)
+ALTER TABLE deal_reporting_periods ADD COLUMN IF NOT EXISTS period_type TEXT NOT NULL DEFAULT 'historical';
+
+-- Forecast horizon on schedule
+ALTER TABLE deal_reporting_schedule ADD COLUMN IF NOT EXISTS forecast_end_date DATE;
+ALTER TABLE deal_reporting_schedule ADD COLUMN IF NOT EXISTS model_periods_count INTEGER;
+
+-- Forecast period items — write-once at ingestion, one row per cell in the grid
+-- (line_key × period × frozen scenario version)
+CREATE TABLE IF NOT EXISTS forecast_period_items (
+    id                          BIGSERIAL PRIMARY KEY,
+    deal_id                     INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+    forecast_case_version_id    INTEGER NOT NULL REFERENCES forecast_case_versions(id) ON DELETE CASCADE,
+    reporting_period_id         INTEGER NOT NULL REFERENCES deal_reporting_periods(id) ON DELETE CASCADE,
+    line_key                    TEXT NOT NULL REFERENCES line_item_definitions(line_key),
+    value                       NUMERIC(18, 4),         -- the forecast value (null = not modelled for this line)
+    created_at                  TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(forecast_case_version_id, reporting_period_id, line_key)
+);
+CREATE INDEX IF NOT EXISTS idx_fpi_deal_version ON forecast_period_items(deal_id, forecast_case_version_id);
+CREATE INDEX IF NOT EXISTS idx_fpi_deal_line ON forecast_period_items(deal_id, line_key);
+CREATE INDEX IF NOT EXISTS idx_fpi_version_period ON forecast_period_items(forecast_case_version_id, reporting_period_id);
+
+-- Forecast model metadata — records the source financial model
+CREATE TABLE IF NOT EXISTS forecast_model_metadata (
+    id                          SERIAL PRIMARY KEY,
+    deal_id                     INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+    forecast_case_version_id    INTEGER REFERENCES forecast_case_versions(id) ON DELETE SET NULL,
+    model_name                  TEXT NOT NULL,           -- e.g. "Aurora IC Model v3.2"
+    model_date                  DATE NOT NULL,           -- date the model was prepared
+    model_source                TEXT,                    -- ic_memo, sponsor_model, lender_model
+    model_periodicity           TEXT NOT NULL,           -- semi_annual, quarterly, annual
+    model_start_date            DATE NOT NULL,           -- first forecast period
+    model_end_date              DATE NOT NULL,           -- last forecast period
+    model_periods               INTEGER NOT NULL,        -- total periods in the model
+    model_currency              VARCHAR(3) NOT NULL,
+    base_rate_assumption        TEXT,                    -- e.g. "SONIA forward curve Mar 2023"
+    inflation_assumption        TEXT,                    -- e.g. "2.5% CPI"
+    prepared_by                 TEXT,
+    approved_by                 TEXT,                    -- IC approval
+    approved_at                 TIMESTAMPTZ,             -- frozen timestamp
+    source_document_id          INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+    notes                       TEXT,
+    created_at                  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_fmm_deal ON forecast_model_metadata(deal_id);
+
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- End of migrations — all statements above are idempotent
 -- ═══════════════════════════════════════════════════════════════════════════════

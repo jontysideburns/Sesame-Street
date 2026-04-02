@@ -18148,7 +18148,7 @@ def get_deal_topsheet(slug: str):
         # Covenant tests (latest 4)
         cov_tests = conn.execute(
             """SELECT * FROM covenant_tests WHERE deal_id = %s
-               ORDER BY test_date DESC LIMIT 4""",
+               ORDER BY created_at DESC LIMIT 4""",
             (deal_id,),
         ).fetchall()
 
