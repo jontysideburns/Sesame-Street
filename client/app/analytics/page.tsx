@@ -187,6 +187,31 @@ The portfolio-level "Avg Headroom" KPI is an exposure-weighted average of deal-l
   },
   // ── Portfolio Aggregations ──
   {
+    id: "wa-rating",
+    name: "Weighted Average Credit Rating",
+    category: "Portfolio Aggregations",
+    summary: "Exposure-weighted average credit rating across the portfolio, displayed on the Moody's scale.",
+    detail: `**Step 1 — Assign numeric value per deal:**
+
+Each rating agency grade maps to a number (lower = better):
+AAA/Aaa = 1, AA+/Aa1 = 2, AA/Aa2 = 3, AA-/Aa3 = 4, A+/A1 = 5, A/A2 = 6, A-/A3 = 7,
+BBB+/Baa1 = 8, BBB/Baa2 = 9, BBB-/Baa3 = 10, BB+/Ba1 = 11, BB/Ba2 = 12, ...
+
+**Step 2 — Select the assigned rating for each deal:**
+- If rated by **3 agencies** (Moody's, S&P, Fitch): use the **middle** rating (median)
+- If rated by **2 agencies**: use the **lower** of the two (more conservative)
+- If rated by **1 agency**: use that rating
+- If **not externally rated**: use the **internal credit score** from the IC memo (updatable by the HAM)
+
+**Step 3 — Compute the portfolio weighted average:**
+WA Rating (numeric) = ROUND(SUM(Exposure × Assigned Rating Numeric) / SUM(Exposure))
+
+**Step 4 — Convert back to Moody's scale:**
+The rounded numeric result is mapped back: 9 → Baa2, 10 → Baa3, etc.
+
+**Example:** A portfolio with 60% BBB (9) and 40% BBB+ (8) gives WA = 8.6, rounded to 9 = Baa2.`,
+  },
+  {
     id: "wa-dscr",
     name: "Weighted Average DSCR",
     category: "Portfolio Aggregations",

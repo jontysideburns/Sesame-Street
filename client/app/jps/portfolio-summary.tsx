@@ -26,6 +26,60 @@ const GRADE_COLORS: Record<string, string> = {
   critical: C.critical,
 };
 
+/* ── Credit Rating Scale (Moody's numeric mapping) ───────────────── */
+
+// Unified scale: maps S&P, Moody's, Fitch, and internal ratings to numeric values
+// Lower number = better credit quality
+const RATING_TO_NUMERIC: Record<string, number> = {
+  // S&P / Fitch scale
+  "AAA": 1, "AA+": 2, "AA": 3, "AA-": 4, "A+": 5, "A": 6, "A-": 7,
+  "BBB+": 8, "BBB": 9, "BBB-": 10, "BB+": 11, "BB": 12, "BB-": 13,
+  "B+": 14, "B": 15, "B-": 16, "CCC+": 17, "CCC": 18, "CCC-": 19,
+  "CC": 20, "C": 21, "D": 22,
+  // Moody's scale
+  "Aaa": 1, "Aa1": 2, "Aa2": 3, "Aa3": 4, "A1": 5, "A2": 6, "A3": 7,
+  "Baa1": 8, "Baa2": 9, "Baa3": 10, "Ba1": 11, "Ba2": 12, "Ba3": 13,
+  "B1": 14, "B2": 15, "B3": 16, "Caa1": 17, "Caa2": 18, "Caa3": 19,
+  "Ca": 20, "C_moody": 21,
+};
+
+// Reverse: numeric back to Moody's display scale
+const NUMERIC_TO_MOODYS: Record<number, string> = {
+  1: "Aaa", 2: "Aa1", 3: "Aa2", 4: "Aa3", 5: "A1", 6: "A2", 7: "A3",
+  8: "Baa1", 9: "Baa2", 10: "Baa3", 11: "Ba1", 12: "Ba2", 13: "Ba3",
+  14: "B1", 15: "B2", 16: "B3", 17: "Caa1", 18: "Caa2", 19: "Caa3",
+  20: "Ca", 21: "C", 22: "D",
+};
+
+/** Get the assigned numeric rating for a deal:
+ *  - If 3 external ratings: use the middle (median)
+ *  - If 2 external ratings: use the lower (higher numeric = worse)
+ *  - If 1 external rating: use it
+ *  - If 0 external ratings: use internal credit score from IC memo
+ */
+function assignedRatingNumeric(deal: Deal): number | null {
+  const externals: number[] = [];
+  if (deal.moodysRating && RATING_TO_NUMERIC[deal.moodysRating] != null) externals.push(RATING_TO_NUMERIC[deal.moodysRating]);
+  if (deal.spRating && RATING_TO_NUMERIC[deal.spRating] != null) externals.push(RATING_TO_NUMERIC[deal.spRating]);
+  if (deal.fitchRating && RATING_TO_NUMERIC[deal.fitchRating] != null) externals.push(RATING_TO_NUMERIC[deal.fitchRating]);
+
+  if (externals.length >= 3) {
+    externals.sort((a, b) => a - b);
+    return externals[1]; // middle of three
+  }
+  if (externals.length === 2) {
+    return Math.max(externals[0], externals[1]); // lower of two (higher number = worse)
+  }
+  if (externals.length === 1) {
+    return externals[0];
+  }
+  // Fall back to internal credit score
+  if (deal.internalCreditScore && RATING_TO_NUMERIC[deal.internalCreditScore] != null) {
+    return RATING_TO_NUMERIC[deal.internalCreditScore];
+  }
+  return null;
+}
+
 function gradeTone(grade: string) {
   if (grade.startsWith("1")) return "good";
   if (grade.startsWith("2")) return "neutral";
@@ -153,6 +207,15 @@ export default function PortfolioSummary({ deals }: { deals: Deal[] }) {
     }
     const waLife = walDen > 0 ? walNum / walDen : null;
 
+    // Weighted average credit rating (exposure-weighted, Moody's scale)
+    let ratingNum = 0, ratingDen = 0;
+    for (const d of deals) {
+      const n = assignedRatingNumeric(d);
+      if (n != null) { ratingNum += d.exposure * n; ratingDen += d.exposure; }
+    }
+    const waRatingNumeric = ratingDen > 0 ? Math.round(ratingNum / ratingDen) : null;
+    const waRatingLabel = waRatingNumeric != null ? (NUMERIC_TO_MOODYS[waRatingNumeric] ?? `~${waRatingNumeric}`) : null;
+
     const watchlistCount = deals.filter((d) => d.watchlist).length;
     const overdueCount = deals.reduce((s, d) => s + (d.overdueObligations ?? 0), 0);
 
@@ -279,7 +342,7 @@ export default function PortfolioSummary({ deals }: { deals: Deal[] }) {
       .slice(0, 5);
 
     return {
-      totalExposure, dealCount, waSpread, waLife, weightedDscr, avgHeadroom,
+      totalExposure, dealCount, waSpread, waLife, waRatingLabel, weightedDscr, avgHeadroom,
       watchlistCount, overdueCount,
       sectorData, countryData, securityData, formatData,
       ratingData, gradeData, trendData, covenantData, ratioStatusData,
@@ -299,6 +362,10 @@ export default function PortfolioSummary({ deals }: { deals: Deal[] }) {
       <div style={{ gridColumn: "span 12", display: "flex", gap: 10 }}>
         <KpiCard label="Exposure" value={fmtCompact(stats.totalExposure)} />
         <KpiCard label="Deals" value={String(stats.dealCount)} />
+        <KpiCard
+          label="WA Rating"
+          value={stats.waRatingLabel ?? "\u2014"}
+        />
         <KpiCard
           label="WA Spread"
           value={stats.waSpread != null ? `${stats.waSpread}bp` : "\u2014"}
