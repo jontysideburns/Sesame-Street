@@ -116,7 +116,7 @@ export default async function PlumbingPage() {
     <main className="shell">
       <section className="hero">
         <div className="hero-body">
-          <p className="section-eyebrow">Plumbing</p>
+          <p className="section-eyebrow">Templates</p>
           <h1 className="hero-title">System configuration</h1>
           <p className="hero-sub">
             Reference templates and classification frameworks as currently configured.

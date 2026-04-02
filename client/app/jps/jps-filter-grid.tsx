@@ -350,7 +350,7 @@ export default function JpsFilterGrid({
                 <SortTh k="sector" label="Sector" sort={sort} onSort={toggleSort} />
                 <SortTh k="rating" label="Rating" sort={sort} onSort={toggleSort} />
                 <SortTh k="exposure" label="Exposure" sort={sort} onSort={toggleSort} align="right" />
-                <SortTh k="performanceScore" label="Credit Score" sort={sort} onSort={toggleSort} align="right" />
+                <SortTh k="performanceScore" label="Score" sort={sort} onSort={toggleSort} align="right" />
                 <SortTh k="grade" label="Grade" sort={sort} onSort={toggleSort} />
                 <SortTh k="performanceTrend" label="Trend" sort={sort} onSort={toggleSort} />
                 <SortTh k="covenantStatus" label="Covenant" sort={sort} onSort={toggleSort} />

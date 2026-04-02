@@ -149,6 +149,15 @@ function JpsIcon(className?: string) {
   );
 }
 
+function AnalyticsIcon(className?: string) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M3 3v18h18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M7 16l4-6 4 4 5-8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function PlumbingIcon(className?: string) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -266,9 +275,15 @@ const primaryNavItems: NavItem[] = [
 const bottomNavItems: NavItem[] = [
   {
     href: "/plumbing",
-    label: "Plumbing",
+    label: "Templates",
     matches: (pathname) => pathname.startsWith("/plumbing"),
     icon: PlumbingIcon
+  },
+  {
+    href: "/analytics",
+    label: "Analytics",
+    matches: (pathname) => pathname.startsWith("/analytics"),
+    icon: AnalyticsIcon
   },
   {
     href: "/miscellaneous",

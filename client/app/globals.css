@@ -3627,6 +3627,9 @@ blockquote {
   }
 }
 
+/* Hide Next.js dev indicator */
+[data-nextjs-toast], nextjs-portal { display: none !important; }
+
 /* ── JPS Portfolio Summary Grid ─────────────────────────────────── */
 
 .jps-summary-grid {
