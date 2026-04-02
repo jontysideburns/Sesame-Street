@@ -519,6 +519,106 @@ export default async function DealPage({
               </article>
             </div>
 
+            {/* ── Liquidity & Reserve Accounts ───────────────────────── */}
+            {deal.reserveAccounts && deal.reserveAccounts.length > 0 && (
+              <article className="topsheet-card" style={{ marginBottom: 16 }}>
+                <strong>Liquidity & Reserve Accounts</strong>
+                <p className="topsheet-meta-note" style={{ marginBottom: 10 }}>
+                  Reserve account balances and liquidity facility availability as reported in the latest compliance certificate.
+                </p>
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.82rem" }}>
+                    <thead>
+                      <tr style={{ borderBottom: "2px solid var(--line)" }}>
+                        <th style={{ textAlign: "left", padding: "6px 8px", fontWeight: 700, fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--accent)" }}>Account</th>
+                        <th style={{ textAlign: "left", padding: "6px 8px", fontWeight: 700, fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--accent)" }}>Type</th>
+                        <th style={{ textAlign: "right", padding: "6px 8px", fontWeight: 700, fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--accent)" }}>Required</th>
+                        <th style={{ textAlign: "right", padding: "6px 8px", fontWeight: 700, fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--accent)" }}>Funded</th>
+                        <th style={{ textAlign: "left", padding: "6px 8px", fontWeight: 700, fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--accent)" }}>Funding</th>
+                        <th style={{ textAlign: "left", padding: "6px 8px", fontWeight: 700, fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--accent)" }}>Status</th>
+                        <th style={{ textAlign: "right", padding: "6px 8px", fontWeight: 700, fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--accent)" }}>Shortfall</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {deal.reserveAccounts.map((ra: {
+                        id: string;
+                        account_name: string;
+                        account_type: string;
+                        required_balance: number | null;
+                        current_balance: number | null;
+                        funded_status: string;
+                        cash_amount: number | null;
+                        lc_amount: number | null;
+                        pcg_amount: number | null;
+                        lc_provider: string | null;
+                        pcg_provider: string | null;
+                        periods_underfunded: number | null;
+                      }) => {
+                        const isAccount = !["liquidity_facility", "working_capital_facility", "rcf"].includes(ra.account_type);
+                        const required = ra.required_balance ?? 0;
+                        const actual = ra.current_balance ?? 0;
+                        const shortfall = required > actual ? required - actual : 0;
+                        const fundingParts: string[] = [];
+                        if (ra.cash_amount && ra.cash_amount > 0) fundingParts.push(`Cash ${formatMoney(ra.cash_amount)}`);
+                        if (ra.lc_amount && ra.lc_amount > 0) fundingParts.push(`LC ${formatMoney(ra.lc_amount)}${ra.lc_provider ? ` (${ra.lc_provider})` : ""}`);
+                        if (ra.pcg_amount && ra.pcg_amount > 0) fundingParts.push(`PCG ${formatMoney(ra.pcg_amount)}${ra.pcg_provider ? ` (${ra.pcg_provider})` : ""}`);
+                        const fundingStr = fundingParts.length > 0 ? fundingParts.join(" + ") : (ra.funded_status === "fully_funded" ? "Cash" : "\u2014");
+                        const statusTone = ra.funded_status === "fully_funded" || ra.funded_status === "surplus" ? "good" : ra.funded_status === "partially_funded" ? "warning" : "critical";
+                        return (
+                          <tr key={ra.id} style={{ borderBottom: "1px solid var(--line)" }}>
+                            <td style={{ padding: "6px 8px", fontWeight: 600 }}>{ra.account_name}</td>
+                            <td style={{ padding: "6px 8px", color: "var(--ink-soft)", fontSize: "0.78rem" }}>
+                              {isAccount ? "Reserve" : "Facility"}
+                            </td>
+                            <td style={{ padding: "6px 8px", textAlign: "right", fontFamily: "monospace" }}>
+                              {isAccount ? formatMoney(required) : formatMoney(required)}
+                            </td>
+                            <td style={{ padding: "6px 8px", textAlign: "right", fontFamily: "monospace", fontWeight: 600 }}>
+                              {formatMoney(actual)}
+                            </td>
+                            <td style={{ padding: "6px 8px", fontSize: "0.78rem", color: "var(--ink-soft)" }}>
+                              {fundingStr}
+                            </td>
+                            <td style={{ padding: "6px 8px" }}>
+                              <span className={`badge ${statusTone} badge-sm`}>
+                                {ra.funded_status.replace(/_/g, " ")}
+                                {ra.periods_underfunded && ra.periods_underfunded > 0 ? ` (${ra.periods_underfunded})` : ""}
+                              </span>
+                            </td>
+                            <td style={{ padding: "6px 8px", textAlign: "right", fontFamily: "monospace", color: shortfall > 0 ? "var(--critical)" : "var(--ink-soft)", fontWeight: shortfall > 0 ? 700 : 400 }}>
+                              {shortfall > 0 ? formatMoney(shortfall) : "\u2014"}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                    <tfoot>
+                      <tr style={{ borderTop: "2px solid var(--line)", fontWeight: 700 }}>
+                        <td style={{ padding: "6px 8px" }} colSpan={2}>Total</td>
+                        <td style={{ padding: "6px 8px", textAlign: "right", fontFamily: "monospace" }}>
+                          {formatMoney(deal.reserveAccounts.reduce((s: number, ra: { required_balance: number | null }) => s + (ra.required_balance ?? 0), 0))}
+                        </td>
+                        <td style={{ padding: "6px 8px", textAlign: "right", fontFamily: "monospace" }}>
+                          {formatMoney(deal.reserveAccounts.reduce((s: number, ra: { current_balance: number | null }) => s + (ra.current_balance ?? 0), 0))}
+                        </td>
+                        <td style={{ padding: "6px 8px" }} colSpan={2}></td>
+                        <td style={{ padding: "6px 8px", textAlign: "right", fontFamily: "monospace", color: "var(--critical)", fontWeight: 700 }}>
+                          {(() => {
+                            const total = deal.reserveAccounts.reduce((s: number, ra: { required_balance: number | null; current_balance: number | null }) => {
+                              const req = ra.required_balance ?? 0;
+                              const act = ra.current_balance ?? 0;
+                              return s + (req > act ? req - act : 0);
+                            }, 0);
+                            return total > 0 ? formatMoney(total) : "\u2014";
+                          })()}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </article>
+            )}
+
             <div className="topsheet-two-column">
               <article className="topsheet-card">
                 <div className="status-row">

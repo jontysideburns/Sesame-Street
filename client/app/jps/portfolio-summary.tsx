@@ -146,6 +146,13 @@ export default function PortfolioSummary({ deals }: { deals: Deal[] }) {
     }
     const waSpread = spreadDen > 0 ? Math.round(spreadNum / spreadDen) : null;
 
+    // Weighted average life (exposure-weighted)
+    let walNum = 0, walDen = 0;
+    for (const d of deals) {
+      if (d.walYears != null) { walNum += d.exposure * d.walYears; walDen += d.exposure; }
+    }
+    const waLife = walDen > 0 ? walNum / walDen : null;
+
     const watchlistCount = deals.filter((d) => d.watchlist).length;
     const overdueCount = deals.reduce((s, d) => s + (d.overdueObligations ?? 0), 0);
 
@@ -195,6 +202,73 @@ export default function PortfolioSummary({ deals }: { deals: Deal[] }) {
       fill: COVENANT_COLORS[key] ?? C.muted,
     }));
 
+    // Country breakdown (exposure-weighted from jurisdiction splits)
+    const countryMap: Record<string, { name: string; value: number }> = {};
+    for (const d of deals) {
+      if (d.jurisdictionSplits && d.jurisdictionSplits.length > 0) {
+        for (const s of d.jurisdictionSplits) {
+          if (!countryMap[s.countryCode]) countryMap[s.countryCode] = { name: s.countryName, value: 0 };
+          countryMap[s.countryCode].value += d.exposure * (s.activityPct / 100);
+        }
+      } else if (d.primaryCountryName) {
+        if (!countryMap[d.primaryCountry ?? "XX"]) countryMap[d.primaryCountry ?? "XX"] = { name: d.primaryCountryName, value: 0 };
+        countryMap[d.primaryCountry ?? "XX"].value += d.exposure;
+      }
+    }
+    const countryData = Object.values(countryMap)
+      .sort((a, b) => b.value - a.value)
+      .map((c, i) => ({ ...c, fill: `hsl(205, 55%, ${30 + i * 10}%)` }));
+
+    // Security ranking breakdown
+    const rankMap: Record<string, { name: string; value: number }> = {};
+    for (const d of deals) {
+      const r = d.securityRanking ?? "Unknown";
+      if (!rankMap[r]) rankMap[r] = { name: r, value: 0 };
+      rankMap[r].value += d.exposure;
+    }
+    const securityData = Object.values(rankMap)
+      .sort((a, b) => b.value - a.value)
+      .map((s, i) => ({ ...s, fill: i === 0 ? C.accent : `hsl(205, 45%, ${45 + i * 12}%)` }));
+
+    // Instrument format breakdown
+    const FORMAT_LABELS: Record<string, string> = {
+      loan: "Loan", bond: "Bond", note: "Note", frn: "FRN",
+      il_bond: "IL Bond", private_placement: "Private Placement",
+      convertible: "Convertible", other: "Other",
+    };
+    const formatMap: Record<string, { name: string; value: number }> = {};
+    for (const d of deals) {
+      const f = d.instrumentFormat ?? "unknown";
+      if (!formatMap[f]) formatMap[f] = { name: FORMAT_LABELS[f] ?? f, value: 0 };
+      formatMap[f].value += d.exposure;
+    }
+    const formatData = Object.values(formatMap)
+      .sort((a, b) => b.value - a.value)
+      .map((f, i) => ({ ...f, fill: `hsl(205, 50%, ${32 + i * 12}%)` }));
+
+    // Credit rating breakdown (using displayRating logic)
+    const ratingMap: Record<string, { name: string; value: number }> = {};
+    for (const d of deals) {
+      const r = d.internalCreditScore ?? d.spRating ?? d.moodysRating ?? d.fitchRating ?? "Unrated";
+      if (!ratingMap[r]) ratingMap[r] = { name: r, value: 0 };
+      ratingMap[r].value += d.exposure;
+    }
+    const ratingData = Object.values(ratingMap)
+      .sort((a, b) => b.value - a.value)
+      .map((r, i) => ({ ...r, fill: `hsl(205, 50%, ${30 + i * 10}%)` }));
+
+    // Ratio status breakdown
+    const ratioMap: Record<string, { name: string; value: number }> = {};
+    for (const d of deals) {
+      const s = d.ratioStatus ?? "unknown";
+      if (!ratioMap[s]) ratioMap[s] = { name: s.replace(/_/g, " "), value: 0 };
+      ratioMap[s].value++;
+    }
+    const ratioStatusData = Object.entries(ratioMap).map(([key, val]) => ({
+      ...val,
+      fill: COVENANT_COLORS[key] ?? C.muted,
+    }));
+
     // Attention lists
     const watchlistDeals = deals.filter((d) => d.watchlist).slice(0, 5);
     const deterioratingDeals = deals
@@ -205,9 +279,10 @@ export default function PortfolioSummary({ deals }: { deals: Deal[] }) {
       .slice(0, 5);
 
     return {
-      totalExposure, dealCount, waSpread, weightedDscr, avgHeadroom,
+      totalExposure, dealCount, waSpread, waLife, weightedDscr, avgHeadroom,
       watchlistCount, overdueCount,
-      gradeData, sectorData, trendData, covenantData,
+      sectorData, countryData, securityData, formatData,
+      ratingData, gradeData, trendData, covenantData, ratioStatusData,
       watchlistDeals, deterioratingDeals, breachedDeals,
       totalWatchlist: deals.filter((d) => d.watchlist).length,
       totalDeteriorating: deals.filter((d) => d.performanceTrend === "deteriorating" || d.performanceTrend === "deteriorating_rapidly").length,
@@ -220,113 +295,129 @@ export default function PortfolioSummary({ deals }: { deals: Deal[] }) {
   return (
     <div className="jps-summary-grid" style={{ marginBottom: 14 }}>
 
-      {/* ── Row 1: KPI Cards ───────────────────────────────────── */}
-      <KpiCard label="Exposure" value={fmtCompact(stats.totalExposure)} />
-      <KpiCard label="Deals" value={String(stats.dealCount)} />
-      <KpiCard
-        label="WA Spread"
-        value={stats.waSpread != null ? `${stats.waSpread}bp` : "\u2014"}
-      />
-      <KpiCard
-        label="Wtd DSCR"
-        value={stats.weightedDscr != null ? `${stats.weightedDscr.toFixed(2)}x` : "\u2014"}
-        tone={stats.weightedDscr != null ? (stats.weightedDscr < 1.0 ? "critical" : stats.weightedDscr < 1.2 ? "warning" : "good") : undefined}
-      />
-      <KpiCard
-        label="Headroom"
-        value={fmtPct(stats.avgHeadroom)}
-        tone={stats.avgHeadroom != null ? (stats.avgHeadroom < 5 ? "critical" : stats.avgHeadroom < 15 ? "warning" : "good") : undefined}
-      />
-      <KpiCard
-        label="Watchlist"
-        value={String(stats.watchlistCount)}
-        tone={stats.watchlistCount > 0 ? "warning" : "good"}
-      />
+      {/* ── Row 1: KPI Cards (flex row for 7 items) ──────────── */}
+      <div style={{ gridColumn: "span 12", display: "flex", gap: 10 }}>
+        <KpiCard label="Exposure" value={fmtCompact(stats.totalExposure)} />
+        <KpiCard label="Deals" value={String(stats.dealCount)} />
+        <KpiCard
+          label="WA Spread"
+          value={stats.waSpread != null ? `${stats.waSpread}bp` : "\u2014"}
+        />
+        <KpiCard
+          label="WA Life"
+          value={stats.waLife != null ? `${stats.waLife.toFixed(1)}yr` : "\u2014"}
+        />
+        <KpiCard
+          label="Wtd DSCR"
+          value={stats.weightedDscr != null ? `${stats.weightedDscr.toFixed(2)}x` : "\u2014"}
+          tone={stats.weightedDscr != null ? (stats.weightedDscr < 1.0 ? "critical" : stats.weightedDscr < 1.2 ? "warning" : "good") : undefined}
+        />
+        <KpiCard
+          label="Headroom"
+          value={fmtPct(stats.avgHeadroom)}
+          tone={stats.avgHeadroom != null ? (stats.avgHeadroom < 5 ? "critical" : stats.avgHeadroom < 15 ? "warning" : "good") : undefined}
+        />
+        <KpiCard
+          label="Watchlist"
+          value={String(stats.watchlistCount)}
+          tone={stats.watchlistCount > 0 ? "warning" : "good"}
+        />
+      </div>
 
-      {/* ── Row 2: Grade Distribution + Sector Exposure ────────── */}
-      <div className="jps-chart-panel" style={{ borderRadius: 14, border: "1px solid var(--line)", background: "var(--panel)", padding: "10px 14px" }}>
-        <h3 style={{ fontSize: "0.72rem", fontWeight: 700, marginBottom: 6, color: "var(--ink-soft)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-          Grade Distribution
-        </h3>
-        <ResponsiveContainer width="100%" height={160}>
-          <BarChart data={stats.gradeData} margin={{ top: 4, right: 8, bottom: 4, left: 8 }}>
-            <XAxis dataKey="grade" tick={{ fontSize: 11 }} />
-            <YAxis tickFormatter={(v: number) => fmtCompact(v)} tick={{ fontSize: 10 }} width={50} />
+      {/* ── Row 2: Composition (Sector, Country, Security, Format) ── */}
+      <ChartPanel title="Sector">
+        <ResponsiveContainer width="100%" height={140}>
+          <Treemap data={stats.sectorData} dataKey="value" stroke="none"
+            content={<TreemapContent x={0} y={0} width={0} height={0} name="" value={0} fill="" />} />
+        </ResponsiveContainer>
+      </ChartPanel>
+
+      <ChartPanel title="Country">
+        <ResponsiveContainer width="100%" height={140}>
+          <PieChart>
+            <Pie data={stats.countryData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={30} outerRadius={52} paddingAngle={2} label={false}>
+              {stats.countryData.map((e, i) => <Cell key={i} fill={e.fill} />)}
+            </Pie>
+            <Tooltip />
+            <Legend wrapperStyle={{ fontSize: "0.62rem" }} iconSize={7} />
+          </PieChart>
+        </ResponsiveContainer>
+      </ChartPanel>
+
+      <ChartPanel title="Security Ranking">
+        <ResponsiveContainer width="100%" height={140}>
+          <PieChart>
+            <Pie data={stats.securityData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={30} outerRadius={52} paddingAngle={2} label={false}>
+              {stats.securityData.map((e, i) => <Cell key={i} fill={e.fill} />)}
+            </Pie>
+            <Tooltip />
+            <Legend wrapperStyle={{ fontSize: "0.62rem" }} iconSize={7} />
+          </PieChart>
+        </ResponsiveContainer>
+      </ChartPanel>
+
+      <ChartPanel title="Format">
+        <ResponsiveContainer width="100%" height={140}>
+          <PieChart>
+            <Pie data={stats.formatData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={30} outerRadius={52} paddingAngle={2} label={false}>
+              {stats.formatData.map((e, i) => <Cell key={i} fill={e.fill} />)}
+            </Pie>
+            <Tooltip />
+            <Legend wrapperStyle={{ fontSize: "0.62rem" }} iconSize={7} />
+          </PieChart>
+        </ResponsiveContainer>
+      </ChartPanel>
+
+      {/* ── Row 3: Performance (Rating, Grade, Trend, Covenant) ── */}
+      <ChartPanel title="Credit Rating">
+        <ResponsiveContainer width="100%" height={140}>
+          <BarChart data={stats.ratingData} margin={{ top: 4, right: 4, bottom: 4, left: 4 }}>
+            <XAxis dataKey="name" tick={{ fontSize: 9 }} />
+            <YAxis tickFormatter={(v: number) => fmtCompact(v)} tick={{ fontSize: 9 }} width={42} />
             <Tooltip content={<ChartTooltip />} />
-            <Bar dataKey="exposure" name="Exposure" radius={[6, 6, 0, 0]}>
-              {stats.gradeData.map((entry, i) => (
-                <Cell key={i} fill={entry.fill} />
-              ))}
+            <Bar dataKey="value" name="Exposure" radius={[4, 4, 0, 0]}>
+              {stats.ratingData.map((e, i) => <Cell key={i} fill={e.fill} />)}
             </Bar>
           </BarChart>
         </ResponsiveContainer>
-      </div>
+      </ChartPanel>
 
-      <div className="jps-chart-panel" style={{ borderRadius: 14, border: "1px solid var(--line)", background: "var(--panel)", padding: "10px 14px" }}>
-        <h3 style={{ fontSize: "0.72rem", fontWeight: 700, marginBottom: 6, color: "var(--ink-soft)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-          Sector Exposure
-        </h3>
-        <ResponsiveContainer width="100%" height={160}>
-          <Treemap
-            data={stats.sectorData}
-            dataKey="value"
-            aspectRatio={4 / 3}
-            stroke="none"
-            content={<TreemapContent x={0} y={0} width={0} height={0} name="" value={0} fill="" />}
-          />
+      <ChartPanel title="Performance Grade">
+        <ResponsiveContainer width="100%" height={140}>
+          <BarChart data={stats.gradeData} margin={{ top: 4, right: 4, bottom: 4, left: 4 }}>
+            <XAxis dataKey="grade" tick={{ fontSize: 9 }} />
+            <YAxis tickFormatter={(v: number) => fmtCompact(v)} tick={{ fontSize: 9 }} width={42} />
+            <Tooltip content={<ChartTooltip />} />
+            <Bar dataKey="exposure" name="Exposure" radius={[4, 4, 0, 0]}>
+              {stats.gradeData.map((e, i) => <Cell key={i} fill={e.fill} />)}
+            </Bar>
+          </BarChart>
         </ResponsiveContainer>
-      </div>
+      </ChartPanel>
 
-      {/* ── Row 3: Trend Distribution + Covenant Status ─────────── */}
-      <div className="jps-chart-panel" style={{ borderRadius: 14, border: "1px solid var(--line)", background: "var(--panel)", padding: "10px 14px" }}>
-        <h3 style={{ fontSize: "0.72rem", fontWeight: 700, marginBottom: 6, color: "var(--ink-soft)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-          Performance Trend
-        </h3>
-        <ResponsiveContainer width="100%" height={160}>
+      <ChartPanel title="Trend">
+        <ResponsiveContainer width="100%" height={140}>
           <PieChart>
-            <Pie
-              data={stats.trendData}
-              dataKey="value"
-              nameKey="name"
-              cx="50%" cy="50%"
-              innerRadius={38} outerRadius={62}
-              paddingAngle={2}
-              label={false}
-            >
-              {stats.trendData.map((entry, i) => (
-                <Cell key={i} fill={entry.fill} />
-              ))}
+            <Pie data={stats.trendData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={30} outerRadius={52} paddingAngle={2} label={false}>
+              {stats.trendData.map((e, i) => <Cell key={i} fill={e.fill} />)}
             </Pie>
             <Tooltip />
-            <Legend wrapperStyle={{ fontSize: "0.68rem" }} iconSize={8} />
+            <Legend wrapperStyle={{ fontSize: "0.62rem" }} iconSize={7} />
           </PieChart>
         </ResponsiveContainer>
-      </div>
+      </ChartPanel>
 
-      <div className="jps-chart-panel" style={{ borderRadius: 14, border: "1px solid var(--line)", background: "var(--panel)", padding: "10px 14px" }}>
-        <h3 style={{ fontSize: "0.72rem", fontWeight: 700, marginBottom: 6, color: "var(--ink-soft)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-          Covenant Status
-        </h3>
-        <ResponsiveContainer width="100%" height={160}>
+      <ChartPanel title="Covenant Status">
+        <ResponsiveContainer width="100%" height={140}>
           <PieChart>
-            <Pie
-              data={stats.covenantData}
-              dataKey="value"
-              nameKey="name"
-              cx="50%" cy="50%"
-              innerRadius={38} outerRadius={62}
-              paddingAngle={2}
-              label={false}
-            >
-              {stats.covenantData.map((entry, i) => (
-                <Cell key={i} fill={entry.fill} />
-              ))}
+            <Pie data={stats.covenantData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={30} outerRadius={52} paddingAngle={2} label={false}>
+              {stats.covenantData.map((e, i) => <Cell key={i} fill={e.fill} />)}
             </Pie>
             <Tooltip />
-            <Legend wrapperStyle={{ fontSize: "0.68rem" }} iconSize={8} />
+            <Legend wrapperStyle={{ fontSize: "0.62rem" }} iconSize={7} />
           </PieChart>
         </ResponsiveContainer>
-      </div>
+      </ChartPanel>
 
       {/* ── Row 4: Attention Lists ──────────────────────────────── */}
       <AttentionPanel
@@ -356,11 +447,22 @@ export default function PortfolioSummary({ deals }: { deals: Deal[] }) {
 
 /* ── Sub-components ──────────────────────────────────────────────── */
 
+function ChartPanel({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="jps-chart-panel" style={{ borderRadius: 14, border: "1px solid var(--line)", background: "var(--panel)", padding: "8px 10px" }}>
+      <h3 style={{ fontSize: "0.65rem", fontWeight: 700, marginBottom: 4, color: "var(--ink-soft)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+        {title}
+      </h3>
+      {children}
+    </div>
+  );
+}
+
 function KpiCard({ label, value, tone }: { label: string; value: string; tone?: string }) {
   const color = tone === "critical" ? C.critical : tone === "warning" ? C.warning : tone === "good" ? C.good : undefined;
   return (
-    <div className="jps-summary-kpi" style={{
-      borderRadius: 14, border: "1px solid var(--line)",
+    <div style={{
+      flex: 1, borderRadius: 14, border: "1px solid var(--line)",
       background: "var(--panel)", padding: "8px 10px", textAlign: "center",
     }}>
       <div style={{ fontSize: "0.62rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--ink-soft)", marginBottom: 2 }}>

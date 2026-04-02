@@ -3636,13 +3636,16 @@ blockquote {
 }
 
 .jps-summary-kpi     { grid-column: span 2; }
-.jps-chart-panel     { grid-column: span 6; }
+.jps-chart-panel     { grid-column: span 3; }
 .jps-attention-panel { grid-column: span 4; }
 
 @media (max-width: 1100px) {
-  .jps-chart-panel     { grid-column: span 12; }
+  .jps-chart-panel     { grid-column: span 6; }
   .jps-attention-panel { grid-column: span 12; }
   .jps-summary-kpi     { grid-column: span 4; }
+}
+@media (max-width: 800px) {
+  .jps-chart-panel     { grid-column: span 12; }
 }
 
 @media (max-width: 700px) {

@@ -1304,6 +1304,40 @@ UPDATE deals SET moodys_rating = 'Baa1',  sp_rating = 'BBB+', fitch_rating = 'BB
 UPDATE deals SET moodys_rating = 'Baa2',  sp_rating = 'BBB',  fitch_rating = NULL,   internal_credit_score = 'BBB'  WHERE id = 6; -- Cobalt
 UPDATE deals SET moodys_rating = NULL,    sp_rating = 'BBB',  fitch_rating = 'BBB',  internal_credit_score = NULL   WHERE id = 7; -- Apollo
 
+-- Borrower jurisdiction, registered address, and primary business country
+UPDATE deals SET borrower_jurisdiction = 'US', country = 'US', borrower_registered_address = '100 Technology Drive, Ashburn, VA 20147, USA',           primary_business_country = 'US', primary_business_country_name = 'United States'  WHERE id = 1; -- Aurora
+UPDATE deals SET borrower_jurisdiction = 'US', country = 'US', borrower_registered_address = '2500 Granite Park Blvd, Plano, TX 75024, USA',           primary_business_country = 'US', primary_business_country_name = 'United States'  WHERE id = 2; -- Granite
+UPDATE deals SET borrower_jurisdiction = 'NL', country = 'NL', borrower_registered_address = 'Schiphol Boulevard 127, 1118 BG Schiphol, Netherlands',  primary_business_country = 'NL', primary_business_country_name = 'Netherlands'    WHERE id = 3; -- Meridian
+UPDATE deals SET borrower_jurisdiction = 'US', country = 'US', borrower_registered_address = '800 Harbor Drive, Suite 400, Baltimore, MD 21202, USA',   primary_business_country = 'US', primary_business_country_name = 'United States'  WHERE id = 4; -- Ion Harbor
+UPDATE deals SET borrower_jurisdiction = 'SG', country = 'SG', borrower_registered_address = '1 Changi Business Park Crescent, Singapore 486025',       primary_business_country = 'SG', primary_business_country_name = 'Singapore'      WHERE id = 5; -- Summit
+UPDATE deals SET borrower_jurisdiction = 'US', country = 'US', borrower_registered_address = '1400 Cobalt Way, Quincy, WA 98848, USA',                  primary_business_country = 'US', primary_business_country_name = 'United States'  WHERE id = 6; -- Cobalt
+UPDATE deals SET borrower_jurisdiction = 'US', country = 'US', borrower_registered_address = '3200 Apollo Edge Pkwy, Phoenix, AZ 85034, USA',           primary_business_country = 'US', primary_business_country_name = 'United States'  WHERE id = 7; -- Apollo
+
+-- Jurisdiction splits — proportion of business activity by country
+-- Single-country deals get 100%, multi-jurisdiction deals get proportional splits
+INSERT INTO deal_jurisdiction_splits (deal_id, country_code, country_name, activity_pct, activity_type, is_primary) VALUES
+-- Aurora Prime — 85% US, 15% Canada (cross-border customer base)
+(1, 'US', 'United States', 85.00, 'revenue', TRUE),
+(1, 'CA', 'Canada',        15.00, 'revenue', FALSE),
+-- Granite Switchyard — 100% US
+(2, 'US', 'United States', 100.00, 'revenue', TRUE),
+-- Meridian Edge — 60% Netherlands, 25% Germany, 15% UK (European edge network)
+(3, 'NL', 'Netherlands',   60.00, 'revenue', TRUE),
+(3, 'DE', 'Germany',       25.00, 'revenue', FALSE),
+(3, 'GB', 'United Kingdom', 15.00, 'revenue', FALSE),
+-- Ion Harbor — 100% US
+(4, 'US', 'United States', 100.00, 'revenue', TRUE),
+-- Summit Loop — 50% Singapore, 30% Australia, 20% Japan (APAC hub)
+(5, 'SG', 'Singapore',     50.00, 'revenue', TRUE),
+(5, 'AU', 'Australia',     30.00, 'revenue', FALSE),
+(5, 'JP', 'Japan',         20.00, 'revenue', FALSE),
+-- Cobalt Grid — 100% US
+(6, 'US', 'United States', 100.00, 'revenue', TRUE),
+-- Apollo Edge — 90% US, 10% Mexico (border region customers)
+(7, 'US', 'United States', 90.00, 'revenue', TRUE),
+(7, 'MX', 'Mexico',        10.00, 'revenue', FALSE)
+ON CONFLICT (deal_id, country_code, activity_type) DO NOTHING;
+
 -- G.4 Per-deal grade configuration (DSCR metric, collateral metric, thresholds)
 UPDATE deals SET grade_dscr_metric = 'seniorAnnualDscr', grade_dscr_fallback = 'seniorDscr', grade_collateral_metric = 'seniorNetDebtEbitda', grade_collateral_direction = 'lower_is_better';
 
@@ -2551,7 +2585,7 @@ CREATE TABLE IF NOT EXISTS deal_reserve_accounts (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     deal_id             INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
     account_name        TEXT NOT NULL,
-    account_type        TEXT NOT NULL,           -- dsra, mra, capex_reserve, o_and_m_reserve, distribution_reserve, liquidity_facility, letter_of_credit, other
+    account_type        TEXT NOT NULL,           -- dsra, mra, capex_reserve, o_and_m_reserve, distribution_reserve, lifecycle_reserve, escrow, lockup, liquidity_facility, working_capital_facility, rcf, letter_of_credit, pcg, insurance_bond, other
     sizing_basis        TEXT,                    -- e.g. '6 months DS', '3 months opex', 'fixed amount'
     required_balance    DECIMAL,
     current_balance     DECIMAL,
@@ -2885,6 +2919,126 @@ CREATE INDEX idx_dlil_deal ON deal_line_item_labels(deal_id);
 -- Bridge: link existing actual_periods to new normalised periods
 ALTER TABLE actual_periods ADD COLUMN IF NOT EXISTS reporting_period_id INTEGER REFERENCES deal_reporting_periods(id) ON DELETE SET NULL;
 
+-- Deal jurisdiction splits — multi-country business activity proportions
+CREATE TABLE IF NOT EXISTS deal_jurisdiction_splits (
+    id                      SERIAL PRIMARY KEY,
+    deal_id                 INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+    country_code            VARCHAR(2) NOT NULL,       -- ISO 3166-1 alpha-2
+    country_name            TEXT NOT NULL,
+    activity_pct            NUMERIC(5, 2) NOT NULL,    -- 0.00–100.00
+    activity_type           TEXT NOT NULL DEFAULT 'revenue',  -- revenue, operations, assets, headcount
+    is_primary              BOOLEAN NOT NULL DEFAULT FALSE,
+    notes                   TEXT,
+    created_at              TIMESTAMPTZ DEFAULT NOW(),
+    updated_at              TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(deal_id, country_code, activity_type)
+);
+CREATE INDEX idx_djs_deal ON deal_jurisdiction_splits(deal_id);
+CREATE INDEX idx_djs_country ON deal_jurisdiction_splits(country_code);
+
+-- Additional geography columns on deals
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS borrower_registered_address TEXT;
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS primary_business_country VARCHAR(2);
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS primary_business_country_name TEXT;
+
+-- Multi-tranche and holding structure enhancements
+-- Revenue risk enrichment — contracted/merchant split and duration coverage
+-- Reserve account liquidity tracking enhancements
+ALTER TABLE deal_reserve_accounts ADD COLUMN IF NOT EXISTS target_balance DECIMAL;
+ALTER TABLE deal_reserve_accounts ADD COLUMN IF NOT EXISTS shortfall DECIMAL;
+ALTER TABLE deal_reserve_accounts ADD COLUMN IF NOT EXISTS top_up_deadline DATE;
+ALTER TABLE deal_reserve_accounts ADD COLUMN IF NOT EXISTS release_conditions TEXT;
+ALTER TABLE deal_reserve_accounts ADD COLUMN IF NOT EXISTS cash_amount DECIMAL;
+ALTER TABLE deal_reserve_accounts ADD COLUMN IF NOT EXISTS lc_amount DECIMAL;
+ALTER TABLE deal_reserve_accounts ADD COLUMN IF NOT EXISTS pcg_amount DECIMAL;
+ALTER TABLE deal_reserve_accounts ADD COLUMN IF NOT EXISTS surety_amount DECIMAL;
+ALTER TABLE deal_reserve_accounts ADD COLUMN IF NOT EXISTS lc_provider TEXT;
+ALTER TABLE deal_reserve_accounts ADD COLUMN IF NOT EXISTS lc_expiry DATE;
+ALTER TABLE deal_reserve_accounts ADD COLUMN IF NOT EXISTS pcg_provider TEXT;
+ALTER TABLE deal_reserve_accounts ADD COLUMN IF NOT EXISTS pcg_expiry DATE;
+ALTER TABLE deal_reserve_accounts ADD COLUMN IF NOT EXISTS currency VARCHAR(3);
+
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS contracted_revenue_pct DECIMAL;
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS merchant_revenue_pct DECIMAL;
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS primary_contract_expiry DATE;
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS duration_coverage_pct DECIMAL;
+
+-- IC Memo KPI targets — origination expectations per scenario
+CREATE TABLE IF NOT EXISTS deal_kpi_targets (
+    id                  SERIAL PRIMARY KEY,
+    deal_id             INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+    kpi_key             TEXT NOT NULL,
+    kpi_label           TEXT NOT NULL,
+    scenario            TEXT NOT NULL,
+    target_value        NUMERIC,
+    target_floor        NUMERIC,
+    target_ceiling      NUMERIC,
+    direction           TEXT NOT NULL DEFAULT 'higher_is_better',
+    unit                TEXT NOT NULL DEFAULT 'count',
+    source              TEXT,
+    source_date         DATE,
+    notes               TEXT,
+    created_at          TIMESTAMPTZ DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(deal_id, kpi_key, scenario)
+);
+CREATE INDEX idx_dkt_deal ON deal_kpi_targets(deal_id);
+CREATE INDEX idx_dkt_scenario ON deal_kpi_targets(deal_id, scenario);
+
+-- KPI observations — actuals per period with proximity-to-stress computation
+CREATE TABLE IF NOT EXISTS deal_kpi_observations (
+    id                      SERIAL PRIMARY KEY,
+    deal_id                 INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+    reporting_period_id     INTEGER NOT NULL REFERENCES deal_reporting_periods(id) ON DELETE CASCADE,
+    kpi_key                 TEXT NOT NULL,
+    kpi_label               TEXT NOT NULL,
+    observed_value          NUMERIC,
+    base_case_target        NUMERIC,
+    stress_case_target      NUMERIC,
+    variance_to_base        NUMERIC,
+    variance_to_base_pct    NUMERIC,
+    deviation_to_stress     NUMERIC,
+    status                  TEXT NOT NULL DEFAULT 'on_track',
+    source                  TEXT,
+    source_document_id      INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+    observed_at             DATE,
+    created_at              TIMESTAMPTZ DEFAULT NOW(),
+    updated_at              TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(deal_id, reporting_period_id, kpi_key)
+);
+CREATE INDEX idx_dko_deal ON deal_kpi_observations(deal_id);
+CREATE INDEX idx_dko_period ON deal_kpi_observations(reporting_period_id);
+CREATE INDEX idx_dko_status ON deal_kpi_observations(status) WHERE status != 'on_track';
+
+-- Multi-tranche and holding structure enhancements
+ALTER TABLE capital_structure_instruments ADD COLUMN IF NOT EXISTS pari_passu_group TEXT;
+ALTER TABLE capital_structure_instruments ADD COLUMN IF NOT EXISTS issuing_entity_id UUID;
+ALTER TABLE capital_structure_instruments ADD COLUMN IF NOT EXISTS instrument_format TEXT;
+
+-- Instrument-level holdings
+ALTER TABLE holdings ADD COLUMN IF NOT EXISTS instrument_id UUID;
+
+-- Account instrument allocations — which account holds which tranche
+CREATE TABLE IF NOT EXISTS account_instrument_allocations (
+    id                  SERIAL PRIMARY KEY,
+    account_id          INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    deal_id             INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+    instrument_id       UUID NOT NULL,
+    allocated_amount    DECIMAL NOT NULL,
+    allocated_pct       DECIMAL,
+    acquisition_date    DATE,
+    acquisition_price   DECIMAL,
+    current_nav         DECIMAL,
+    status              TEXT NOT NULL DEFAULT 'active',
+    notes               TEXT,
+    created_at          TIMESTAMPTZ DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(account_id, instrument_id)
+);
+CREATE INDEX idx_aia_account ON account_instrument_allocations(account_id);
+CREATE INDEX idx_aia_deal ON account_instrument_allocations(deal_id);
+CREATE INDEX idx_aia_instrument ON account_instrument_allocations(instrument_id);
+
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- SEED: Line item definitions — 67 generic rows + subcategory slots
 -- ═══════════════════════════════════════════════════════════════════════════════
@@ -3022,6 +3176,84 @@ INSERT INTO line_item_definitions (line_key, section, display_label, row_order, 
 ('depreciation',              'pnl', 'Depreciation',               2, FALSE, NULL,                                       'currency'),
 ('regulatory_depreciation',   'pnl', 'Regulatory Depreciation',    3, FALSE, NULL,                                       'currency'),
 ('ebit',                      'pnl', 'EBIT',                       4, TRUE,  'ebitda - depreciation',                    'currency')
+ON CONFLICT (line_key) DO NOTHING;
+
+-- Balance sheet / Reserve account & liquidity balances
+INSERT INTO line_item_definitions (line_key, section, display_label, row_order, is_computed, unit) VALUES
+('dsra_required',            'balance_sheet', 'DSRA Required Balance',                 1, FALSE, 'currency'),
+('dsra_actual',              'balance_sheet', 'DSRA Actual Balance',                   2, FALSE, 'currency'),
+('dsra_cash',                'balance_sheet', 'DSRA — Cash Portion',                   3, FALSE, 'currency'),
+('dsra_lc',                  'balance_sheet', 'DSRA — LC Portion',                     4, FALSE, 'currency'),
+('dsra_pcg',                 'balance_sheet', 'DSRA — PCG Portion',                    5, FALSE, 'currency'),
+('mra_required',             'balance_sheet', 'MRA Required Balance',                  6, FALSE, 'currency'),
+('mra_actual',               'balance_sheet', 'MRA Actual Balance',                    7, FALSE, 'currency'),
+('mra_cash',                 'balance_sheet', 'MRA — Cash Portion',                    8, FALSE, 'currency'),
+('mra_lc',                   'balance_sheet', 'MRA — LC Portion',                      9, FALSE, 'currency'),
+('capex_reserve_required',   'balance_sheet', 'Capex Reserve Required Balance',       10, FALSE, 'currency'),
+('capex_reserve_actual',     'balance_sheet', 'Capex Reserve Actual Balance',         11, FALSE, 'currency'),
+('om_reserve_required',      'balance_sheet', 'O&M Reserve Required Balance',         12, FALSE, 'currency'),
+('om_reserve_actual',        'balance_sheet', 'O&M Reserve Actual Balance',           13, FALSE, 'currency'),
+('distribution_reserve_req', 'balance_sheet', 'Distribution Reserve Required',        14, FALSE, 'currency'),
+('distribution_reserve_act', 'balance_sheet', 'Distribution Reserve Actual',          15, FALSE, 'currency'),
+('lifecycle_reserve_req',    'balance_sheet', 'Lifecycle Reserve Required',            16, FALSE, 'currency'),
+('lifecycle_reserve_act',    'balance_sheet', 'Lifecycle Reserve Actual',              17, FALSE, 'currency'),
+('escrow_balance',           'balance_sheet', 'Escrow Account Balance',               18, FALSE, 'currency'),
+('lockup_account_balance',   'balance_sheet', 'Lock-Up Account Balance',              19, FALSE, 'currency'),
+('liquidity_facility_limit', 'balance_sheet', 'Liquidity Facility — Committed Limit', 20, FALSE, 'currency'),
+('liquidity_facility_drawn', 'balance_sheet', 'Liquidity Facility — Drawn Amount',    21, FALSE, 'currency'),
+('liquidity_facility_avail', 'balance_sheet', 'Liquidity Facility — Available',       22, TRUE,  'currency'),
+('wcf_limit',                'balance_sheet', 'Working Capital Facility — Limit',     23, FALSE, 'currency'),
+('wcf_drawn',                'balance_sheet', 'Working Capital Facility — Drawn',     24, FALSE, 'currency'),
+('wcf_available',            'balance_sheet', 'Working Capital Facility — Available',  25, TRUE,  'currency'),
+('rcf_limit',                'balance_sheet', 'Revolving Credit Facility — Limit',    26, FALSE, 'currency'),
+('rcf_drawn',                'balance_sheet', 'Revolving Credit Facility — Drawn',    27, FALSE, 'currency'),
+('rcf_available',            'balance_sheet', 'Revolving Credit Facility — Available', 28, TRUE,  'currency'),
+('total_reserves_required',  'balance_sheet', 'Total Reserves Required',              29, TRUE,  'currency'),
+('total_reserves_actual',    'balance_sheet', 'Total Reserves Actual',                30, TRUE,  'currency'),
+('total_reserves_shortfall', 'balance_sheet', 'Total Reserves Shortfall',             31, TRUE,  'currency'),
+('total_liquidity_available','balance_sheet', 'Total Liquidity Available',            32, TRUE,  'currency')
+ON CONFLICT (line_key) DO NOTHING;
+
+-- Additional balance sheet inputs for Moody's standard adjustments
+INSERT INTO line_item_definitions (line_key, section, display_label, row_order, is_computed, computation_formula, unit) VALUES
+('total_debt_drawn',         'balance_sheet', 'Total Debt Drawn',                    33, FALSE, NULL,                                                'currency'),
+('net_debt',                 'balance_sheet', 'Net Debt',                             34, TRUE,  'total_debt_drawn - cash_cf',                        'currency'),
+('operating_lease_obligation','balance_sheet', 'Operating Lease Obligation (Capitalised)', 35, FALSE, NULL,                                           'currency'),
+('pension_deficit',          'balance_sheet', 'Pension Deficit (Underfunded)',         36, FALSE, NULL,                                                'currency'),
+('hybrid_debt_component',    'balance_sheet', 'Hybrid Securities — Debt Component (50%)', 37, FALSE, NULL,                                           'currency'),
+('securitised_receivables',  'balance_sheet', 'Securitised Receivables (Recourse)',    38, FALSE, NULL,                                                'currency'),
+('moodys_adjusted_debt',     'balance_sheet', 'Moody''s Adjusted Total Debt',         39, TRUE,  'total_debt_drawn + operating_lease_obligation + pension_deficit + hybrid_debt_component + securitised_receivables', 'currency'),
+('moodys_adjusted_net_debt', 'balance_sheet', 'Moody''s Adjusted Net Debt',           40, TRUE,  'moodys_adjusted_debt - cash_cf',                   'currency')
+ON CONFLICT (line_key) DO NOTHING;
+
+-- Additional P&L items for FFO computation
+INSERT INTO line_item_definitions (line_key, section, display_label, row_order, is_computed, computation_formula, unit) VALUES
+('non_cash_charges',         'pnl', 'Other Non-Cash Charges',                          5, FALSE, NULL,                                                'currency'),
+('gains_on_disposal',        'pnl', 'Gains on Asset Sales',                            6, FALSE, NULL,                                                'currency'),
+('losses_on_disposal',       'pnl', 'Losses on Asset Sales',                           7, FALSE, NULL,                                                'currency')
+ON CONFLICT (line_key) DO NOTHING;
+
+-- Moody's computed cashflow measures
+INSERT INTO line_item_definitions (line_key, section, display_label, row_order, is_computed, computation_formula, unit) VALUES
+('ffo',                      'moodys_metrics', 'Funds From Operations (FFO)',          1, TRUE, 'ebitda - tax_paid - senior_interest - junior_interest - shareholder_loan_interest + interest_on_cash', 'currency'),
+('rcf',                      'moodys_metrics', 'Retained Cash Flow (RCF)',             2, TRUE, 'ffo - distributions',                               'currency'),
+('total_debt_service',       'moodys_metrics', 'Total Debt Service',                   3, TRUE, 'senior_debt_service + junior_debt_service',          'currency')
+ON CONFLICT (line_key) DO NOTHING;
+
+-- Moody's coverage and leverage ratios
+INSERT INTO line_item_definitions (line_key, section, display_label, row_order, is_computed, computation_formula, unit) VALUES
+('ffo_interest_coverage',    'moodys_ratios', 'FFO Interest Coverage',                 1, TRUE, '(ffo + senior_interest + junior_interest) / (senior_interest + junior_interest)', 'ratio'),
+('ffo_net_debt',             'moodys_ratios', 'FFO / Net Debt',                        2, TRUE, 'ffo / net_debt',                                    'percentage'),
+('rcf_net_debt',             'moodys_ratios', 'RCF / Net Debt',                        3, TRUE, 'rcf / net_debt',                                    'percentage'),
+('ffo_debt',                 'moodys_ratios', 'FFO / Debt',                            4, TRUE, 'ffo / total_debt_drawn',                            'percentage'),
+('rcf_debt',                 'moodys_ratios', 'RCF / Debt',                            5, TRUE, 'rcf / total_debt_drawn',                            'percentage'),
+('total_dscr',               'moodys_ratios', 'Total DSCR',                            6, TRUE, 'cfads / (senior_debt_service + junior_debt_service)','ratio'),
+('adscr_breakeven',          'moodys_ratios', 'ADSCR Break-Even (%)',                  7, TRUE, '(cfads - senior_debt_service) / total_operating_costs * 100', 'percentage'),
+('aicr',                     'moodys_ratios', 'Adjusted Interest Coverage (AICR)',      8, TRUE, '(ffo + senior_interest - regulatory_depreciation) / senior_interest', 'ratio'),
+('cash_interest_coverage',   'moodys_ratios', 'Cash Interest Coverage',                9, TRUE, '(total_revenue - total_operating_costs) / senior_interest', 'ratio'),
+('adj_ffo_net_debt',         'moodys_ratios', 'Adj FFO / Net Debt (Moody''s)',        10, TRUE, 'ffo / moodys_adjusted_net_debt',                    'percentage'),
+('adj_rcf_net_debt',         'moodys_ratios', 'Adj RCF / Net Debt (Moody''s)',        11, TRUE, 'rcf / moodys_adjusted_net_debt',                    'percentage'),
+('adj_net_debt_ebitda',      'moodys_ratios', 'Adj Net Debt / EBITDA (Moody''s)',     12, TRUE, 'moodys_adjusted_net_debt / ebitda',                 'ratio')
 ON CONFLICT (line_key) DO NOTHING;
 
 -- Sector subcategory slots — Revenue (up to 8)
@@ -3337,3 +3569,51 @@ INSERT INTO deal_financial_template (deal_id, sector_template, revenue_line_labe
  '["Contracted Capacity (MW)","Leased Capacity (%)","PUE (Power Usage Effectiveness)","Weighted Average Lease Term (yrs)","Blended $/kW/month","GPU Utilisation (%)","Customer Concentration (top 3 %)","Availability (% uptime)","Carbon Intensity (tCO2e/MW)","Capex per MW Installed"]'::jsonb
 )
 ON CONFLICT DO NOTHING;
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- SEED: IC Memo KPI targets and observations for Aurora Prime (deal_id = 1)
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+-- Base case targets (from IC memo at origination)
+INSERT INTO deal_kpi_targets (deal_id, kpi_key, kpi_label, scenario, target_value, target_floor, direction, unit, source, source_date) VALUES
+(1, 'sector_kpi_1',  'Contracted Capacity (MW)',           'base_case', 36.0,  30.0,  'higher_is_better', 'count',      'ic_memo', '2023-03-01'),
+(1, 'sector_kpi_2',  'Leased Capacity (%)',                'base_case', 75.0,  60.0,  'higher_is_better', 'percentage', 'ic_memo', '2023-03-01'),
+(1, 'sector_kpi_3',  'PUE',                                'base_case', 1.25,  NULL,  'lower_is_better',  'ratio',      'ic_memo', '2023-03-01'),
+(1, 'sector_kpi_4',  'Weighted Average Lease Term (yrs)',  'base_case', 7.0,   5.0,   'higher_is_better', 'years',      'ic_memo', '2023-03-01'),
+(1, 'sector_kpi_5',  'Blended $/kW/month',                'base_case', 145.0, 120.0, 'higher_is_better', 'currency',   'ic_memo', '2023-03-01'),
+(1, 'sector_kpi_6',  'GPU Utilisation (%)',                'base_case', 70.0,  50.0,  'higher_is_better', 'percentage', 'ic_memo', '2023-03-01'),
+(1, 'sector_kpi_7',  'Customer Concentration (top 3 %)',   'base_case', 55.0,  NULL,  'lower_is_better',  'percentage', 'ic_memo', '2023-03-01'),
+(1, 'sector_kpi_8',  'Availability (% uptime)',            'base_case', 99.95, 99.5,  'higher_is_better', 'percentage', 'ic_memo', '2023-03-01'),
+(1, 'sector_kpi_9',  'Carbon Intensity (tCO2e/MW)',        'base_case', 0.35,  NULL,  'lower_is_better',  'ratio',      'ic_memo', '2023-03-01'),
+(1, 'sector_kpi_10', 'Capex per MW Installed',             'base_case', 7.5,   NULL,  'lower_is_better',  'currency',   'ic_memo', '2023-03-01')
+ON CONFLICT (deal_id, kpi_key, scenario) DO NOTHING;
+
+-- Stress case targets (downside scenario from IC memo)
+INSERT INTO deal_kpi_targets (deal_id, kpi_key, kpi_label, scenario, target_value, direction, unit, source, source_date, notes) VALUES
+(1, 'sector_kpi_1',  'Contracted Capacity (MW)',           'stress_case', 36.0,  'higher_is_better', 'count',      'ic_memo', '2023-03-01', 'Capacity fixed at build spec'),
+(1, 'sector_kpi_2',  'Leased Capacity (%)',                'stress_case', 50.0,  'higher_is_better', 'percentage', 'ic_memo', '2023-03-01', 'Lease-up stalls at 50%'),
+(1, 'sector_kpi_3',  'PUE',                                'stress_case', 1.45,  'lower_is_better',  'ratio',      'ic_memo', '2023-03-01', 'Cooling inefficiency in summer peaks'),
+(1, 'sector_kpi_4',  'Weighted Average Lease Term (yrs)',  'stress_case', 3.5,   'higher_is_better', 'years',      'ic_memo', '2023-03-01', 'Short-term contracts only'),
+(1, 'sector_kpi_5',  'Blended $/kW/month',                'stress_case', 105.0, 'higher_is_better', 'currency',   'ic_memo', '2023-03-01', 'Pricing pressure from hyperscale competition'),
+(1, 'sector_kpi_6',  'GPU Utilisation (%)',                'stress_case', 35.0,  'higher_is_better', 'percentage', 'ic_memo', '2023-03-01', 'AI demand does not materialise'),
+(1, 'sector_kpi_7',  'Customer Concentration (top 3 %)',   'stress_case', 80.0,  'lower_is_better',  'percentage', 'ic_memo', '2023-03-01', 'Single anchor tenant dominance'),
+(1, 'sector_kpi_8',  'Availability (% uptime)',            'stress_case', 98.5,  'higher_is_better', 'percentage', 'ic_memo', '2023-03-01', 'Major outage event'),
+(1, 'sector_kpi_9',  'Carbon Intensity (tCO2e/MW)',        'stress_case', 0.55,  'lower_is_better',  'ratio',      'ic_memo', '2023-03-01', 'Grid decarbonisation stalls'),
+(1, 'sector_kpi_10', 'Capex per MW Installed',             'stress_case', 9.5,   'lower_is_better',  'currency',   'ic_memo', '2023-03-01', 'Construction cost overruns')
+ON CONFLICT (deal_id, kpi_key, scenario) DO NOTHING;
+
+-- KPI observations — Q1 2026 and Q2 2026 (mostly on track, GPU utilisation drifting toward stress)
+INSERT INTO deal_kpi_observations (deal_id, reporting_period_id, kpi_key, kpi_label, observed_value, base_case_target, stress_case_target, variance_to_base, variance_to_base_pct, deviation_to_stress, status, source, observed_at) VALUES
+(1, (SELECT id FROM deal_reporting_periods WHERE deal_id=1 AND period_flag='2026Q1'), 'sector_kpi_1', 'Contracted Capacity (MW)',  36.0,  36.0, 36.0,   0.0,   0.0,   0.0, 'on_track',           'compliance_certificate', '2026-03-31'),
+(1, (SELECT id FROM deal_reporting_periods WHERE deal_id=1 AND period_flag='2026Q1'), 'sector_kpi_2', 'Leased Capacity (%)',       62.0,  75.0, 50.0, -13.0, -17.3,  52.0, 'watch',              'compliance_certificate', '2026-03-31'),
+(1, (SELECT id FROM deal_reporting_periods WHERE deal_id=1 AND period_flag='2026Q1'), 'sector_kpi_3', 'PUE',                        1.30,  1.25,  1.45,  0.05,  4.0,  25.0, 'on_track',           'compliance_certificate', '2026-03-31'),
+(1, (SELECT id FROM deal_reporting_periods WHERE deal_id=1 AND period_flag='2026Q1'), 'sector_kpi_5', 'Blended $/kW/month',       138.0, 145.0, 105.0, -7.0,  -4.8,  17.5, 'on_track',           'compliance_certificate', '2026-03-31'),
+(1, (SELECT id FROM deal_reporting_periods WHERE deal_id=1 AND period_flag='2026Q1'), 'sector_kpi_6', 'GPU Utilisation (%)',        52.0,  70.0,  35.0,-18.0, -25.7,  51.4, 'watch',              'compliance_certificate', '2026-03-31'),
+(1, (SELECT id FROM deal_reporting_periods WHERE deal_id=1 AND period_flag='2026Q1'), 'sector_kpi_8', 'Availability (% uptime)',   99.92, 99.95, 98.5, -0.03,  0.0,   2.1, 'on_track',           'compliance_certificate', '2026-03-31'),
+(1, (SELECT id FROM deal_reporting_periods WHERE deal_id=1 AND period_flag='2026Q2'), 'sector_kpi_1', 'Contracted Capacity (MW)',  36.0,  36.0, 36.0,   0.0,   0.0,   0.0, 'on_track',           'compliance_certificate', '2026-06-30'),
+(1, (SELECT id FROM deal_reporting_periods WHERE deal_id=1 AND period_flag='2026Q2'), 'sector_kpi_2', 'Leased Capacity (%)',       61.0,  75.0, 50.0, -14.0, -18.7,  56.0, 'watch',              'compliance_certificate', '2026-06-30'),
+(1, (SELECT id FROM deal_reporting_periods WHERE deal_id=1 AND period_flag='2026Q2'), 'sector_kpi_3', 'PUE',                        1.32,  1.25,  1.45,  0.07,  5.6,  35.0, 'on_track',           'compliance_certificate', '2026-06-30'),
+(1, (SELECT id FROM deal_reporting_periods WHERE deal_id=1 AND period_flag='2026Q2'), 'sector_kpi_5', 'Blended $/kW/month',       135.0, 145.0, 105.0,-10.0,  -6.9,  25.0, 'on_track',           'compliance_certificate', '2026-06-30'),
+(1, (SELECT id FROM deal_reporting_periods WHERE deal_id=1 AND period_flag='2026Q2'), 'sector_kpi_6', 'GPU Utilisation (%)',        46.0,  70.0,  35.0,-24.0, -34.3,  68.6, 'approaching_stress', 'compliance_certificate', '2026-06-30'),
+(1, (SELECT id FROM deal_reporting_periods WHERE deal_id=1 AND period_flag='2026Q2'), 'sector_kpi_8', 'Availability (% uptime)',   99.91, 99.95, 98.5, -0.04,  0.0,   2.8, 'on_track',           'compliance_certificate', '2026-06-30')
+ON CONFLICT (deal_id, reporting_period_id, kpi_key) DO NOTHING;

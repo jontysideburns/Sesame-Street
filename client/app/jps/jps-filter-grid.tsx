@@ -32,6 +32,15 @@ export type Deal = {
   performanceTrend: string | null;
   performanceGrade: number | null;
   spreadBps: number | null;
+  securityRanking: string | null;
+  instrumentFormat: string | null;
+  primaryCountry: string | null;
+  primaryCountryName: string | null;
+  jurisdictionSplits: { countryCode: string; countryName: string; activityPct: number; isPrimary: boolean }[];
+  ratioStatus: string | null;
+  walYears: number | null;
+  reservesFullyFunded: boolean | null;
+  reservesUnderfundedPeriods: number | null;
 };
 
 type HierarchyOrg = { id: number; name: string; dealCount: number };
@@ -48,7 +57,7 @@ type Filters = {
 
 const EMPTY: Filters = { organisation: "", owner: "", sector: "", grade: "", watchlist: "", search: "" };
 
-type SortKey = "dealName" | "sector" | "rating" | "exposure" | "performanceScore" | "grade" | "performanceTrend" | "covenantStatus" | "latestPeriodEnd" | "reportedDscr" | "headroomPct" | "todos" | "watchlist";
+type SortKey = "dealName" | "sector" | "rating" | "exposure" | "performanceScore" | "grade" | "performanceTrend" | "covenantStatus" | "ratioStatus" | "latestPeriodEnd" | "reportedDscr" | "headroomPct" | "todos" | "watchlist" | "reservesFullyFunded";
 type SortDir = "asc" | "desc";
 type SortState = { key: SortKey; dir: SortDir } | null;
 
@@ -243,11 +252,13 @@ export default function JpsFilterGrid({
         case "grade": av = a.grade; bv = b.grade; break;
         case "performanceTrend": av = a.performanceTrend; bv = b.performanceTrend; break;
         case "covenantStatus": av = a.covenantStatus; bv = b.covenantStatus; break;
+        case "ratioStatus": av = a.ratioStatus; bv = b.ratioStatus; break;
         case "latestPeriodEnd": av = a.latestPeriodEnd; bv = b.latestPeriodEnd; break;
         case "reportedDscr": av = a.reportedDscr; bv = b.reportedDscr; break;
         case "headroomPct": av = a.headroomPct; bv = b.headroomPct; break;
         case "todos": av = (a.pendingReviews ?? 0) + (a.overdueObligations ?? 0) + (a.openRequests ?? 0); bv = (b.pendingReviews ?? 0) + (b.overdueObligations ?? 0) + (b.openRequests ?? 0); break;
         case "watchlist": av = a.watchlist ? 1 : 0; bv = b.watchlist ? 1 : 0; break;
+        case "reservesFullyFunded": av = a.reservesFullyFunded ? 0 : (a.reservesUnderfundedPeriods ?? 0); bv = b.reservesFullyFunded ? 0 : (b.reservesUnderfundedPeriods ?? 0); break;
         default: return 0;
       }
       if (av == null && bv == null) return 0;
@@ -322,6 +333,9 @@ export default function JpsFilterGrid({
       <PortfolioSummary deals={filtered} />
 
       {/* ── Deal table ──────────────────────────────────────────────── */}
+      <h2 style={{ fontSize: "1.88rem", fontWeight: 700, letterSpacing: "-0.04em", color: "var(--ink)", margin: "20px 0 10px", whiteSpace: "nowrap" }}>
+        Portfolio Assets
+      </h2>
       {filtered.length === 0 ? (
         <article className="topsheet-note topsheet-note-info">
           <strong>No deals match</strong>
@@ -340,11 +354,13 @@ export default function JpsFilterGrid({
                 <SortTh k="grade" label="Grade" sort={sort} onSort={toggleSort} />
                 <SortTh k="performanceTrend" label="Trend" sort={sort} onSort={toggleSort} />
                 <SortTh k="covenantStatus" label="Covenant" sort={sort} onSort={toggleSort} />
+                <SortTh k="ratioStatus" label="Ratio Status" sort={sort} onSort={toggleSort} />
                 <SortTh k="latestPeriodEnd" label="Last Financials" sort={sort} onSort={toggleSort} />
                 <SortTh k="reportedDscr" label="DSCR" sort={sort} onSort={toggleSort} align="right" />
                 <SortTh k="headroomPct" label="Headroom" sort={sort} onSort={toggleSort} align="right" />
                 <SortTh k="todos" label="To-do's" sort={sort} onSort={toggleSort} align="right" />
                 <SortTh k="watchlist" label="Watchlist" sort={sort} onSort={toggleSort} />
+                <SortTh k="reservesFullyFunded" label="Reserves" sort={sort} onSort={toggleSort} />
               </tr>
             </thead>
             <tbody>
@@ -424,6 +440,17 @@ export default function JpsFilterGrid({
                       </span>
                     </td>
 
+                    {/* Ratio Status */}
+                    <td style={td}>
+                      {deal.ratioStatus ? (
+                        <span className={`badge ${tierTone(deal.ratioStatus)} badge-sm`}>
+                          {deal.ratioStatus.replace(/_/g, " ")}
+                        </span>
+                      ) : (
+                        <span style={{ color: "var(--ink-soft)" }}>{"\u2014"}</span>
+                      )}
+                    </td>
+
                     {/* Last Financials — text (date), left */}
                     <td style={td}>
                       {deal.latestPeriodEnd ? (
@@ -458,6 +485,17 @@ export default function JpsFilterGrid({
                         <span className="badge warning badge-sm">Yes</span>
                       ) : (
                         <span style={{ color: "var(--ink-soft)" }}>—</span>
+                      )}
+                    </td>
+
+                    {/* Reserves — fully funded or periods underfunded count */}
+                    <td style={td}>
+                      {deal.reservesFullyFunded === true ? (
+                        <span className="badge good badge-sm">Yes</span>
+                      ) : deal.reservesFullyFunded === false ? (
+                        <span className="badge critical badge-sm">No ({deal.reservesUnderfundedPeriods ?? 0})</span>
+                      ) : (
+                        <span style={{ color: "var(--ink-soft)" }}>{"\u2014"}</span>
                       )}
                     </td>
                   </tr>

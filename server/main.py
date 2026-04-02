@@ -10784,6 +10784,15 @@ def get_portfolio(
                 "performanceTrend": None,
                 "performanceGrade": None,
                 "spreadBps": None,
+                "securityRanking": None,
+                "instrumentFormat": None,
+                "primaryCountry": None,
+                "primaryCountryName": None,
+                "jurisdictionSplits": [],
+                "ratioStatus": None,
+                "walYears": None,
+                "reservesFullyFunded": None,
+                "reservesUnderfundedPeriods": None,
                 "organisations": set(),
                 "owners": set(),
                 "accounts": set(),
@@ -10827,6 +10836,95 @@ def get_portfolio(
                     entry["spreadBps"] = s
     except Exception:
         pass  # Table may not exist yet; degrade gracefully
+
+    # Enrich with security ranking and instrument format (from most senior active instrument)
+    try:
+        with get_connection() as inst_conn:
+            inst_rows = inst_conn.execute(
+                """SELECT DISTINCT ON (deal_id) deal_id, enforcement_class, instrument_format
+                   FROM capital_structure_instruments
+                   WHERE status = 'active' AND drawn_amount > 0
+                   ORDER BY deal_id, waterfall_priority ASC"""
+            ).fetchall()
+            for r in inst_rows:
+                did = int(r["deal_id"])
+                for entry in deal_rows_by_slug.values():
+                    if int(entry["dealId"]) == did:
+                        entry["securityRanking"] = r["enforcement_class"]
+                        entry["instrumentFormat"] = r["instrument_format"]
+    except Exception:
+        pass
+
+    # Enrich with primary country and jurisdiction splits
+    try:
+        with get_connection() as geo_conn:
+            geo_rows = geo_conn.execute(
+                """SELECT id, primary_business_country, primary_business_country_name, weighted_average_life FROM deals"""
+            ).fetchall()
+            geo_by_id = {int(r["id"]): r for r in geo_rows}
+            for entry in deal_rows_by_slug.values():
+                g = geo_by_id.get(int(entry["dealId"]))
+                if g:
+                    entry["primaryCountry"] = g["primary_business_country"]
+                    entry["primaryCountryName"] = g["primary_business_country_name"]
+                    if g["weighted_average_life"] is not None:
+                        entry["walYears"] = float(g["weighted_average_life"])
+            # Jurisdiction splits
+            split_rows = geo_conn.execute(
+                """SELECT deal_id, country_code, country_name, activity_pct, is_primary
+                   FROM deal_jurisdiction_splits ORDER BY deal_id, activity_pct DESC"""
+            ).fetchall()
+            splits_by_deal: dict = {}
+            for r in split_rows:
+                did = int(r["deal_id"])
+                if did not in splits_by_deal:
+                    splits_by_deal[did] = []
+                splits_by_deal[did].append({
+                    "countryCode": r["country_code"],
+                    "countryName": r["country_name"],
+                    "activityPct": float(r["activity_pct"]),
+                    "isPrimary": r["is_primary"],
+                })
+            for entry in deal_rows_by_slug.values():
+                s = splits_by_deal.get(int(entry["dealId"]), [])
+                if s:
+                    entry["jurisdictionSplits"] = s
+    except Exception:
+        pass
+
+    # Enrich with ratio status (covenant tier_status from most recent covenant test)
+    try:
+        with get_connection() as cov_conn:
+            cov_rows = cov_conn.execute(
+                """SELECT DISTINCT ON (deal_id) deal_id, tier_status
+                   FROM covenant_tests ORDER BY deal_id, created_at DESC"""
+            ).fetchall()
+            for r in cov_rows:
+                did = int(r["deal_id"])
+                for entry in deal_rows_by_slug.values():
+                    if int(entry["dealId"]) == did:
+                        entry["ratioStatus"] = r["tier_status"]
+    except Exception:
+        pass
+
+    # Enrich with reserve account funding status
+    try:
+        with get_connection() as res_conn:
+            res_rows = res_conn.execute(
+                """SELECT deal_id,
+                          BOOL_AND(funded_status = 'fully_funded') AS all_funded,
+                          MAX(periods_underfunded) AS max_periods_underfunded
+                   FROM deal_reserve_accounts
+                   GROUP BY deal_id"""
+            ).fetchall()
+            for r in res_rows:
+                did = int(r["deal_id"])
+                for entry in deal_rows_by_slug.values():
+                    if int(entry["dealId"]) == did:
+                        entry["reservesFullyFunded"] = bool(r["all_funded"])
+                        entry["reservesUnderfundedPeriods"] = int(r["max_periods_underfunded"]) if r["max_periods_underfunded"] else 0
+    except Exception:
+        pass
 
     deal_rows = [
         {
@@ -11464,6 +11562,15 @@ def get_dashboard(
                 "performanceTrend": None,
                 "performanceGrade": None,
                 "spreadBps": None,
+                "securityRanking": None,
+                "instrumentFormat": None,
+                "primaryCountry": None,
+                "primaryCountryName": None,
+                "jurisdictionSplits": [],
+                "ratioStatus": None,
+                "walYears": None,
+                "reservesFullyFunded": None,
+                "reservesUnderfundedPeriods": None,
                 "organisations": set(),
                 "owners": set(),
                 "accounts": set(),
@@ -11507,6 +11614,95 @@ def get_dashboard(
                     entry["spreadBps"] = s
     except Exception:
         pass  # Table may not exist yet; degrade gracefully
+
+    # Enrich with security ranking and instrument format (from most senior active instrument)
+    try:
+        with get_connection() as inst_conn:
+            inst_rows = inst_conn.execute(
+                """SELECT DISTINCT ON (deal_id) deal_id, enforcement_class, instrument_format
+                   FROM capital_structure_instruments
+                   WHERE status = 'active' AND drawn_amount > 0
+                   ORDER BY deal_id, waterfall_priority ASC"""
+            ).fetchall()
+            for r in inst_rows:
+                did = int(r["deal_id"])
+                for entry in deal_rows_by_slug.values():
+                    if int(entry["dealId"]) == did:
+                        entry["securityRanking"] = r["enforcement_class"]
+                        entry["instrumentFormat"] = r["instrument_format"]
+    except Exception:
+        pass
+
+    # Enrich with primary country and jurisdiction splits
+    try:
+        with get_connection() as geo_conn:
+            geo_rows = geo_conn.execute(
+                """SELECT id, primary_business_country, primary_business_country_name, weighted_average_life FROM deals"""
+            ).fetchall()
+            geo_by_id = {int(r["id"]): r for r in geo_rows}
+            for entry in deal_rows_by_slug.values():
+                g = geo_by_id.get(int(entry["dealId"]))
+                if g:
+                    entry["primaryCountry"] = g["primary_business_country"]
+                    entry["primaryCountryName"] = g["primary_business_country_name"]
+                    if g["weighted_average_life"] is not None:
+                        entry["walYears"] = float(g["weighted_average_life"])
+            # Jurisdiction splits
+            split_rows = geo_conn.execute(
+                """SELECT deal_id, country_code, country_name, activity_pct, is_primary
+                   FROM deal_jurisdiction_splits ORDER BY deal_id, activity_pct DESC"""
+            ).fetchall()
+            splits_by_deal: dict = {}
+            for r in split_rows:
+                did = int(r["deal_id"])
+                if did not in splits_by_deal:
+                    splits_by_deal[did] = []
+                splits_by_deal[did].append({
+                    "countryCode": r["country_code"],
+                    "countryName": r["country_name"],
+                    "activityPct": float(r["activity_pct"]),
+                    "isPrimary": r["is_primary"],
+                })
+            for entry in deal_rows_by_slug.values():
+                s = splits_by_deal.get(int(entry["dealId"]), [])
+                if s:
+                    entry["jurisdictionSplits"] = s
+    except Exception:
+        pass
+
+    # Enrich with ratio status (covenant tier_status from most recent covenant test)
+    try:
+        with get_connection() as cov_conn:
+            cov_rows = cov_conn.execute(
+                """SELECT DISTINCT ON (deal_id) deal_id, tier_status
+                   FROM covenant_tests ORDER BY deal_id, created_at DESC"""
+            ).fetchall()
+            for r in cov_rows:
+                did = int(r["deal_id"])
+                for entry in deal_rows_by_slug.values():
+                    if int(entry["dealId"]) == did:
+                        entry["ratioStatus"] = r["tier_status"]
+    except Exception:
+        pass
+
+    # Enrich with reserve account funding status
+    try:
+        with get_connection() as res_conn:
+            res_rows = res_conn.execute(
+                """SELECT deal_id,
+                          BOOL_AND(funded_status = 'fully_funded') AS all_funded,
+                          MAX(periods_underfunded) AS max_periods_underfunded
+                   FROM deal_reserve_accounts
+                   GROUP BY deal_id"""
+            ).fetchall()
+            for r in res_rows:
+                did = int(r["deal_id"])
+                for entry in deal_rows_by_slug.values():
+                    if int(entry["dealId"]) == did:
+                        entry["reservesFullyFunded"] = bool(r["all_funded"])
+                        entry["reservesUnderfundedPeriods"] = int(r["max_periods_underfunded"]) if r["max_periods_underfunded"] else 0
+    except Exception:
+        pass
 
     deal_rows = [
         {
@@ -13148,6 +13344,15 @@ def get_deal(slug: str, viewer: str | None = None):
             (deal["id"],),
         ).fetchall()
 
+        # Reserve accounts
+        try:
+            reserve_account_rows = conn.execute(
+                "SELECT * FROM deal_reserve_accounts WHERE deal_id = %s ORDER BY account_type",
+                (deal["id"],),
+            ).fetchall()
+        except Exception:
+            reserve_account_rows = []
+
         borrower_request_rows = conn.execute(
             """
             SELECT *
@@ -13306,6 +13511,7 @@ def get_deal(slug: str, viewer: str | None = None):
         "memoPacks": memo_packs,
         "forecastSummary": forecast_summary,
         "snapshotHistory": [serialize_topsheet_snapshot(row) for row in snapshot_rows],
+        "reserveAccounts": [_serialize_row(r) for r in reserve_account_rows],
         "covenant": {
             "id": covenant["id"],
             "code": covenant["code"],
