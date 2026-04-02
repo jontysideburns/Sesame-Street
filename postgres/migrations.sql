@@ -433,6 +433,15 @@ INSERT INTO line_item_definitions (line_key, section, display_label, row_order, 
 ('adj_net_debt_ebitda',      'moodys_ratios', 'Adj Net Debt / EBITDA (Moody''s)',     12, TRUE,  'moodys_adjusted_net_debt / ebitda',                 'ratio')
 ON CONFLICT (line_key) DO NOTHING;
 
+-- ── Security ranking on deals ────────────────────────────────────────────────
+-- Distinct from enforcement_class (instrument-level). This is the deal-level security ranking.
+-- Values: Senior Secured, Senior Unsecured, Second Lien, Mezzanine, Subordinated,
+--         Holdco, Majority Holdco, Minority Holdco, PIK, Equity
+-- Holdco variants based on % equity ownership of OpCo:
+--   Majority Holdco = HoldCo owns >50% of OpCo equity
+--   Minority Holdco = HoldCo owns ≤50% of OpCo equity
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS security_ranking TEXT;
+
 -- ── Full life-of-investment forecast storage ─────────────────────────────────
 
 -- Period type discriminator (historical, current, forecast)

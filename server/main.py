@@ -10837,20 +10837,25 @@ def get_portfolio(
     except Exception:
         pass  # Table may not exist yet; degrade gracefully
 
-    # Enrich with security ranking and instrument format (from most senior active instrument)
+    # Enrich with security ranking and instrument format
     try:
         with get_connection() as inst_conn:
-            inst_rows = inst_conn.execute(
-                """SELECT DISTINCT ON (deal_id) deal_id, enforcement_class, instrument_format
-                   FROM capital_structure_instruments
-                   WHERE status = 'active' AND drawn_amount > 0
-                   ORDER BY deal_id, waterfall_priority ASC"""
+            # Security ranking: prefer deals.security_ranking, fallback to enforcement_class
+            rank_rows = inst_conn.execute(
+                """SELECT d.id AS deal_id, d.security_ranking,
+                          (SELECT csi.enforcement_class FROM capital_structure_instruments csi
+                           WHERE csi.deal_id = d.id AND csi.status = 'active' AND csi.drawn_amount > 0
+                           ORDER BY csi.waterfall_priority ASC LIMIT 1) AS fallback_class,
+                          (SELECT csi.instrument_format FROM capital_structure_instruments csi
+                           WHERE csi.deal_id = d.id AND csi.status = 'active' AND csi.drawn_amount > 0
+                           ORDER BY csi.waterfall_priority ASC LIMIT 1) AS instrument_format
+                   FROM deals d"""
             ).fetchall()
-            for r in inst_rows:
+            for r in rank_rows:
                 did = int(r["deal_id"])
                 for entry in deal_rows_by_slug.values():
                     if int(entry["dealId"]) == did:
-                        entry["securityRanking"] = r["enforcement_class"]
+                        entry["securityRanking"] = r["security_ranking"] or r["fallback_class"]
                         entry["instrumentFormat"] = r["instrument_format"]
     except Exception:
         pass
@@ -11615,20 +11620,25 @@ def get_dashboard(
     except Exception:
         pass  # Table may not exist yet; degrade gracefully
 
-    # Enrich with security ranking and instrument format (from most senior active instrument)
+    # Enrich with security ranking and instrument format
     try:
         with get_connection() as inst_conn:
-            inst_rows = inst_conn.execute(
-                """SELECT DISTINCT ON (deal_id) deal_id, enforcement_class, instrument_format
-                   FROM capital_structure_instruments
-                   WHERE status = 'active' AND drawn_amount > 0
-                   ORDER BY deal_id, waterfall_priority ASC"""
+            # Security ranking: prefer deals.security_ranking, fallback to enforcement_class
+            rank_rows = inst_conn.execute(
+                """SELECT d.id AS deal_id, d.security_ranking,
+                          (SELECT csi.enforcement_class FROM capital_structure_instruments csi
+                           WHERE csi.deal_id = d.id AND csi.status = 'active' AND csi.drawn_amount > 0
+                           ORDER BY csi.waterfall_priority ASC LIMIT 1) AS fallback_class,
+                          (SELECT csi.instrument_format FROM capital_structure_instruments csi
+                           WHERE csi.deal_id = d.id AND csi.status = 'active' AND csi.drawn_amount > 0
+                           ORDER BY csi.waterfall_priority ASC LIMIT 1) AS instrument_format
+                   FROM deals d"""
             ).fetchall()
-            for r in inst_rows:
+            for r in rank_rows:
                 did = int(r["deal_id"])
                 for entry in deal_rows_by_slug.values():
                     if int(entry["dealId"]) == did:
-                        entry["securityRanking"] = r["enforcement_class"]
+                        entry["securityRanking"] = r["security_ranking"] or r["fallback_class"]
                         entry["instrumentFormat"] = r["instrument_format"]
     except Exception:
         pass
