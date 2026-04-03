@@ -4,6 +4,7 @@ import { getDeal, getDealFinancialPeriod } from "../../../api/deals";
 import { getDealAssessment } from "../../../api/assessment";
 import { captureDealSnapshot } from "../actions";
 import RevenueRiskTooltip from "../../../components/revenue-risk-tooltip";
+import DealCharts from "./deal-charts";
 
 function formatMoney(value: number) {
   return new Intl.NumberFormat("en-US", {
@@ -633,6 +634,14 @@ export default async function DealPage({
                 </div>
               </article>
             )}
+
+            {/* Financial Performance Charts */}
+            <DealCharts
+              slug={slug}
+              currency={deal.currency}
+              lockupLevel={deal.covenant?.thresholdLockup}
+              defaultLevel={deal.covenant?.thresholdTrigger}
+            />
 
             <div className="topsheet-two-column">
               <article className="topsheet-card">
