@@ -309,16 +309,17 @@ export default function PortfolioSummary({ deals }: { deals: Deal[] }) {
       .sort((a, b) => b.value - a.value)
       .map((f, i) => ({ ...f, fill: `hsl(205, 50%, ${32 + i * 12}%)` }));
 
-    // Credit rating breakdown (using displayRating logic)
-    const ratingMap: Record<string, { name: string; value: number }> = {};
+    // Credit rating breakdown — all converted to Moody's scale
+    const ratingMap: Record<string, { name: string; value: number; numericSort: number }> = {};
     for (const d of deals) {
-      const r = d.internalCreditScore ?? d.spRating ?? d.moodysRating ?? d.fitchRating ?? "Unrated";
-      if (!ratingMap[r]) ratingMap[r] = { name: r, value: 0 };
-      ratingMap[r].value += d.exposure;
+      const numRating = assignedRatingNumeric(d);
+      const moodysLabel = numRating != null ? (NUMERIC_TO_MOODYS[numRating] ?? "Unrated") : "Unrated";
+      if (!ratingMap[moodysLabel]) ratingMap[moodysLabel] = { name: moodysLabel, value: 0, numericSort: numRating ?? 99 };
+      ratingMap[moodysLabel].value += d.exposure;
     }
     const ratingData = Object.values(ratingMap)
-      .sort((a, b) => b.value - a.value)
-      .map((r, i) => ({ ...r, fill: `hsl(205, 50%, ${30 + i * 10}%)` }));
+      .sort((a, b) => a.numericSort - b.numericSort)
+      .map((r, i) => ({ name: r.name, value: r.value, fill: `hsl(205, 50%, ${30 + i * 10}%)` }));
 
     // Ratio status breakdown
     const ratioMap: Record<string, { name: string; value: number }> = {};

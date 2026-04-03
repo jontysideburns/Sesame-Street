@@ -191,11 +191,15 @@ The portfolio-level "Avg Headroom" KPI is an exposure-weighted average of deal-l
     name: "Weighted Average Credit Rating",
     category: "Portfolio Aggregations",
     summary: "Exposure-weighted average credit rating across the portfolio, displayed on the Moody's scale.",
-    detail: `**Step 1 — Assign numeric value per deal:**
+    detail: `**All ratings are converted to the Moody's scale** for consistency. S&P and Fitch ratings are mapped to their Moody's equivalents (e.g. BBB- = Baa3, A+ = A1). The Credit Rating chart on the portfolio summary also displays all ratings on the Moody's scale.
 
-Each rating agency grade maps to a number (lower = better):
-AAA/Aaa = 1, AA+/Aa1 = 2, AA/Aa2 = 3, AA-/Aa3 = 4, A+/A1 = 5, A/A2 = 6, A-/A3 = 7,
-BBB+/Baa1 = 8, BBB/Baa2 = 9, BBB-/Baa3 = 10, BB+/Ba1 = 11, BB/Ba2 = 12, ...
+**Step 1 — Assign numeric value per deal:**
+
+Each rating maps to a number on a unified scale (lower = better):
+Aaa = 1, Aa1 = 2, Aa2 = 3, Aa3 = 4, A1 = 5, A2 = 6, A3 = 7,
+Baa1 = 8, Baa2 = 9, Baa3 = 10, Ba1 = 11, Ba2 = 12, Ba3 = 13, ...
+
+S&P/Fitch equivalents: AAA = Aaa (1), AA+ = Aa1 (2), BBB = Baa2 (9), BBB- = Baa3 (10), etc.
 
 **Step 2 — Select the assigned rating for each deal:**
 - If rated by **3 agencies** (Moody's, S&P, Fitch): use the **middle** rating (median)
@@ -204,12 +208,12 @@ BBB+/Baa1 = 8, BBB/Baa2 = 9, BBB-/Baa3 = 10, BB+/Ba1 = 11, BB/Ba2 = 12, ...
 - If **not externally rated**: use the **internal credit score** from the IC memo (updatable by the HAM)
 
 **Step 3 — Compute the portfolio weighted average:**
-WA Rating (numeric) = ROUND(SUM(Exposure × Assigned Rating Numeric) / SUM(Exposure))
+WA Rating (numeric) = ROUND(SUM(Exposure x Assigned Rating Numeric) / SUM(Exposure))
 
 **Step 4 — Convert back to Moody's scale:**
-The rounded numeric result is mapped back: 9 → Baa2, 10 → Baa3, etc.
+The rounded numeric result is mapped back: 9 = Baa2, 10 = Baa3, etc.
 
-**Example:** A portfolio with 60% BBB (9) and 40% BBB+ (8) gives WA = 8.6, rounded to 9 = Baa2.`,
+**Example:** A portfolio with 60% BBB/Baa2 (9) and 40% BBB+/Baa1 (8) gives WA = 8.6, rounded to 9 = Baa2.`,
   },
   {
     id: "wa-dscr",
