@@ -33,6 +33,7 @@ type Props = {
   dealLabels: Record<string, string>;
   forecastItems: { forecast_case_version_id: number; reporting_period_id: number; line_key: string; value: number | null }[];
   actualItems: { reporting_period_id: number; line_key: string; approved_value: number | null; reported_value: number | null }[];
+  currency?: string;
 };
 
 /* ── Section display order and labels ──────────────────────────────────────── */
@@ -68,12 +69,9 @@ function fmtCell(value: number | null | undefined, unit: string) {
   if (unit === "ratio") return value.toFixed(2) + "x";
   if (unit === "percentage") return value.toFixed(1) + "%";
   if (unit === "count") return value.toFixed(1);
-  // currency — compact
-  const abs = Math.abs(value);
-  if (abs >= 1e9) return (value / 1e9).toFixed(1) + "B";
-  if (abs >= 1e6) return (value / 1e6).toFixed(1) + "M";
-  if (abs >= 1e3) return (value / 1e3).toFixed(0) + "K";
-  return value.toFixed(0);
+  // currency — expressed in thousands, comma-separated
+  const inThousands = value / 1000;
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(inThousands);
 }
 
 /* ── Component ───────────────────────────────────────────────────────────── */
@@ -87,8 +85,39 @@ const VIEW_LABELS: Record<ViewMode, string> = {
   actuals: "Actuals",
 };
 
-export default function ForecastGrid({ periods, lineItems, dealLabels, forecastItems, actualItems }: Props) {
+const CASE_ASSUMPTIONS: Record<string, { title: string; assumptions: string[] }> = {
+  credit_case: {
+    title: "Credit Case Assumptions",
+    assumptions: [
+      "Revenue: Cumulative 0.25% per annum decline vs management case (0.25% year 1, 0.50% year 2, 0.75% year 3, etc.)",
+      "Operating costs: 5% higher than management case in every period",
+      "Tax: Falls proportionally with reduced EBITDA",
+      "Capital expenditure: Unchanged from management case",
+      "Debt service: Unchanged (fixed-rate amortising note)",
+      "All other assumptions: Same as management case",
+    ],
+  },
+  combined_downside: {
+    title: "Combined Downside Assumptions",
+    assumptions: [
+      "Revenue: P90 resource assumption (10% below P50 base case)",
+      "Operating costs: 10% above management case",
+      "Major component failure in year 5",
+      "Grid curtailment increased to 8%",
+    ],
+  },
+};
+
+const CURRENCY_SYMBOLS: Record<string, string> = {
+  GBP: "\u00A3", USD: "$", EUR: "\u20AC", CHF: "CHF", JPY: "\u00A5",
+  AUD: "A$", CAD: "C$", SGD: "S$", HKD: "HK$", NZD: "NZ$",
+};
+
+export default function ForecastGrid({ periods, lineItems, dealLabels, forecastItems, actualItems, currency }: Props) {
   const [viewMode, setViewMode] = useState<ViewMode>("management_case");
+  const [showAssumptions, setShowAssumptions] = useState(false);
+
+  const currSymbol = CURRENCY_SYMBOLS[currency ?? "USD"] ?? currency ?? "$";
 
   // Build lookup maps
   const forecastMap = new Map<string, number | null>();
@@ -147,6 +176,20 @@ export default function ForecastGrid({ periods, lineItems, dealLabels, forecastI
         <span style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--ink-soft)", marginRight: 4 }}>
           View:
         </span>
+        {CASE_ASSUMPTIONS[viewMode] && (
+          <button
+            onClick={() => setShowAssumptions(!showAssumptions)}
+            style={{
+              padding: "5px 14px", borderRadius: 8,
+              border: showAssumptions ? "2px solid var(--accent)" : "1px solid var(--line)",
+              background: showAssumptions ? "var(--accent-soft)" : "var(--panel)",
+              color: "var(--accent)", fontSize: "0.75rem", fontWeight: 600,
+              cursor: "pointer", whiteSpace: "nowrap", marginRight: 8,
+            }}
+          >
+            Assumptions
+          </button>
+        )}
         {(Object.entries(VIEW_LABELS) as [ViewMode, string][]).map(([key, label]) => (
           <button
             key={key}
@@ -167,6 +210,32 @@ export default function ForecastGrid({ periods, lineItems, dealLabels, forecastI
           </button>
         ))}
       </div>
+
+      {/* Assumptions popup */}
+      {showAssumptions && CASE_ASSUMPTIONS[viewMode] && (
+        <div style={{
+          background: "var(--panel-strong)", border: "1px solid var(--line)",
+          borderRadius: 14, padding: "14px 18px", marginBottom: 10,
+          boxShadow: "0 4px 16px rgba(0,0,0,0.08)", position: "relative",
+        }}>
+          <button
+            onClick={() => setShowAssumptions(false)}
+            style={{
+              position: "absolute", top: 8, right: 12,
+              background: "none", border: "none", cursor: "pointer",
+              fontSize: "1.1rem", color: "var(--ink-soft)", fontWeight: 700,
+            }}
+          >&times;</button>
+          <div style={{ fontWeight: 700, fontSize: "0.85rem", color: "var(--accent)", marginBottom: 8 }}>
+            {CASE_ASSUMPTIONS[viewMode].title}
+          </div>
+          <ul style={{ margin: 0, paddingLeft: 18, fontSize: "0.80rem", lineHeight: 1.7, color: "var(--ink)" }}>
+            {CASE_ASSUMPTIONS[viewMode].assumptions.map((a, i) => (
+              <li key={i}>{a}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div style={{ overflowX: "auto", overflowY: "auto", maxHeight: "70vh", border: "1px solid var(--line)", borderRadius: 12 }}>
       <table style={{ borderCollapse: "collapse", width: "max-content" }}>
@@ -193,7 +262,12 @@ export default function ForecastGrid({ periods, lineItems, dealLabels, forecastI
               <React.Fragment key={sec.key}>
                 {/* Section header row */}
                 <tr>
-                  <td style={sectionHeaderStyle}>{sec.label}</td>
+                  <td style={sectionHeaderStyle}>
+                    {sec.label}
+                    {!["covenant_core","covenant_project_finance","covenant_real_estate","covenant_regulated","covenant_social","moodys_metrics","moodys_ratios","sector_kpi"].includes(sec.key) && (
+                      <span style={{ fontWeight: 400, fontSize: "0.55rem", marginLeft: 6, opacity: 0.8 }}>{currSymbol}&apos;000s</span>
+                    )}
+                  </td>
                   {sortedPeriods.map((p) => (
                     <td key={p.id} style={{ ...sectionHeaderStyle, textAlign: "center" }}></td>
                   ))}
