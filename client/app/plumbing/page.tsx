@@ -121,6 +121,11 @@ export default async function PlumbingPage() {
           <p className="hero-sub">
             Reference templates and classification frameworks as currently configured.
           </p>
+          <div style={{ marginTop: 12 }}>
+            <a className="button secondary" href="/plumbing/risk-taxonomy" style={{ fontWeight: 700, background: "var(--accent)", color: "white", border: "none", textDecoration: "none", padding: "8px 20px", borderRadius: 10, display: "inline-block" }}>
+              View Risk Taxonomy (226 risks)
+            </a>
+          </div>
         </div>
       </section>
 

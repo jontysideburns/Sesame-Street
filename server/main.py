@@ -17630,6 +17630,18 @@ def initialise_risk_register_endpoint(slug: str):
     return {"ok": True, "rowsInserted": result[0] if result else 0}
 
 
+@app.get("/api/risk-taxonomy")
+def get_risk_taxonomy():
+    """Full risk taxonomy — 226 standardised risks across 7 categories."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            """SELECT risk_id, risk_name, category_code, category_name, category_number,
+                      sub_sector, description, typical_sectors, key_indicators, sort_order
+               FROM risk_taxonomy ORDER BY sort_order"""
+        ).fetchall()
+    return {"risks": [_serialize_row(r) for r in rows]}
+
+
 @app.get("/api/portfolio/risk-heatmap")
 def get_risk_heatmap():
     with get_connection() as conn:
