@@ -157,10 +157,19 @@ def portfolio_covenant_status(
     return "performing"
 
 
-def portfolio_headroom_pct(current_value: float | None, threshold_lockup: float | None):
-    if current_value is None or threshold_lockup in (None, 0):
+def portfolio_headroom_pct(current_value: float | None, threshold_default: float | None, management_case_value: float | None = None):
+    """Relative headroom: what proportion of expected cushion above default remains.
+    100% = performing exactly at management case. 0% = at default threshold. Negative = breached.
+    Formula: (actual - default) / (management_case - default) * 100
+    Falls back to lockup-based if no management case available."""
+    if current_value is None or threshold_default in (None, 0):
         return None
-    return round(((current_value - threshold_lockup) / threshold_lockup) * 100, 1)
+    if management_case_value is not None and management_case_value != threshold_default:
+        expected_cushion = management_case_value - threshold_default
+        actual_cushion = current_value - threshold_default
+        return round((actual_cushion / expected_cushion) * 100, 1)
+    # Fallback: absolute headroom above the threshold
+    return round(((current_value - threshold_default) / threshold_default) * 100, 1)
 
 
 PERMISSION_LABELS = {
@@ -2276,7 +2285,11 @@ def commit_document_proposal(conn, proposal_id: int, actor_name: str):
                 """
                 UPDATE covenants
                 SET current_value = %s,
-                    headroom_pct = ROUND((((%s)::numeric - threshold_lockup) / threshold_lockup) * 100, 2),
+                    headroom_pct = CASE
+                      WHEN management_case_value IS NOT NULL AND management_case_value != COALESCE(threshold_default, threshold_trigger)
+                      THEN ROUND((((%s)::numeric - COALESCE(threshold_default, threshold_trigger)) / (management_case_value - COALESCE(threshold_default, threshold_trigger))) * 100, 2)
+                      ELSE ROUND((((%s)::numeric - threshold_lockup) / NULLIF(threshold_lockup, 0)) * 100, 2)
+                    END,
                     status = CASE
                       WHEN %s <= threshold_trigger THEN 'trigger_event'
                       WHEN %s <= threshold_lockup THEN 'lock_up'
@@ -9746,10 +9759,14 @@ def get_portfolio(
                 WHEN COALESCE(ch.dscr, c.current_value) < c.threshold_lockup THEN 'lock_up_risk'
                 ELSE 'performing'
               END AS covenant_status,
-              ROUND(
-                ((COALESCE(ch.dscr, c.current_value) - c.threshold_lockup) / NULLIF(c.threshold_lockup, 0)) * 100,
-                1
-              ) AS headroom_pct,
+              CASE
+                WHEN c.management_case_value IS NOT NULL AND c.management_case_value != COALESCE(c.threshold_default, c.threshold_trigger)
+                THEN ROUND(
+                  ((COALESCE(ch.dscr, c.current_value) - COALESCE(c.threshold_default, c.threshold_trigger))
+                  / NULLIF(c.management_case_value - COALESCE(c.threshold_default, c.threshold_trigger), 0)) * 100, 1)
+                ELSE ROUND(
+                  ((COALESCE(ch.dscr, c.current_value) - c.threshold_lockup) / NULLIF(c.threshold_lockup, 0)) * 100, 1)
+              END AS headroom_pct,
               latest_period.period_key,
               latest_period.period_label,
               latest_period.period_end,
@@ -17117,7 +17134,11 @@ def approve_review_item(review_id: int):
                     """
                     UPDATE covenants
                     SET current_value = %s,
-                        headroom_pct = ROUND((((%s)::numeric - threshold_lockup) / threshold_lockup) * 100, 2),
+                        headroom_pct = CASE
+                          WHEN management_case_value IS NOT NULL AND management_case_value != COALESCE(threshold_default, threshold_trigger)
+                          THEN ROUND((((%s)::numeric - COALESCE(threshold_default, threshold_trigger)) / (management_case_value - COALESCE(threshold_default, threshold_trigger))) * 100, 2)
+                          ELSE ROUND((((%s)::numeric - threshold_lockup) / NULLIF(threshold_lockup, 0)) * 100, 2)
+                        END,
                         status = CASE
                           WHEN %s <= threshold_trigger THEN 'trigger_event'
                           WHEN %s <= threshold_lockup THEN 'lock_up'

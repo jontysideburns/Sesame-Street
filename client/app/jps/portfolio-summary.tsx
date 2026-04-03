@@ -382,7 +382,7 @@ export default function PortfolioSummary({ deals }: { deals: Deal[] }) {
         <KpiCard
           label="Headroom"
           value={fmtPct(stats.avgHeadroom)}
-          tone={stats.avgHeadroom != null ? (stats.avgHeadroom < 5 ? "critical" : stats.avgHeadroom < 15 ? "warning" : "good") : undefined}
+          tone={stats.avgHeadroom != null ? (stats.avgHeadroom < 30 ? "critical" : stats.avgHeadroom < 70 ? "warning" : "good") : undefined}
         />
         <KpiCard
           label="Watchlist"

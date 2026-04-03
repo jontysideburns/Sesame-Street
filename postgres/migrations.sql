@@ -491,6 +491,11 @@ CREATE TABLE IF NOT EXISTS forecast_model_metadata (
 );
 CREATE INDEX IF NOT EXISTS idx_fmm_deal ON forecast_model_metadata(deal_id);
 
+-- ── Relative headroom: management case value on covenants ────────────────────
+ALTER TABLE covenants ADD COLUMN IF NOT EXISTS management_case_value NUMERIC(8,2);
+ALTER TABLE covenants ADD COLUMN IF NOT EXISTS threshold_default NUMERIC(8,2);
+-- headroom_pct is now: (current_value - threshold_default) / (management_case_value - threshold_default) * 100
+
 -- ── Part A: Obligation Taxonomy & Deal Obligation Register ───────────────────
 
 -- Master reference list of all possible deliverables, covenants, and monitoring items

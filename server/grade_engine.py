@@ -81,11 +81,20 @@ def compute_headroom(
         # Management Case itself breaches default
         erosion_pct = Decimal("1.0")
 
+    # Relative headroom: 100% = at management case, 0% = at default, negative = breached
+    if expected_headroom > 0:
+        relative_headroom_pct = (actual_headroom / expected_headroom) * 100
+    elif actual_headroom > 0:
+        relative_headroom_pct = Decimal("100")
+    else:
+        relative_headroom_pct = Decimal("0")
+
     return {
         "expected_headroom": expected_headroom,
         "actual_headroom": actual_headroom,
         "erosion_abs": erosion_abs,
         "erosion_pct": erosion_pct,
+        "relative_headroom_pct": relative_headroom_pct,
     }
 
 

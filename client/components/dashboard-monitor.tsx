@@ -141,21 +141,21 @@ function dscrHealth(value: number): { tone: MetricTone; summary: string } {
 }
 
 function headroomHealth(value: number): { tone: MetricTone; summary: string } {
-  if (value >= 12) {
+  if (value >= 70) {
     return {
       tone: "good",
-      summary: `Green because average headroom is ${value.toFixed(1)}%, leaving meaningful covenant cushion.`
+      summary: `Green because average headroom is ${value.toFixed(1)}% of expected cushion — portfolio performing near management case.`
     };
   }
-  if (value >= 5) {
+  if (value >= 30) {
     return {
       tone: "warning",
-      summary: `Yellow because average headroom is ${value.toFixed(1)}%, which is usable but tighter than ideal.`
+      summary: `Yellow because average headroom is ${value.toFixed(1)}% of expected cushion — some erosion from management case.`
     };
   }
   return {
     tone: "critical",
-    summary: `Red because average headroom is ${value.toFixed(1)}%, meaning several deals are close to adverse thresholds.`
+    summary: `Red because average headroom is ${value.toFixed(1)}% of expected cushion — significant erosion, approaching default thresholds.`
   };
 }
 
