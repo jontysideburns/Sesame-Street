@@ -342,9 +342,6 @@ export default async function DealPage({
                   <div><dt>Latest document</dt><dd>{latestDocument ? latestDocument.documentName : "\u2014"}</dd></div>
                 </dl>
               </article>
-            </div>
-
-            <div className="topsheet-two-column">
               <article className="topsheet-card">
                 <div className="status-row">
                   <strong>Distribution Assessment</strong>
@@ -358,37 +355,22 @@ export default async function DealPage({
                   <>
                     <p>{distribution.summary}</p>
                     <dl className="topsheet-definition-grid">
-                      <div>
-                        <dt>Assessment period</dt>
-                        <dd>{distribution.periodLabel}</dd>
-                      </div>
-                      <div>
-                        <dt>Lock-up state</dt>
-                        <dd>{distribution.lockupState.replaceAll("_", " ")}</dd>
-                      </div>
-                      <div>
-                        <dt>Blockers</dt>
-                        <dd>{distribution.blockerCount}</dd>
-                      </div>
-                      <div>
-                        <dt>Permitted capacity</dt>
-                        <dd>
-                          {distribution.distributionCapacity !== null
-                            ? formatMoney(distribution.distributionCapacity)
-                            : "—"}
-                        </dd>
-                      </div>
+                      <div><dt>Assessment period</dt><dd>{distribution.periodLabel}</dd></div>
+                      <div><dt>Lock-up state</dt><dd>{distribution.lockupState.replaceAll("_", " ")}</dd></div>
+                      <div><dt>Blockers</dt><dd>{distribution.blockerCount}</dd></div>
+                      <div><dt>Permitted capacity</dt><dd>{distribution.distributionCapacity !== null ? formatMoney(distribution.distributionCapacity) : "\u2014"}</dd></div>
                     </dl>
                     {distribution.failedConditions[0] ? (
-                      <p className="meta-note">
-                        Primary blocker: {distribution.failedConditions[0].label}
-                      </p>
+                      <p className="meta-note">Primary blocker: {distribution.failedConditions[0].label}</p>
                     ) : null}
                   </>
                 ) : (
                   <p>No distribution assessment is available for this deal.</p>
                 )}
               </article>
+            </div>
+
+            <div className="topsheet-two-column">
 
               <article className="topsheet-card">
                 <strong>Key Metrics</strong>
