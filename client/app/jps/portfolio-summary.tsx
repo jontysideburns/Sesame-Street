@@ -431,9 +431,9 @@ export default function PortfolioSummary({ deals }: { deals: Deal[] }) {
       </ChartPanel>
 
       <ChartPanel title="Performance Grade">
-        <ResponsiveContainer width="100%" height={140}>
+        <ResponsiveContainer width="100%" height={110}>
           <BarChart data={stats.gradeData} margin={{ top: 4, right: 4, bottom: 4, left: 4 }}>
-            <XAxis dataKey="grade" tick={{ fontSize: 9 }} />
+            <XAxis dataKey="grade" tick={false} />
             <YAxis tickFormatter={(v: number) => fmtCompact(v)} tick={{ fontSize: 9 }} width={42} />
             <Tooltip content={<ChartTooltip />} />
             <Bar dataKey="exposure" name="Exposure" radius={[4, 4, 0, 0]}>
@@ -441,6 +441,18 @@ export default function PortfolioSummary({ deals }: { deals: Deal[] }) {
             </Bar>
           </BarChart>
         </ResponsiveContainer>
+        <div style={{ display: "flex", justifyContent: "center", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
+          {stats.gradeData.map((g) => {
+            const parts = g.grade.split(" - ");
+            return (
+              <div key={g.grade} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1 }}>
+                <span style={{ width: 8, height: 8, borderRadius: "50%", background: g.fill, display: "inline-block" }} />
+                <span style={{ fontSize: "0.60rem", fontWeight: 700, color: "var(--ink)" }}>{parts[0]}</span>
+                <span style={{ fontSize: "0.55rem", color: "var(--ink-soft)", lineHeight: 1.1, textAlign: "center", maxWidth: 55 }}>{parts[1]}</span>
+              </div>
+            );
+          })}
+        </div>
       </ChartPanel>
 
       <ChartPanel title="Trend">

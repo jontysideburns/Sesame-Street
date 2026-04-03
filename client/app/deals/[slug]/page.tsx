@@ -373,7 +373,7 @@ export default async function DealPage({
             <div className="topsheet-two-column">
 
               <article className="topsheet-card">
-                <strong>Key Metrics</strong>
+                <strong>Key Metrics as at {deal.latestReportedAt ? deal.latestReportedAt.slice(0, 10) : deal.latestPeriodLabel}</strong>
 
                 {/* Credit ratings */}
                 {(deal.moodysRating || deal.spRating || deal.fitchRating || deal.internalCreditScore) && (
