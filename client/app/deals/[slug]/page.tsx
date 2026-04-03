@@ -255,30 +255,6 @@ export default async function DealPage({
             </div>
 
             <div className="topsheet-status-grid">
-              <article className="topsheet-note topsheet-note-critical">
-                <strong>Compliance Update</strong>
-                <p>
-                  {overdueCount > 0
-                    ? `${overdueCount} overdue deliverable${
-                        overdueCount > 1 ? "s" : ""
-                      } requiring action.`
-                    : "All currently scheduled deliverables are up to date."}
-                </p>
-                <span>
-                  Latest package: {deal.latestPeriodLabel} · reported{" "}
-                  {deal.latestReportedAt.slice(0, 10)}
-                </span>
-              </article>
-
-              <article className="topsheet-note topsheet-note-info">
-                <strong>Investment Update</strong>
-                <p>{firstSentence(safeAssessment.assessment.summary)}</p>
-                <span>
-                  Active trends: {safeAssessment.activeTrends.length} · next test{" "}
-                  {deal.nextTestDate}
-                </span>
-              </article>
-
               <article className="topsheet-note">
                 <strong>Deal Summary</strong>
                 <dl className="topsheet-key-metrics">
@@ -306,6 +282,64 @@ export default async function DealPage({
                     <dt>Revenue risk</dt>
                     <dd><RevenueRiskTooltip code={deal.revenueRisk} /></dd>
                   </div>
+                </dl>
+              </article>
+
+              <article className="topsheet-note topsheet-note-critical">
+                <strong>Compliance Update</strong>
+                <p>
+                  {overdueCount > 0
+                    ? `${overdueCount} overdue deliverable${
+                        overdueCount > 1 ? "s" : ""
+                      } requiring action.`
+                    : "All currently scheduled deliverables are up to date."}
+                </p>
+                <span>
+                  Latest package: {deal.latestPeriodLabel} · reported{" "}
+                  {deal.latestReportedAt.slice(0, 10)}
+                </span>
+              </article>
+
+              <article className="topsheet-note topsheet-note-info">
+                <strong>Investment Update</strong>
+                <p>{firstSentence(safeAssessment.assessment.summary)}</p>
+                <span>
+                  Active trends: {safeAssessment.activeTrends.length} · next test{" "}
+                  {deal.nextTestDate}
+                </span>
+              </article>
+            </div>
+
+            <div className="topsheet-snapshot-grid">
+              <article className="topsheet-card">
+                <strong>Deal Snapshot</strong>
+                <dl className="topsheet-definition-grid">
+                  <div><dt>Borrower</dt><dd>{deal.borrower}</dd></div>
+                  <div><dt>Sector</dt><dd>{deal.sector}</dd></div>
+                  <div><dt>Region</dt><dd>{deal.region}</dd></div>
+                  <div><dt>Currency</dt><dd>{deal.currency}</dd></div>
+                  <div><dt>Project phase</dt><dd>{deal.phase}</dd></div>
+                  <div><dt>Latest period</dt><dd>{deal.latestPeriodLabel}</dd></div>
+                  <div><dt>Next test date</dt><dd>{deal.nextTestDate}</dd></div>
+                  <div><dt>Primary covenant</dt><dd>{deal.covenant.name}</dd></div>
+                  <div><dt>Distribution status</dt><dd>{distribution ? distribution.status.replaceAll("_", " ") : "not assessed"}</dd></div>
+                  <div><dt>Active amendments</dt><dd>{activeAmendmentCount}</dd></div>
+                  <div><dt>Monitoring case</dt><dd>{deal.forecastSummary?.activeMonitoringCaseName ?? "\u2014"}</dd></div>
+                </dl>
+              </article>
+              <article className="topsheet-card">
+                <strong>Risk Snapshot</strong>
+                <dl className="topsheet-definition-grid">
+                  <div><dt>Deal status</dt><dd>{deal.status}</dd></div>
+                  <div><dt>Watchlist</dt><dd>{deal.watchlist ? "Active" : "Standard"}</dd></div>
+                  <div><dt>Open risks</dt><dd>{deal.riskSnapshot.openCount}</dd></div>
+                  <div><dt>High severity risks</dt><dd>{deal.riskSnapshot.highSeverityCount}</dd></div>
+                  <div><dt>Overall score</dt><dd>{safeAssessment.assessment.overallScore}</dd></div>
+                  <div><dt>Escalation level</dt><dd>{safeAssessment.assessment.escalationLevel}</dd></div>
+                  <div><dt>Recommendation</dt><dd>{safeAssessment.assessment.watchlistRecommendation.replaceAll("_", " ")}</dd></div>
+                  <div><dt>Grade override</dt><dd>{deal.activeGradeOverride ? `${deal.activeGradeOverride.overrideGrade} until ${deal.activeGradeOverride.expiresOn}` : "None"}</dd></div>
+                  <div><dt>Active trends</dt><dd>{safeAssessment.activeTrends.length}</dd></div>
+                  <div><dt>Latest document</dt><dd>{latestDocument ? latestDocument.documentName : "\u2014"}</dd></div>
                 </dl>
               </article>
             </div>
@@ -424,122 +458,6 @@ export default async function DealPage({
                   Latest period: {safeLatestPeriod.periodLabel}. Values are sourced from
                   the most recent approved period and covenant test.
                 </p>
-              </article>
-            </div>
-
-            <div className="topsheet-snapshot-grid">
-              <article className="topsheet-card">
-                <strong>Deal Snapshot</strong>
-                <dl className="topsheet-definition-grid">
-                  <div>
-                    <dt>Borrower</dt>
-                    <dd>{deal.borrower}</dd>
-                  </div>
-                  <div>
-                    <dt>Sector</dt>
-                    <dd>{deal.sector}</dd>
-                  </div>
-                  <div>
-                    <dt>Region</dt>
-                    <dd>{deal.region}</dd>
-                  </div>
-                  <div>
-                    <dt>Currency</dt>
-                    <dd>{deal.currency}</dd>
-                  </div>
-                  <div>
-                    <dt>Project phase</dt>
-                    <dd>{deal.phase}</dd>
-                  </div>
-                  <div>
-                    <dt>Latest period</dt>
-                    <dd>{deal.latestPeriodLabel}</dd>
-                  </div>
-                  <div>
-                    <dt>Next test date</dt>
-                    <dd>{deal.nextTestDate}</dd>
-                  </div>
-                  <div>
-                    <dt>Primary covenant</dt>
-                    <dd>{deal.covenant.name}</dd>
-                  </div>
-                  <div>
-                    <dt>Distribution status</dt>
-                    <dd>
-                      {distribution
-                        ? distribution.status.replaceAll("_", " ")
-                        : "not assessed"}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>Distribution period</dt>
-                    <dd>{distribution ? distribution.periodLabel : "—"}</dd>
-                  </div>
-                  <div>
-                    <dt>Active amendments</dt>
-                    <dd>{activeAmendmentCount}</dd>
-                  </div>
-                  <div>
-                    <dt>Monitoring case</dt>
-                    <dd>{deal.forecastSummary?.activeMonitoringCaseName ?? "—"}</dd>
-                  </div>
-                </dl>
-              </article>
-
-              <article className="topsheet-card">
-                <strong>Risk Snapshot</strong>
-                <dl className="topsheet-definition-grid">
-                  <div>
-                    <dt>Deal status</dt>
-                    <dd>{deal.status}</dd>
-                  </div>
-                  <div>
-                    <dt>Watchlist</dt>
-                    <dd>{deal.watchlist ? "Active" : "Standard"}</dd>
-                  </div>
-                  <div>
-                    <dt>Open risks</dt>
-                    <dd>{deal.riskSnapshot.openCount}</dd>
-                  </div>
-                  <div>
-                    <dt>High severity risks</dt>
-                    <dd>{deal.riskSnapshot.highSeverityCount}</dd>
-                  </div>
-                  <div>
-                    <dt>Overall score</dt>
-                    <dd>{safeAssessment.assessment.overallScore}</dd>
-                  </div>
-                  <div>
-                    <dt>Escalation level</dt>
-                    <dd>{safeAssessment.assessment.escalationLevel}</dd>
-                  </div>
-                  <div>
-                    <dt>Recommendation</dt>
-                    <dd>
-                      {safeAssessment.assessment.watchlistRecommendation.replaceAll("_", " ")}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>Grade override</dt>
-                    <dd>
-                      {deal.activeGradeOverride
-                        ? `${deal.activeGradeOverride.overrideGrade} until ${deal.activeGradeOverride.expiresOn}`
-                        : "None"}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>Active trends</dt>
-                    <dd>{safeAssessment.activeTrends.length}</dd>
-                  </div>
-                  <div>
-                    <dt>Latest document</dt>
-                    <dd>{latestDocument ? latestDocument.documentName : "—"}</dd>
-                  </div>
-                  <div>
-                    <dt>Evidence page</dt>
-                    <dd>{latestDocument ? latestDocument.evidencePage : "—"}</dd>
-                  </div>
-                </dl>
               </article>
             </div>
 
