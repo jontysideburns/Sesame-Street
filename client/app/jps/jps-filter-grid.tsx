@@ -41,6 +41,7 @@ export type Deal = {
   walYears: number | null;
   reservesFullyFunded: boolean | null;
   reservesUnderfundedPeriods: number | null;
+  topsheetCompletePct: number | null;
 };
 
 type HierarchyOrg = { id: number; name: string; dealCount: number };
@@ -57,7 +58,7 @@ type Filters = {
 
 const EMPTY: Filters = { organisation: "", owner: "", sector: "", grade: "", watchlist: "", search: "" };
 
-type SortKey = "dealName" | "sector" | "rating" | "exposure" | "performanceScore" | "grade" | "performanceTrend" | "covenantStatus" | "ratioStatus" | "latestPeriodEnd" | "reportedDscr" | "headroomPct" | "todos" | "watchlist" | "reservesFullyFunded";
+type SortKey = "dealName" | "topsheetCompletePct" | "sector" | "rating" | "exposure" | "performanceScore" | "grade" | "performanceTrend" | "covenantStatus" | "ratioStatus" | "latestPeriodEnd" | "reportedDscr" | "headroomPct" | "todos" | "watchlist" | "reservesFullyFunded";
 type SortDir = "asc" | "desc";
 type SortState = { key: SortKey; dir: SortDir } | null;
 
@@ -245,6 +246,7 @@ export default function JpsFilterGrid({
       let bv: string | number | boolean | null;
       switch (key) {
         case "dealName": av = a.dealName; bv = b.dealName; break;
+        case "topsheetCompletePct": av = a.topsheetCompletePct; bv = b.topsheetCompletePct; break;
         case "sector": av = a.sector; bv = b.sector; break;
         case "rating": av = displayRating(a); bv = displayRating(b); break;
         case "exposure": av = a.exposure; bv = b.exposure; break;
@@ -347,6 +349,7 @@ export default function JpsFilterGrid({
             <thead>
               <tr style={{ background: "var(--accent-soft)" }}>
                 <SortTh k="dealName" label="Deal" sort={sort} onSort={toggleSort} />
+                <SortTh k="topsheetCompletePct" label="%" sort={sort} onSort={toggleSort} align="right" />
                 <SortTh k="sector" label="Sector" sort={sort} onSort={toggleSort} />
                 <SortTh k="rating" label="Rating" sort={sort} onSort={toggleSort} />
                 <SortTh k="exposure" label="Exposure" sort={sort} onSort={toggleSort} align="right" />
@@ -379,6 +382,18 @@ export default function JpsFilterGrid({
                       <Link href={`/deals/${deal.dealSlug}`} style={{ color: "var(--ink)", textDecoration: "none", fontWeight: 600 }}>
                         {deal.dealName}
                       </Link>
+                    </td>
+
+                    {/* Topsheet completeness */}
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontSize: "0.72rem" }}>
+                      {deal.topsheetCompletePct != null ? (
+                        <span style={{
+                          color: deal.topsheetCompletePct >= 80 ? "var(--good)" : deal.topsheetCompletePct >= 50 ? "var(--warning)" : "var(--critical)",
+                          fontWeight: 600,
+                        }}>
+                          {deal.topsheetCompletePct}%
+                        </span>
+                      ) : "\u2014"}
                     </td>
 
                     {/* Sector — text, left */}

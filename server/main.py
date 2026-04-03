@@ -10810,6 +10810,7 @@ def get_portfolio(
                 "walYears": None,
                 "reservesFullyFunded": None,
                 "reservesUnderfundedPeriods": None,
+                "topsheetCompletePct": None,
                 "organisations": set(),
                 "owners": set(),
                 "accounts": set(),
@@ -10945,6 +10946,32 @@ def get_portfolio(
                     if int(entry["dealId"]) == did:
                         entry["reservesFullyFunded"] = bool(r["all_funded"])
                         entry["reservesUnderfundedPeriods"] = int(r["max_periods_underfunded"]) if r["max_periods_underfunded"] else 0
+    except Exception:
+        pass
+
+    # Enrich with topsheet completeness percentage (10 sections, each 10%)
+    try:
+        with get_connection() as comp_conn:
+            comp_rows = comp_conn.execute(
+                """SELECT d.id AS deal_id,
+                    (CASE WHEN d.borrower_jurisdiction IS NOT NULL THEN 10 ELSE 0 END
+                    + CASE WHEN (SELECT count(*) FROM capital_structure_instruments csi WHERE csi.deal_id = d.id) > 0 THEN 10 ELSE 0 END
+                    + CASE WHEN (SELECT count(*) FROM deal_counterparties dc WHERE dc.deal_id = d.id) > 0 THEN 10 ELSE 0 END
+                    + CASE WHEN (SELECT count(*) FROM deal_reserve_accounts dra WHERE dra.deal_id = d.id) > 0 THEN 10 ELSE 0 END
+                    + CASE WHEN (SELECT count(*) FROM deal_financial_template dft WHERE dft.deal_id = d.id) > 0 THEN 10 ELSE 0 END
+                    + CASE WHEN (SELECT count(*) FROM forecast_period_items fpi WHERE fpi.deal_id = d.id) > 0 THEN 10 ELSE 0 END
+                    + CASE WHEN (SELECT count(*) FROM period_financial_items pfi WHERE pfi.deal_id = d.id) > 0 THEN 10 ELSE 0 END
+                    + CASE WHEN (SELECT count(*) FROM deal_kpi_targets dkt WHERE dkt.deal_id = d.id) > 0 THEN 10 ELSE 0 END
+                    + CASE WHEN (SELECT count(*) FROM performance_assessments pa WHERE pa.deal_id = d.id) > 0 THEN 10 ELSE 0 END
+                    + CASE WHEN (SELECT count(*) FROM deal_jurisdiction_splits djs WHERE djs.deal_id = d.id) > 0 THEN 10 ELSE 0 END
+                    ) AS completeness_pct
+                FROM deals d"""
+            ).fetchall()
+            for r in comp_rows:
+                did = int(r["deal_id"])
+                for entry in deal_rows_by_slug.values():
+                    if int(entry["dealId"]) == did:
+                        entry["topsheetCompletePct"] = int(r["completeness_pct"])
     except Exception:
         pass
 
@@ -11593,6 +11620,7 @@ def get_dashboard(
                 "walYears": None,
                 "reservesFullyFunded": None,
                 "reservesUnderfundedPeriods": None,
+                "topsheetCompletePct": None,
                 "organisations": set(),
                 "owners": set(),
                 "accounts": set(),
@@ -11728,6 +11756,32 @@ def get_dashboard(
                     if int(entry["dealId"]) == did:
                         entry["reservesFullyFunded"] = bool(r["all_funded"])
                         entry["reservesUnderfundedPeriods"] = int(r["max_periods_underfunded"]) if r["max_periods_underfunded"] else 0
+    except Exception:
+        pass
+
+    # Enrich with topsheet completeness percentage (10 sections, each 10%)
+    try:
+        with get_connection() as comp_conn:
+            comp_rows = comp_conn.execute(
+                """SELECT d.id AS deal_id,
+                    (CASE WHEN d.borrower_jurisdiction IS NOT NULL THEN 10 ELSE 0 END
+                    + CASE WHEN (SELECT count(*) FROM capital_structure_instruments csi WHERE csi.deal_id = d.id) > 0 THEN 10 ELSE 0 END
+                    + CASE WHEN (SELECT count(*) FROM deal_counterparties dc WHERE dc.deal_id = d.id) > 0 THEN 10 ELSE 0 END
+                    + CASE WHEN (SELECT count(*) FROM deal_reserve_accounts dra WHERE dra.deal_id = d.id) > 0 THEN 10 ELSE 0 END
+                    + CASE WHEN (SELECT count(*) FROM deal_financial_template dft WHERE dft.deal_id = d.id) > 0 THEN 10 ELSE 0 END
+                    + CASE WHEN (SELECT count(*) FROM forecast_period_items fpi WHERE fpi.deal_id = d.id) > 0 THEN 10 ELSE 0 END
+                    + CASE WHEN (SELECT count(*) FROM period_financial_items pfi WHERE pfi.deal_id = d.id) > 0 THEN 10 ELSE 0 END
+                    + CASE WHEN (SELECT count(*) FROM deal_kpi_targets dkt WHERE dkt.deal_id = d.id) > 0 THEN 10 ELSE 0 END
+                    + CASE WHEN (SELECT count(*) FROM performance_assessments pa WHERE pa.deal_id = d.id) > 0 THEN 10 ELSE 0 END
+                    + CASE WHEN (SELECT count(*) FROM deal_jurisdiction_splits djs WHERE djs.deal_id = d.id) > 0 THEN 10 ELSE 0 END
+                    ) AS completeness_pct
+                FROM deals d"""
+            ).fetchall()
+            for r in comp_rows:
+                did = int(r["deal_id"])
+                for entry in deal_rows_by_slug.values():
+                    if int(entry["dealId"]) == did:
+                        entry["topsheetCompletePct"] = int(r["completeness_pct"])
     except Exception:
         pass
 
