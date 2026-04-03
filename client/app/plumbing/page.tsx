@@ -125,6 +125,10 @@ export default async function PlumbingPage() {
             <a className="button secondary" href="/plumbing/risk-taxonomy" style={{ fontWeight: 700, background: "var(--accent)", color: "white", border: "none", textDecoration: "none", padding: "8px 20px", borderRadius: 10, display: "inline-block" }}>
               View Risk Taxonomy (226 risks)
             </a>
+            {" "}
+            <a className="button secondary" href="/plumbing/obligation-taxonomy" style={{ fontWeight: 700, background: "var(--accent)", color: "white", border: "none", textDecoration: "none", padding: "8px 20px", borderRadius: 10, display: "inline-block" }}>
+              View Obligation & Covenant Taxonomy (229 items)
+            </a>
           </div>
         </div>
       </section>

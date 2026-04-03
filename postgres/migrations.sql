@@ -491,6 +491,122 @@ CREATE TABLE IF NOT EXISTS forecast_model_metadata (
 );
 CREATE INDEX IF NOT EXISTS idx_fmm_deal ON forecast_model_metadata(deal_id);
 
+-- ── Part A: Obligation Taxonomy & Deal Obligation Register ───────────────────
+
+-- Master reference list of all possible deliverables, covenants, and monitoring items
+-- (like risk_taxonomy is for risks). 230+ items across 13 categories from Part A.
+CREATE TABLE IF NOT EXISTS obligation_taxonomy (
+    item_id             TEXT PRIMARY KEY,           -- INFO-001, NOTIF-003, AFF-005, EOD-012, etc.
+    category_number     INTEGER NOT NULL,            -- 1-13
+    category_name       TEXT NOT NULL,               -- "Financial Information Deliverables"
+    sub_category        TEXT,                        -- "1A", "9B", "12A"
+    title               TEXT NOT NULL,               -- Short name
+    description         TEXT,                        -- Full description with notes
+    typical_frequency   TEXT,                        -- annual, semi_annual, quarterly, monthly, event_driven
+    typical_deadline    TEXT,                        -- "90 days after FY end"
+    typical_severity    TEXT,                        -- informational, potential_default, event_of_default
+    typical_phase       TEXT,                        -- all, construction, operational
+    sector_applicability TEXT DEFAULT 'all',         -- all, real_estate, infrastructure, uspp, wbs, pfi
+    sort_order          INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_ot_category ON obligation_taxonomy(category_number);
+
+-- Per-deal obligation tracking — each deal gets its subset from the taxonomy
+CREATE TABLE IF NOT EXISTS deal_obligation_register (
+    id                  SERIAL PRIMARY KEY,
+    deal_id             INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+    item_id             TEXT NOT NULL REFERENCES obligation_taxonomy(item_id),
+    applicable          BOOLEAN NOT NULL DEFAULT TRUE,
+    title               TEXT NOT NULL,
+    description         TEXT,
+    responsible_party   TEXT,                        -- borrower, auditor, agent, adviser, insurer
+    frequency           TEXT,                        -- annual, semi_annual, quarterly, monthly, event_driven
+    deadline_rule       TEXT,                        -- "90 days after FY end"
+    grace_period_days   INTEGER,
+    severity_if_missed  TEXT,                        -- informational, potential_default, event_of_default
+    phase               TEXT,                        -- all, construction, operational
+    covenant_tier       TEXT,                        -- normal, trigger_event, event_of_default
+    source_clause       TEXT,                        -- clause reference in finance documents
+    auto_approve_rule   TEXT,
+    current_status      TEXT NOT NULL DEFAULT 'not_yet_due',  -- not_yet_due, compliant, overdue, waived, not_applicable
+    last_delivered_date DATE,
+    next_due_date       DATE,
+    depends_on_item_id  TEXT,                        -- linked deadline dependency
+    notes               TEXT,
+    created_at          TIMESTAMPTZ DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(deal_id, item_id)
+);
+CREATE INDEX IF NOT EXISTS idx_dor_deal ON deal_obligation_register(deal_id);
+CREATE INDEX IF NOT EXISTS idx_dor_status ON deal_obligation_register(current_status) WHERE current_status IN ('overdue', 'not_yet_due');
+CREATE INDEX IF NOT EXISTS idx_dor_next_due ON deal_obligation_register(next_due_date) WHERE next_due_date IS NOT NULL;
+
+-- Per-deal consent mechanics configuration (CONS-001 to CONS-008)
+CREATE TABLE IF NOT EXISTS deal_consent_mechanics (
+    id                              SERIAL PRIMARY KEY,
+    deal_id                         INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+    majority_threshold_pct          DECIMAL,            -- e.g. 66.67
+    supermajority_threshold_pct     DECIMAL,            -- e.g. 75 or 90
+    voting_basis                    TEXT,                -- by_commitment, by_lender, by_block
+    all_lender_matters              JSONB DEFAULT '[]',  -- list of matters requiring unanimous consent
+    snooze_you_lose                 BOOLEAN DEFAULT FALSE,
+    deemed_consent_on_silence       BOOLEAN DEFAULT FALSE,
+    yank_clause                     BOOLEAN DEFAULT FALSE,
+    non_consenting_replacement_basis TEXT,               -- par, make_whole, market_value
+    standard_consent_period_days    INTEGER,
+    disenfranchisement_triggers     JSONB DEFAULT '[]',
+    notes                           TEXT,
+    created_at                      TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(deal_id)
+);
+
+-- Per-deal events of default register (EOD-001 to EOD-032)
+CREATE TABLE IF NOT EXISTS deal_eod_register (
+    id                      SERIAL PRIMARY KEY,
+    deal_id                 INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+    eod_id                  TEXT NOT NULL,               -- EOD-001, EOD-002, etc.
+    title                   TEXT NOT NULL,
+    grace_period_days       INTEGER,
+    remedy_capable          BOOLEAN NOT NULL DEFAULT FALSE,
+    cross_default_threshold DECIMAL,                    -- e.g. 50000 or percentage
+    cross_default_basis     TEXT,                        -- absolute, pct_of_assets
+    current_state           TEXT NOT NULL DEFAULT 'not_triggered', -- not_triggered, triggered, cured, waived
+    triggered_date          DATE,
+    cure_deadline           DATE,
+    waived_until            DATE,
+    waiver_conditions       TEXT,
+    notes                   TEXT,
+    created_at              TIMESTAMPTZ DEFAULT NOW(),
+    updated_at              TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(deal_id, eod_id)
+);
+CREATE INDEX IF NOT EXISTS idx_deod_deal ON deal_eod_register(deal_id);
+CREATE INDEX IF NOT EXISTS idx_deod_state ON deal_eod_register(current_state) WHERE current_state != 'not_triggered';
+
+-- Per-deal trigger events (TE-001 to TE-010) with consequence escalation
+CREATE TABLE IF NOT EXISTS deal_trigger_events (
+    id                          SERIAL PRIMARY KEY,
+    deal_id                     INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+    trigger_id                  TEXT NOT NULL,           -- TE-001, TE-002, etc.
+    title                       TEXT NOT NULL,
+    trigger_type                TEXT,                    -- tested, event_driven
+    trigger_condition           TEXT,                    -- e.g. "ACR > 0.70" or "credit rating downgrade"
+    current_state               TEXT NOT NULL DEFAULT 'not_triggered', -- not_triggered, triggered, remedied
+    triggered_date              DATE,
+    consequence_immediate       TEXT,                    -- e.g. "Distributions locked. No restricted payments."
+    consequence_0_12m           TEXT,                    -- e.g. "Enhanced reporting, additional forecast periods"
+    consequence_beyond_12m      TEXT,                    -- e.g. "Remedial plan required, independent review"
+    exit_mechanism              TEXT,                    -- e.g. "Ratios back within limits at next Calculation Date"
+    exit_certification          TEXT,                    -- e.g. "Director's certificate confirming remedy"
+    remedial_plan_required      BOOLEAN DEFAULT FALSE,
+    independent_review_required BOOLEAN DEFAULT FALSE,
+    notes                       TEXT,
+    created_at                  TIMESTAMPTZ DEFAULT NOW(),
+    updated_at                  TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(deal_id, trigger_id)
+);
+CREATE INDEX IF NOT EXISTS idx_dte_deal ON deal_trigger_events(deal_id);
+
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- End of migrations — all statements above are idempotent
 -- ═══════════════════════════════════════════════════════════════════════════════

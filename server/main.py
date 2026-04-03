@@ -17630,6 +17630,19 @@ def initialise_risk_register_endpoint(slug: str):
     return {"ok": True, "rowsInserted": result[0] if result else 0}
 
 
+@app.get("/api/obligation-taxonomy")
+def get_obligation_taxonomy():
+    """Full obligation taxonomy -- 230+ items across 13 categories from Part A."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            """SELECT item_id, category_number, category_name, sub_category, title, description,
+                      typical_frequency, typical_deadline, typical_severity, typical_phase,
+                      sector_applicability, sort_order
+               FROM obligation_taxonomy ORDER BY sort_order"""
+        ).fetchall()
+    return {"obligations": [_serialize_row(r) for r in rows]}
+
+
 @app.get("/api/risk-taxonomy")
 def get_risk_taxonomy():
     """Full risk taxonomy — 226 standardised risks across 7 categories."""
