@@ -291,8 +291,16 @@ export default async function DealPage({
                     <dd>{formatMoney(deal.facilityAmount)}</dd>
                   </div>
                   <div>
+                    <dt>Credit rating</dt>
+                    <dd>{deal.internalCreditScore ?? deal.moodysRating ?? deal.spRating ?? deal.fitchRating ?? "\u2014"}</dd>
+                  </div>
+                  <div>
                     <dt>Current grade</dt>
                     <dd>{deal.grade}</dd>
+                  </div>
+                  <div>
+                    <dt>Trend</dt>
+                    <dd>{deal.performanceTrend ? deal.performanceTrend.replace(/_/g, " ") : "\u2014"}</dd>
                   </div>
                   <div>
                     <dt>Revenue risk</dt>
