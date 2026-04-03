@@ -278,9 +278,13 @@ export default function PortfolioSummary({ deals }: { deals: Deal[] }) {
         countryMap[d.primaryCountry ?? "XX"].value += d.exposure;
       }
     }
+    const COUNTRY_PALETTE = [
+      "#1f6fa5", "#2f8b72", "#c97f1f", "#d65454", "#6a5acd",
+      "#20b2aa", "#cd853f", "#708090", "#b22222", "#4682b4",
+    ];
     const countryData = Object.values(countryMap)
       .sort((a, b) => b.value - a.value)
-      .map((c, i) => ({ ...c, fill: `hsl(205, 55%, ${30 + i * 10}%)` }));
+      .map((c, i) => ({ ...c, fill: COUNTRY_PALETTE[i % COUNTRY_PALETTE.length] }));
 
     // Security ranking breakdown
     const rankMap: Record<string, { name: string; value: number }> = {};
