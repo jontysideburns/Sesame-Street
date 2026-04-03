@@ -64,14 +64,17 @@ const SECTION_ORDER = [
 
 /* ── Helpers ──────────────────────────────────────────────────────────────── */
 
-function fmtCell(value: number | null | undefined, unit: string) {
-  if (value == null) return "";
-  if (unit === "ratio") return value.toFixed(2) + "x";
-  if (unit === "percentage") return value.toFixed(1) + "%";
-  if (unit === "count") return value.toFixed(1);
-  // currency — expressed in thousands, comma-separated
+function fmtCell(value: number | null | undefined, unit: string): { text: string; isNegative: boolean } {
+  if (value == null) return { text: "", isNegative: false };
+  if (unit === "ratio") return { text: value.toFixed(2) + "x", isNegative: value < 0 };
+  if (unit === "percentage") return { text: value.toFixed(1) + "%", isNegative: value < 0 };
+  if (unit === "count") return { text: value.toFixed(1), isNegative: value < 0 };
+  // currency — expressed in thousands, negatives in brackets
   const inThousands = value / 1000;
-  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(inThousands);
+  const abs = Math.abs(inThousands);
+  const formatted = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(abs);
+  if (inThousands < 0) return { text: `(${formatted})`, isNegative: true };
+  return { text: formatted, isNegative: false };
 }
 
 /* ── Component ───────────────────────────────────────────────────────────── */
@@ -285,14 +288,16 @@ export default function ForecastGrid({ periods, lineItems, dealLabels, forecastI
                         // Show based on selected view mode
                         const value = viewMode === "actuals" ? actual : (forecast ?? null);
                         const isActual = viewMode === "actuals" && actual != null;
+                        const formatted = value != null ? fmtCell(value, li.unit) : null;
                         return (
                           <td key={p.id} style={{
                             ...cellStyle,
                             color: value != null ? (isActual ? "var(--ink)" : "var(--ink-soft)") : "var(--line)",
                             fontWeight: isActual ? 600 : 400,
                             background: isActual ? "rgba(47, 139, 114, 0.04)" : undefined,
+                            paddingRight: formatted && !formatted.isNegative && li.unit === "currency" ? "calc(6px + 0.55em)" : "6px",
                           }}>
-                            {value != null ? fmtCell(value, li.unit) : "\u00B7"}
+                            {formatted ? formatted.text : "\u00B7"}
                           </td>
                         );
                       })}
