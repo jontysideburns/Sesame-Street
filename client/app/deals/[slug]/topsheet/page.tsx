@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { fetchJson } from "../../../../api/http";
 import { getDeal } from "../../../../api/deals";
 import ForecastGrid from "./forecast-grid";
+import RevenueRiskTooltip from "../../../../components/revenue-risk-tooltip";
 
 /* ── Helpers ─────────────────────────────────────────────────────── */
 
@@ -154,7 +155,7 @@ export default async function TopSheetPage({ params }: { params: Promise<{ slug:
           ["Internal Score", d.internal_credit_score],
           ["Performance Grade", d.performance_grade ? `Grade ${d.performance_grade}` : "\u2014"],
           ["Watchlist", d.watchlist ? "Active" : "Standard"],
-          ["Revenue Risk", d.revenue_risk],
+          ["Revenue Risk", <RevenueRiskTooltip code={d.revenue_risk} />],
           ["Contracted Revenue", d.contracted_revenue_pct ? `${d.contracted_revenue_pct}%` : "\u2014"],
           ["Merchant Revenue", d.merchant_revenue_pct ? `${d.merchant_revenue_pct}%` : "\u2014"],
           ["Duration Coverage", d.duration_coverage_pct ? `${d.duration_coverage_pct}%` : "\u2014"],

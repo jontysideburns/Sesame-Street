@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { getDeal, getDealFinancialPeriod } from "../../../api/deals";
 import { getDealAssessment } from "../../../api/assessment";
 import { captureDealSnapshot } from "../actions";
+import RevenueRiskTooltip from "../../../components/revenue-risk-tooltip";
 
 function formatMoney(value: number) {
   return new Intl.NumberFormat("en-US", {
@@ -294,7 +295,7 @@ export default async function DealPage({
                   </div>
                   <div>
                     <dt>Revenue risk</dt>
-                    <dd>{deal.revenueRisk}</dd>
+                    <dd><RevenueRiskTooltip code={deal.revenueRisk} /></dd>
                   </div>
                 </dl>
               </article>

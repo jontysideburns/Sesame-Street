@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getDeal } from "../../../api/deals";
 import { getCovenantConfig, getActualPeriods } from "../../../api/jps";
+import RevenueRiskTooltip from "../../../components/revenue-risk-tooltip";
 
 function tierTone(tier: string) {
   if (tier === "event_of_default" || tier === "trigger_event") return "critical";
@@ -68,7 +69,7 @@ export default async function JpsDealPage({
               <div><dt>Currency</dt><dd>{deal.currency}</dd></div>
               <div><dt>Facility</dt><dd>{fmt(deal.facilityAmount)}</dd></div>
               <div><dt>Exposure</dt><dd>{fmt(deal.exposure)}</dd></div>
-              <div><dt>Revenue risk</dt><dd>{deal.revenueRisk}</dd></div>
+              <div><dt>Revenue risk</dt><dd><RevenueRiskTooltip code={deal.revenueRisk} /></dd></div>
               <div><dt>Grade</dt><dd>{deal.grade}</dd></div>
               <div><dt>Watchlist</dt><dd>{deal.watchlist ? "Yes" : "No"}</dd></div>
               <div><dt>Status</dt><dd>{deal.status}</dd></div>
