@@ -27,7 +27,7 @@ from typing import Any
 GRADE_LABELS = {
     1: "Outperforming",
     2: "In Line",
-    3: "Below Expectation",
+    3: "Underperforming",
     4: "Below Lock-Up / Default",
 }
 
