@@ -18233,6 +18233,16 @@ def get_deal_topsheet(slug: str):
             (deal_id,),
         ).fetchall()
 
+        # Forecast case versions (maps case_type to version_id)
+        forecast_versions = conn.execute(
+            """SELECT fc.case_type, fcv.id AS version_id, fcv.version_label, fcv.is_active
+               FROM forecast_cases fc
+               JOIN forecast_case_versions fcv ON fcv.forecast_case_id = fc.id
+               WHERE fc.deal_id = %s AND fcv.is_active = TRUE
+               ORDER BY fc.comparison_priority""",
+            (deal_id,),
+        ).fetchall()
+
         # Forecast period items (if any frozen forecasts exist)
         forecast_items = conn.execute(
             """SELECT fpi.forecast_case_version_id, fpi.reporting_period_id,
@@ -18274,6 +18284,7 @@ def get_deal_topsheet(slug: str):
         "reportingPeriods": [_serialize_row(r) for r in all_periods],
         "lineItemDefinitions": [_serialize_row(r) for r in line_items],
         "dealLineLabels": {r["line_key"]: r["display_label"] for r in deal_labels},
+        "forecastVersions": {r["case_type"]: {"versionId": r["version_id"], "label": r["version_label"]} for r in forecast_versions},
         "forecastItems": [_serialize_row(r) for r in forecast_items],
         "actualItems": [_serialize_row(r) for r in actual_items],
     }

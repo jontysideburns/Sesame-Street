@@ -33,6 +33,7 @@ type Props = {
   dealLabels: Record<string, string>;
   forecastItems: { forecast_case_version_id: number; reporting_period_id: number; line_key: string; value: number | null }[];
   actualItems: { reporting_period_id: number; line_key: string; approved_value: number | null; reported_value: number | null }[];
+  forecastVersions?: Record<string, { versionId: number; label: string }>;
   currency?: string;
 };
 
@@ -116,15 +117,21 @@ const CURRENCY_SYMBOLS: Record<string, string> = {
   AUD: "A$", CAD: "C$", SGD: "S$", HKD: "HK$", NZD: "NZ$",
 };
 
-export default function ForecastGrid({ periods, lineItems, dealLabels, forecastItems, actualItems, currency }: Props) {
+export default function ForecastGrid({ periods, lineItems, dealLabels, forecastItems, actualItems, forecastVersions, currency }: Props) {
   const [viewMode, setViewMode] = useState<ViewMode>("management_case");
   const [showAssumptions, setShowAssumptions] = useState(false);
 
   const currSymbol = CURRENCY_SYMBOLS[currency ?? "USD"] ?? currency ?? "$";
 
-  // Build lookup maps
+  // Get the active version ID for the selected case
+  const activeVersionId = viewMode !== "actuals" && forecastVersions?.[viewMode]
+    ? forecastVersions[viewMode].versionId
+    : null;
+
+  // Build lookup map filtered by the selected forecast case version
   const forecastMap = new Map<string, number | null>();
   for (const fi of forecastItems) {
+    if (activeVersionId != null && fi.forecast_case_version_id !== activeVersionId) continue;
     forecastMap.set(`${fi.reporting_period_id}:${fi.line_key}`, fi.value);
   }
   const actualMap = new Map<string, number | null>();

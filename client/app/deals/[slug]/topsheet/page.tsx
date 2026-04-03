@@ -422,6 +422,7 @@ export default async function TopSheetPage({ params }: { params: Promise<{ slug:
             dealLabels={ts.dealLineLabels ?? {}}
             forecastItems={ts.forecastItems ?? []}
             actualItems={ts.actualItems ?? []}
+            forecastVersions={ts.forecastVersions ?? {}}
             currency={d.currency}
           />
         </Section>
