@@ -179,6 +179,7 @@ export default function DealCharts({ slug, currency, lockupLevel, defaultLevel }
   if (data.length === 0) return null;
 
   const hasActuals = data.some((d) => d.a_revenue != null);
+  const hasLeverage = data.some((d) => d.f_leverage != null || d.a_leverage != null);
 
   return (
     <article className="topsheet-card" style={{ marginBottom: 16 }}>
@@ -214,25 +215,52 @@ export default function DealCharts({ slug, currency, lockupLevel, defaultLevel }
         </ResponsiveContainer>
       </div>
 
-      {/* Chart 2: Key Ratios */}
+      {/* Chart 2: Key Ratios — dual Y-axis */}
       <div>
         <div style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--accent)", marginBottom: 6 }}>
           Key Financial Ratios
         </div>
-        <ResponsiveContainer width="100%" height={180}>
-          <LineChart data={data} margin={{ top: 5, right: 20, bottom: 5, left: 10 }}>
+        <ResponsiveContainer width="100%" height={200}>
+          <LineChart data={data} margin={{ top: 5, right: 55, bottom: 5, left: 10 }}>
             <XAxis dataKey="label" tick={{ fontSize: 9 }} />
-            <YAxis tick={{ fontSize: 9 }} width={35} domain={["auto", "auto"]} tickFormatter={(v: number) => v.toFixed(1) + "x"} />
-            <Tooltip content={<ChartTooltipContent />} />
-            {/* Threshold reference lines */}
-            {lockupLevel && <ReferenceLine y={lockupLevel} stroke="#c97f1f" strokeDasharray="4 4" strokeWidth={1} label={{ value: "Lockup", fontSize: 8, fill: "#c97f1f", position: "right" }} />}
-            {defaultLevel && <ReferenceLine y={defaultLevel} stroke="#d65454" strokeDasharray="4 4" strokeWidth={1} label={{ value: "Default", fontSize: 8, fill: "#d65454", position: "right" }} />}
-            {/* Management case — dashed */}
-            <Line type="monotone" dataKey="f_dscr" name="DSCR (Forecast)" stroke={MGMT_COLORS.dscr} strokeWidth={1.5} strokeDasharray="6 3" dot={false} connectNulls />
-            {/* Actuals — solid bold */}
-            {hasActuals && (
-              <Line type="monotone" dataKey="a_dscr" name="DSCR (Actual)" stroke={ACTUAL_COLORS.dscr} strokeWidth={2.5} dot={{ r: 3 }} connectNulls />
+            {/* Left Y-axis: DSCR (coverage ratios) — starts at 1.0x */}
+            <YAxis
+              yAxisId="left"
+              tick={{ fontSize: 9, fill: ACTUAL_COLORS.dscr }}
+              width={40}
+              domain={[1.0, (dataMax: number) => Math.ceil(dataMax * 10) / 10]}
+              allowDataOverflow
+              tickFormatter={(v: number) => v.toFixed(1) + "x"}
+              label={{ value: "DSCR", angle: -90, position: "insideLeft", fontSize: 9, fill: ACTUAL_COLORS.dscr, dx: -5 }}
+            />
+            {/* Right Y-axis: Leverage (Net Debt / EBITDA) — own scale */}
+            {hasLeverage && (
+              <YAxis
+                yAxisId="right"
+                orientation="right"
+                tick={{ fontSize: 9, fill: ACTUAL_COLORS.leverage }}
+                width={40}
+                domain={[0, "auto"]}
+                tickFormatter={(v: number) => v.toFixed(1) + "x"}
+                label={{ value: "ND/EBITDA", angle: 90, position: "insideRight", fontSize: 9, fill: ACTUAL_COLORS.leverage, dx: 5 }}
+              />
             )}
+            <Tooltip content={<ChartTooltipContent />} />
+            {/* Threshold reference lines (on DSCR axis) */}
+            {lockupLevel && <ReferenceLine yAxisId="left" y={lockupLevel} stroke="#c97f1f" strokeDasharray="4 4" strokeWidth={1} label={{ value: "Lockup", fontSize: 8, fill: "#c97f1f", position: "right" }} />}
+            {defaultLevel && <ReferenceLine yAxisId="left" y={defaultLevel} stroke="#d65454" strokeDasharray="4 4" strokeWidth={1} label={{ value: "Default", fontSize: 8, fill: "#d65454", position: "right" }} />}
+            {/* DSCR — left axis */}
+            <Line yAxisId="left" type="monotone" dataKey="f_dscr" name="DSCR (Forecast)" stroke={MGMT_COLORS.dscr} strokeWidth={1.5} strokeDasharray="6 3" dot={false} connectNulls />
+            {hasActuals && (
+              <Line yAxisId="left" type="monotone" dataKey="a_dscr" name="DSCR (Actual)" stroke={ACTUAL_COLORS.dscr} strokeWidth={2.5} dot={{ r: 3 }} connectNulls />
+            )}
+            {/* Leverage — right axis */}
+            {hasLeverage && <>
+              <Line yAxisId="right" type="monotone" dataKey="f_leverage" name="ND/EBITDA (Forecast)" stroke={MGMT_COLORS.leverage} strokeWidth={1.5} strokeDasharray="6 3" dot={false} connectNulls />
+              {hasActuals && (
+                <Line yAxisId="right" type="monotone" dataKey="a_leverage" name="ND/EBITDA (Actual)" stroke={ACTUAL_COLORS.leverage} strokeWidth={2.5} dot={{ r: 3 }} connectNulls />
+              )}
+            </>}
             <Legend wrapperStyle={{ fontSize: "0.62rem" }} iconSize={10} />
           </LineChart>
         </ResponsiveContainer>
