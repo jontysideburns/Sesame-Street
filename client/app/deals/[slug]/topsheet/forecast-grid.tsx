@@ -104,10 +104,11 @@ const CASE_ASSUMPTIONS: Record<string, { title: string; assumptions: string[] }>
   combined_downside: {
     title: "Combined Downside Assumptions",
     assumptions: [
-      "Revenue: P90 resource assumption (10% below P50 base case)",
-      "Operating costs: 10% above management case",
-      "Major component failure in year 5",
-      "Grid curtailment increased to 8%",
+      "Revenue: 5% reduction vs management case in every period",
+      "Operating costs: 10% higher than management case in every period",
+      "Corporate tax rate: 3 percentage points higher than base rate",
+      "Capital expenditure: Unchanged from management case",
+      "Debt service: Unchanged (fixed-rate amortising note)",
     ],
   },
 };
