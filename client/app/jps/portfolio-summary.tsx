@@ -21,7 +21,7 @@ const C = {
 
 const GRADE_COLORS: Record<string, string> = {
   good: C.good,
-  neutral: C.accent,
+  neutral: "#4a90c4",
   warning: C.warning,
   critical: C.critical,
 };
