@@ -219,16 +219,30 @@ export default function PortfolioSummary({ deals }: { deals: Deal[] }) {
     const watchlistCount = deals.filter((d) => d.watchlist).length;
     const overdueCount = deals.reduce((s, d) => s + (d.overdueObligations ?? 0), 0);
 
-    // Grade distribution
+    // Grade distribution — always show all 4 grades + Watchlist
+    const GRADE_SLOTS: { grade: string; tone: string }[] = [
+      { grade: "1 - Outperforming", tone: "good" },
+      { grade: "2 - In Line", tone: "neutral" },
+      { grade: "3 - Underperforming", tone: "warning" },
+      { grade: "4 - Stressed", tone: "critical" },
+      { grade: "Watchlist", tone: "critical" },
+    ];
     const gradeMap: Record<string, { grade: string; count: number; exposure: number }> = {};
-    for (const d of deals) {
-      if (!gradeMap[d.grade]) gradeMap[d.grade] = { grade: d.grade, count: 0, exposure: 0 };
-      gradeMap[d.grade].count++;
-      gradeMap[d.grade].exposure += d.exposure;
+    for (const slot of GRADE_SLOTS) {
+      gradeMap[slot.grade] = { grade: slot.grade, count: 0, exposure: 0 };
     }
-    const gradeData = Object.values(gradeMap)
-      .sort((a, b) => a.grade.localeCompare(b.grade))
-      .map((g) => ({ ...g, fill: GRADE_COLORS[gradeTone(g.grade)] ?? C.neutral }));
+    for (const d of deals) {
+      if (gradeMap[d.grade]) {
+        gradeMap[d.grade].count++;
+        gradeMap[d.grade].exposure += d.exposure;
+      }
+      if (d.watchlist) {
+        gradeMap["Watchlist"].count++;
+        gradeMap["Watchlist"].exposure += d.exposure;
+      }
+    }
+    const gradeData = GRADE_SLOTS
+      .map((slot) => ({ ...gradeMap[slot.grade], fill: GRADE_COLORS[slot.tone] ?? C.neutral }));
 
     // Sector concentration
     const sectorMap: Record<string, { name: string; value: number; count: number }> = {};

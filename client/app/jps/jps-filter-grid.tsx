@@ -362,7 +362,6 @@ export default function JpsFilterGrid({
                 <SortTh k="reportedDscr" label="DSCR" sort={sort} onSort={toggleSort} align="right" />
                 <SortTh k="headroomPct" label="Headroom" sort={sort} onSort={toggleSort} align="right" />
                 <SortTh k="todos" label="To-do's" sort={sort} onSort={toggleSort} align="right" />
-                <SortTh k="watchlist" label="Watchlist" sort={sort} onSort={toggleSort} />
                 <SortTh k="reservesFullyFunded" label="Reserves" sort={sort} onSort={toggleSort} />
               </tr>
             </thead>
@@ -495,14 +494,6 @@ export default function JpsFilterGrid({
                     </td>
 
                     {/* Watchlist — text, left */}
-                    <td style={td}>
-                      {deal.watchlist ? (
-                        <span className="badge warning badge-sm">Yes</span>
-                      ) : (
-                        <span style={{ color: "var(--ink-soft)" }}>—</span>
-                      )}
-                    </td>
-
                     {/* Reserves — fully funded or periods underfunded count */}
                     <td style={td}>
                       {deal.reservesFullyFunded === true ? (
