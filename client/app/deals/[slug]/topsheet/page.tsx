@@ -85,12 +85,20 @@ export default async function TopSheetPage({ params }: { params: Promise<{ slug:
   let ts: any;
   let deal: any;
   try {
-    [ts, deal] = await Promise.all([
-      fetchJson<any>(`/api/deals/${slug}/topsheet`),
-      getDeal(slug),
-    ]);
+    ts = await fetchJson<any>(`/api/deals/${slug}/topsheet`);
   } catch {
     notFound();
+  }
+  try {
+    deal = await getDeal(slug);
+  } catch {
+    // Deal detail may fail for new deals with incomplete data — use safe defaults
+    deal = {
+      distributionAssessment: null,
+      obligations: [],
+      forecastSummary: { scenarioCount: 0, scenarios: [] },
+      riskSnapshot: { entries: [], openCount: 0, highSeverityCount: 0 },
+    };
   }
 
   const d = ts.deal;

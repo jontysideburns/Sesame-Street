@@ -71,24 +71,35 @@ export default async function DealPage({
   const { slug } = await params;
 
   try {
-    const [deal, assessment, latestPeriod] = await Promise.all([
-      getDeal(slug),
-      getDealAssessment(slug),
-      getDealFinancialPeriod(slug, "latest")
-    ]);
+    // Fetch deal (required), assessment and period (optional — may not exist for new deals)
+    const deal = await getDeal(slug);
+    const assessment = await getDealAssessment(slug).catch(() => null);
+    const latestPeriod = await getDealFinancialPeriod(slug, "latest").catch(() => null);
 
-    const overdueCount = deal.obligations.filter((item) => item.status === "overdue").length;
-    const latestDocument = deal.documents[0];
-    const dscrHistoryPoint = deal.history[deal.history.length - 1];
+    // Safe defaults for optional data
+    const safeAssessment = assessment ?? {
+      assessment: { summary: "No assessment available.", overallScore: "\u2014", escalationLevel: "\u2014", watchlistRecommendation: "not_assessed" },
+      activeTrends: [],
+    };
+    const safeLatestPeriod = latestPeriod ?? {
+      periodLabel: "No period data",
+      reportedMetrics: {} as Record<string, any>,
+      expectedMetrics: {} as Record<string, any>,
+    };
+
+    const overdueCount = (deal.obligations ?? []).filter((item: any) => item.status === "overdue").length;
+    const latestDocument = (deal.documents ?? [])[0];
+    const dscrHistoryPoint = (deal.history ?? [])[(deal.history ?? []).length - 1];
     const distribution = deal.distributionAssessment;
-    const latestAmendment = deal.amendmentHistory[0] ?? null;
-    const activeAmendmentCount = deal.amendmentHistory.filter(
-      (item) => item.amendmentStatus === "active"
+    const latestAmendment = (deal.amendmentHistory ?? [])[0] ?? null;
+    const activeAmendmentCount = (deal.amendmentHistory ?? []).filter(
+      (item: any) => item.amendmentStatus === "active"
     ).length;
     // Determine collateral ratio — pick whichever is available
     const collateralRatio = (() => {
-      const rm = latestPeriod.reportedMetrics;
-      const em = latestPeriod.expectedMetrics;
+      if (!latestPeriod) return null;
+      const rm = safeLatestPeriod.reportedMetrics ?? {};
+      const em = safeLatestPeriod.expectedMetrics ?? {};
       if (rm.ltv_npv != null) return { label: "LTV (NPV)", actualVal: rm.ltv_npv, baseVal: em.ltv_npv, suffix: "x" };
       if (rm.senior_net_debt_ebitda != null) return { label: "Net Debt / EBITDA", actualVal: rm.senior_net_debt_ebitda, baseVal: em.senior_net_debt_ebitda, suffix: "x" };
       if (rm.total_net_debt_ebitda != null) return { label: "Net Debt / EBITDA", actualVal: rm.total_net_debt_ebitda, baseVal: em.total_net_debt_ebitda, suffix: "x" };
@@ -114,32 +125,32 @@ export default async function DealPage({
       },
       {
         label: "Revenue",
-        actual: metricValue(latestPeriod.reportedMetrics.revenue),
-        baseCase: metricValue(latestPeriod.expectedMetrics.revenue),
+        actual: metricValue(safeLatestPeriod.reportedMetrics.revenue),
+        baseCase: metricValue(safeLatestPeriod.expectedMetrics.revenue),
         lockup: "—",
         defaultLevel: "—",
         tone: "neutral"
       },
       {
         label: "EBITDA",
-        actual: metricValue(latestPeriod.reportedMetrics.ebitda),
-        baseCase: metricValue(latestPeriod.expectedMetrics.ebitda),
+        actual: metricValue(safeLatestPeriod.reportedMetrics.ebitda),
+        baseCase: metricValue(safeLatestPeriod.expectedMetrics.ebitda),
         lockup: "—",
         defaultLevel: "—",
         tone: "neutral"
       },
       {
         label: "CFADS",
-        actual: metricValue(latestPeriod.reportedMetrics.cfads),
-        baseCase: metricValue(latestPeriod.expectedMetrics.cfads),
+        actual: metricValue(safeLatestPeriod.reportedMetrics.cfads),
+        baseCase: metricValue(safeLatestPeriod.expectedMetrics.cfads),
         lockup: "—",
         defaultLevel: "—",
         tone: "neutral"
       },
       {
         label: "Leased Capacity",
-        actual: metricValue(latestPeriod.reportedMetrics.leasedCapacityPct, "%"),
-        baseCase: metricValue(latestPeriod.expectedMetrics.leasedCapacityPct, "%"),
+        actual: metricValue(safeLatestPeriod.reportedMetrics.leasedCapacityPct, "%"),
+        baseCase: metricValue(safeLatestPeriod.expectedMetrics.leasedCapacityPct, "%"),
         lockup: "—",
         defaultLevel: "—",
         tone: "neutral"
@@ -147,11 +158,11 @@ export default async function DealPage({
       {
         label: "Construction Completion",
         actual: metricValue(
-          latestPeriod.reportedMetrics.constructionCompletionPct,
+          safeLatestPeriod.reportedMetrics.constructionCompletionPct,
           "%"
         ),
         baseCase: metricValue(
-          latestPeriod.expectedMetrics.constructionCompletionPct,
+          safeLatestPeriod.expectedMetrics.constructionCompletionPct,
           "%"
         ),
         lockup: "—",
@@ -259,9 +270,9 @@ export default async function DealPage({
 
               <article className="topsheet-note topsheet-note-info">
                 <strong>Investment Update</strong>
-                <p>{firstSentence(assessment.assessment.summary)}</p>
+                <p>{firstSentence(safeAssessment.assessment.summary)}</p>
                 <span>
-                  Active trends: {assessment.activeTrends.length} · next test{" "}
+                  Active trends: {safeAssessment.activeTrends.length} · next test{" "}
                   {deal.nextTestDate}
                 </span>
               </article>
@@ -400,7 +411,7 @@ export default async function DealPage({
                   </tbody>
                 </table>
                 <p className="meta-note">
-                  Latest period: {latestPeriod.periodLabel}. Values are sourced from
+                  Latest period: {safeLatestPeriod.periodLabel}. Values are sourced from
                   the most recent approved period and covenant test.
                 </p>
               </article>
@@ -486,16 +497,16 @@ export default async function DealPage({
                   </div>
                   <div>
                     <dt>Overall score</dt>
-                    <dd>{assessment.assessment.overallScore}</dd>
+                    <dd>{safeAssessment.assessment.overallScore}</dd>
                   </div>
                   <div>
                     <dt>Escalation level</dt>
-                    <dd>{assessment.assessment.escalationLevel}</dd>
+                    <dd>{safeAssessment.assessment.escalationLevel}</dd>
                   </div>
                   <div>
                     <dt>Recommendation</dt>
                     <dd>
-                      {assessment.assessment.watchlistRecommendation.replaceAll("_", " ")}
+                      {safeAssessment.assessment.watchlistRecommendation.replaceAll("_", " ")}
                     </dd>
                   </div>
                   <div>
@@ -508,7 +519,7 @@ export default async function DealPage({
                   </div>
                   <div>
                     <dt>Active trends</dt>
-                    <dd>{assessment.activeTrends.length}</dd>
+                    <dd>{safeAssessment.activeTrends.length}</dd>
                   </div>
                   <div>
                     <dt>Latest document</dt>
