@@ -118,8 +118,11 @@ const CURRENCY_SYMBOLS: Record<string, string> = {
   AUD: "A$", CAD: "C$", SGD: "S$", HKD: "HK$", NZD: "NZ$",
 };
 
+type PeriodMode = "contracted" | "annual";
+
 export default function ForecastGrid({ periods, lineItems, dealLabels, forecastItems, actualItems, forecastVersions, currency }: Props) {
   const [viewMode, setViewMode] = useState<ViewMode>("management_case");
+  const [periodMode, setPeriodMode] = useState<PeriodMode>("contracted");
   const [showAssumptions, setShowAssumptions] = useState(false);
 
   const currSymbol = CURRENCY_SYMBOLS[currency ?? "USD"] ?? currency ?? "$";
@@ -156,6 +159,56 @@ export default function ForecastGrid({ periods, lineItems, dealLabels, forecastI
   // Sort periods
   const sortedPeriods = [...periods].sort((a, b) => a.id - b.id);
 
+  // Annual grouping: group periods by year, sum currency values, average ratios
+  type DisplayPeriod = { key: string; label: string; periodType: string; periodIds: number[] };
+
+  const displayPeriods: DisplayPeriod[] = (() => {
+    if (periodMode === "contracted") {
+      return sortedPeriods.map((p) => ({
+        key: String(p.id),
+        label: p.period_label,
+        periodType: p.period_type,
+        periodIds: [p.id],
+      }));
+    }
+    // Annual: group by year extracted from period_flag (e.g. "2024H1" → "2024")
+    const yearMap = new Map<string, { ids: number[]; type: string }>();
+    for (const p of sortedPeriods) {
+      const year = p.period_flag.replace(/H\d$/, "");
+      if (!yearMap.has(year)) yearMap.set(year, { ids: [], type: p.period_type });
+      yearMap.get(year)!.ids.push(p.id);
+      // Period type: use the latest sub-period's type
+      if (p.period_type === "forecast") yearMap.get(year)!.type = "forecast";
+      else if (p.period_type === "current" && yearMap.get(year)!.type !== "forecast") yearMap.get(year)!.type = "current";
+    }
+    return Array.from(yearMap.entries()).map(([year, { ids, type }]) => ({
+      key: year,
+      label: year,
+      periodType: type,
+      periodIds: ids,
+    }));
+  })();
+
+  // Helper: get value for a display period (sum for currency, average for ratios)
+  function getDisplayValue(dp: DisplayPeriod, lineKey: string, unit: string): number | null {
+    const isRatio = unit === "ratio" || unit === "percentage";
+    const values: number[] = [];
+    for (const pid of dp.periodIds) {
+      const actual = actualMap.get(`${pid}:${lineKey}`);
+      const forecast = forecastMap.get(`${pid}:${lineKey}`);
+      const v = viewMode === "actuals" ? actual : (forecast ?? null);
+      if (v != null) values.push(v);
+    }
+    if (values.length === 0) return null;
+    if (periodMode === "annual" && !isRatio) {
+      return values.reduce((a, b) => a + b, 0); // Sum currency
+    }
+    if (periodMode === "annual" && isRatio) {
+      return values.reduce((a, b) => a + b, 0) / values.length; // Average ratios
+    }
+    return values[0]; // Contracted: single value
+  }
+
   const thStyle: React.CSSProperties = {
     padding: "4px 6px", fontSize: "0.62rem", fontWeight: 700, textTransform: "uppercase",
     letterSpacing: "0.06em", whiteSpace: "nowrap", position: "sticky", top: 0,
@@ -187,6 +240,26 @@ export default function ForecastGrid({ periods, lineItems, dealLabels, forecastI
         <span style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--ink-soft)", marginRight: 4 }}>
           View:
         </span>
+        {/* Period toggle */}
+        {(["contracted", "annual"] as PeriodMode[]).map((mode) => (
+          <button
+            key={mode}
+            onClick={() => setPeriodMode(mode)}
+            style={{
+              padding: "5px 12px", borderRadius: 8,
+              border: periodMode === mode ? "2px solid var(--ink)" : "1px solid var(--line)",
+              background: periodMode === mode ? "var(--ink)" : "var(--panel)",
+              color: periodMode === mode ? "white" : "var(--ink)",
+              fontSize: "0.72rem", fontWeight: periodMode === mode ? 700 : 500,
+              cursor: "pointer", whiteSpace: "nowrap",
+            }}
+          >
+            {mode === "contracted" ? "Contracted Periodicity" : "Annual"}
+          </button>
+        ))}
+
+        <span style={{ width: 1, height: 20, background: "var(--line)", margin: "0 4px" }} />
+
         {CASE_ASSUMPTIONS[viewMode] && (
           <button
             onClick={() => setShowAssumptions(!showAssumptions)}
@@ -255,12 +328,12 @@ export default function ForecastGrid({ periods, lineItems, dealLabels, forecastI
             <th style={{ ...thStyle, position: "sticky", left: 0, zIndex: 3, minWidth: 180, textAlign: "left", background: "var(--panel-strong)" }}>
               Line Item
             </th>
-            {sortedPeriods.map((p) => (
-              <th key={p.id} style={{
+            {displayPeriods.map((dp) => (
+              <th key={dp.key} style={{
                 ...thStyle, textAlign: "center",
-                color: p.period_type === "forecast" ? "var(--accent)" : p.period_type === "current" ? "var(--warning)" : "var(--ink-soft)",
+                color: dp.periodType === "forecast" ? "var(--accent)" : dp.periodType === "current" ? "var(--warning)" : "var(--ink-soft)",
               }}>
-                {p.period_label}
+                {dp.label}
               </th>
             ))}
           </tr>
@@ -279,8 +352,8 @@ export default function ForecastGrid({ periods, lineItems, dealLabels, forecastI
                       <span style={{ fontWeight: 400, fontSize: "0.55rem", marginLeft: 6, opacity: 0.8 }}>{currSymbol}&apos;000s</span>
                     )}
                   </td>
-                  {sortedPeriods.map((p) => (
-                    <td key={p.id} style={{ ...sectionHeaderStyle, textAlign: "center" }}></td>
+                  {displayPeriods.map((dp) => (
+                    <td key={dp.key} style={{ ...sectionHeaderStyle, textAlign: "center" }}></td>
                   ))}
                 </tr>
                 {/* Line item rows */}
@@ -290,15 +363,12 @@ export default function ForecastGrid({ periods, lineItems, dealLabels, forecastI
                   return (
                     <tr key={li.line_key}>
                       <td style={isSubItem ? subRowLabelStyle : rowLabelStyle}>{label}</td>
-                      {sortedPeriods.map((p) => {
-                        const actual = actualMap.get(`${p.id}:${li.line_key}`);
-                        const forecast = forecastMap.get(`${p.id}:${li.line_key}`);
-                        // Show based on selected view mode
-                        const value = viewMode === "actuals" ? actual : (forecast ?? null);
-                        const isActual = viewMode === "actuals" && actual != null;
+                      {displayPeriods.map((dp) => {
+                        const value = getDisplayValue(dp, li.line_key, li.unit);
+                        const isActual = viewMode === "actuals" && value != null;
                         const formatted = value != null ? fmtCell(value, li.unit) : null;
                         return (
-                          <td key={p.id} style={{
+                          <td key={dp.key} style={{
                             ...cellStyle,
                             color: value != null ? (isActual ? "var(--ink)" : "var(--ink-soft)") : "var(--line)",
                             fontWeight: isActual ? 600 : 400,
