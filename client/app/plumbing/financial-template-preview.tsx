@@ -73,71 +73,73 @@ const CASHFLOW_MODEL: CashflowRow[] = [
   { section: "Senior Debt Service" },
   { n: 24, row: "Senior Interest", key: "senior_interest", desc: "Senior interest + commitment fees", type: "Currency" },
   { n: 25, row: "Senior Principal (Scheduled)", key: "senior_principal", desc: "Senior principal repayment (scheduled amortisation)", type: "Currency" },
-  { n: 26, row: "Senior Principal (Cash Sweep)", key: "senior_principal_sweep", desc: "Cash sweep repayment (excess cash)", type: "Currency" },
-  { n: 27, row: "Total Senior Debt Service", key: "senior_debt_service", desc: "Sum of senior interest + principal + sweep", type: "Computed" },
-  { n: 28, row: "CF After Senior Debt Service", key: "cf_after_senior_ds", desc: "CFADS \u2212 Senior Debt Service", type: "Computed" },
+  { n: 26, row: "Total Senior Debt Service", key: "senior_debt_service", desc: "Senior interest + scheduled principal (excludes cash sweep)", type: "Computed" },
+  { n: 27, row: "CF After Senior Debt Service", key: "cf_after_senior_ds", desc: "CFADS \u2212 Senior Debt Service", type: "Computed" },
+  { n: 28, row: "Senior Cash Sweep", key: "senior_principal_sweep", desc: "Cash sweep repayment from excess cash (NOT included in DSCR)", type: "Currency" },
 
   // ── JUNIOR DEBT SERVICE ──
   { section: "Junior Debt Service" },
   { n: 29, row: "Junior Interest", key: "junior_interest", desc: "Junior / mezzanine interest", type: "Currency" },
   { n: 30, row: "Junior Principal", key: "junior_principal", desc: "Junior principal repayment", type: "Currency" },
-  { n: 31, row: "Total Junior Debt Service", key: "junior_debt_service", desc: "Sum of junior interest + principal", type: "Computed" },
+  { n: 31, row: "Total Junior Debt Service", key: "junior_debt_service", desc: "Junior interest + principal (excludes cash sweep)", type: "Computed" },
+  { n: 32, row: "CF After Junior Debt Service", key: "cf_after_junior_ds", desc: "CF After Senior DS \u2212 Junior Debt Service", type: "Computed" },
+  { n: 33, row: "Junior Cash Sweep", key: "junior_principal_sweep", desc: "Junior cash sweep from excess cash (NOT included in DSCR)", type: "Currency" },
 
   // ── SHAREHOLDER / INTERCOMPANY ──
   { section: "Shareholder & Intercompany" },
-  { n: 32, row: "Shareholder Loan Interest", key: "shareholder_loan_interest", desc: "SHL interest (may capitalise)", type: "Currency" },
-  { n: 33, row: "Shareholder Loan Repayment", key: "shareholder_loan_repayment", desc: "SHL principal repayment", type: "Currency" },
-  { n: 34, row: "Intercompany Interest (Net)", key: "intercompany_interest_net", desc: "Net intercompany interest income / (expense)", type: "Currency" },
+  { n: 34, row: "Shareholder Loan Interest", key: "shareholder_loan_interest", desc: "SHL interest (may capitalise)", type: "Currency" },
+  { n: 35, row: "Shareholder Loan Repayment", key: "shareholder_loan_repayment", desc: "SHL principal repayment", type: "Currency" },
+  { n: 36, row: "Intercompany Interest (Net)", key: "intercompany_interest_net", desc: "Net intercompany interest income / (expense)", type: "Currency" },
 
   // ── OTHER FEES ──
   { section: "Other Fees & Costs" },
-  { n: 35, row: "Ticking / Commitment Fees", key: "ticking_commitment_fees", desc: "Ticking fees, commitment fees (separate from interest)", type: "Currency" },
-  { n: 36, row: "Debt Arrangement Fees", key: "debt_arrangement_fees", desc: "Arrangement / issuance fees", type: "Currency" },
-  { n: 37, row: "Liquidity Facility Drawdown", key: "liquidity_facility_drawdown", desc: "Drawdown from liquidity reserves / facilities", type: "Currency" },
+  { n: 37, row: "Ticking / Commitment Fees", key: "ticking_commitment_fees", desc: "Ticking fees, commitment fees (separate from interest)", type: "Currency" },
+  { n: 38, row: "Debt Arrangement Fees", key: "debt_arrangement_fees", desc: "Arrangement / issuance fees", type: "Currency" },
+  { n: 39, row: "Liquidity Facility Drawdown", key: "liquidity_facility_drawdown", desc: "Drawdown from liquidity reserves / facilities", type: "Currency" },
 
   // ── NET CF & CLOSING ──
   { section: "Net Cashflow & Closing" },
-  { n: 38, row: "Net Cashflow", key: "net_cashflow", desc: "CF after all debt service, fees and intercompany", type: "Computed" },
-  { n: 39, row: "Opening Cash Balance", key: "cash_bf", desc: "Cash balance brought forward", type: "Currency" },
-  { n: 40, row: "Distributions", key: "distributions", desc: "Dividends to equity (negative)", type: "Currency", sub: "equity_line_labels", subLabel: "Equity Returns" },
-  { n: 41, row: "Share Capital Redemption", key: "share_capital_redemption", desc: "Share capital / preference share redemption", type: "Currency" },
-  { n: 42, row: "Closing Cash Balance", key: "cash_cf", desc: "Opening + Net CF \u2212 Distributions \u2212 Redemptions", type: "Computed" },
+  { n: 40, row: "Net Cashflow", key: "net_cashflow", desc: "CF after all debt service, fees and intercompany", type: "Computed" },
+  { n: 41, row: "Opening Cash Balance", key: "cash_bf", desc: "Cash balance brought forward", type: "Currency" },
+  { n: 42, row: "Distributions", key: "distributions", desc: "Dividends to equity (negative)", type: "Currency", sub: "equity_line_labels", subLabel: "Equity Returns" },
+  { n: 43, row: "Share Capital Redemption", key: "share_capital_redemption", desc: "Share capital / preference share redemption", type: "Currency" },
+  { n: 44, row: "Closing Cash Balance", key: "cash_cf", desc: "Opening + Net CF \u2212 Distributions \u2212 Redemptions", type: "Computed" },
 
   // ── COVENANT RATIOS — CORE (all sectors) ──
   { section: "Core Covenant Ratios (all sectors)" },
-  { n: 43, row: "Senior DSCR", key: "senior_dscr", desc: "CFADS / Senior Debt Service", type: "Ratio", sectors: "All" },
-  { n: 44, row: "Senior Annual DSCR", key: "senior_annual_dscr", desc: "Annualised CFADS / Senior Debt Service", type: "Ratio", sectors: "All" },
-  { n: 45, row: "Net Debt / EBITDA", key: "net_debt_ebitda", desc: "Senior Net Debt / EBITDA", type: "Ratio", sectors: "All" },
-  { n: 46, row: "Interest Coverage Ratio (ICR)", key: "icr", desc: "EBITDA / Interest Expense", type: "Ratio", sectors: "All" },
-  { n: 47, row: "Fixed Charge Coverage Ratio", key: "fccr", desc: "EBITDA / (Interest + Scheduled Principal + Lease Payments)", type: "Ratio", sectors: "All" },
+  { n: 45, row: "Senior DSCR", key: "senior_dscr", desc: "CFADS / Senior Debt Service (excludes cash sweep)", type: "Ratio", sectors: "All" },
+  { n: 46, row: "Senior Annual DSCR", key: "senior_annual_dscr", desc: "Annualised CFADS / Senior Debt Service (excludes cash sweep)", type: "Ratio", sectors: "All" },
+  { n: 47, row: "Net Debt / EBITDA", key: "net_debt_ebitda", desc: "Senior Net Debt / EBITDA", type: "Ratio", sectors: "All" },
+  { n: 48, row: "Interest Coverage Ratio (ICR)", key: "icr", desc: "EBITDA / Interest Expense", type: "Ratio", sectors: "All" },
+  { n: 49, row: "Fixed Charge Coverage Ratio", key: "fccr", desc: "EBITDA / (Interest + Scheduled Principal + Lease Payments)", type: "Ratio", sectors: "All" },
 
   // ── COVENANT RATIOS — PROJECT FINANCE ──
   { section: "Project Finance Ratios (ports, wind, toll roads, clean tech)" },
-  { n: 48, row: "Loan Life Coverage Ratio (LLCR)", key: "llcr", desc: "NPV of projected cash flows to final repayment / Outstanding debt", type: "Ratio", sectors: "Port, Wind, Toll Road, Clean Tech" },
-  { n: 49, row: "Project Life Coverage Ratio (PLCR)", key: "plcr", desc: "NPV of projected cash flows over project life / Outstanding debt", type: "Ratio", sectors: "Port, Wind, Toll Road" },
+  { n: 50, row: "Loan Life Coverage Ratio (LLCR)", key: "llcr", desc: "NPV of projected cash flows to final repayment / Outstanding debt", type: "Ratio", sectors: "Port, Wind, Toll Road, Clean Tech" },
+  { n: 51, row: "Project Life Coverage Ratio (PLCR)", key: "plcr", desc: "NPV of projected cash flows over project life / Outstanding debt", type: "Ratio", sectors: "Port, Wind, Toll Road" },
 
   // ── COVENANT RATIOS — REAL ESTATE ──
   { section: "Real Estate Ratios" },
-  { n: 50, row: "Loan-to-Value (LTV)", key: "ltv", desc: "Loan Balance / Appraised Property Value", type: "Ratio", sectors: "Real Estate" },
-  { n: 51, row: "Rental Coverage Ratio", key: "rental_coverage", desc: "Net Rental Income / Debt Service", type: "Ratio", sectors: "Real Estate" },
-  { n: 52, row: "Debt Yield", key: "debt_yield", desc: "Net Operating Income / Loan Balance", type: "Ratio", sectors: "Real Estate" },
+  { n: 52, row: "Loan-to-Value (LTV)", key: "ltv", desc: "Loan Balance / Appraised Property Value", type: "Ratio", sectors: "Real Estate" },
+  { n: 53, row: "Rental Coverage Ratio", key: "rental_coverage", desc: "Net Rental Income / Debt Service", type: "Ratio", sectors: "Real Estate" },
+  { n: 54, row: "Debt Yield", key: "debt_yield", desc: "Net Operating Income / Loan Balance", type: "Ratio", sectors: "Real Estate" },
 
   // ── COVENANT RATIOS — REGULATED UTILITY / WBS ──
   { section: "Regulated Utility / WBS Ratios (airports, utilities)" },
-  { n: 53, row: "Net Debt / RAB", key: "net_debt_rab", desc: "Net Senior Debt / Regulated Asset Base (lower is better)", type: "Ratio", sectors: "Airport, Utility" },
-  { n: 54, row: "Asset Cover Ratio (ACR)", key: "acr", desc: "Net Debt / RAB trigger & default tiers (WBS structures)", type: "Ratio", sectors: "Airport WBS" },
-  { n: 55, row: "Post-Maintenance ICR (PMICR)", key: "pmicr", desc: "(CFADS \u2212 Regulatory Depreciation) / Senior Interest", type: "Ratio", sectors: "Airport, Utility" },
-  { n: 56, row: "Senior ICR (Regulatory Dep.)", key: "senior_icr_reg_dep", desc: "EBITDA after regulatory depreciation / Senior interest", type: "Ratio", sectors: "Airport WBS" },
-  { n: 57, row: "Senior ICR (2% RAB)", key: "senior_icr_2pct_rab", desc: "EBITDA after 2% synthetic RAB depreciation / Senior interest", type: "Ratio", sectors: "Airport WBS" },
-  { n: 58, row: "Class A Net Debt / RAB", key: "class_a_debt_rab", desc: "Class A senior secured debt / RAB", type: "Ratio", sectors: "Airport WBS" },
-  { n: 59, row: "Total Debt / RAB", key: "total_debt_rab", desc: "Total (all classes) debt / RAB", type: "Ratio", sectors: "Airport, Utility" },
-  { n: 60, row: "Solvency Ratio", key: "solvency_ratio", desc: "Total assets / total liabilities (hard & soft default tiers)", type: "Ratio", sectors: "Airport WBS" },
+  { n: 55, row: "Net Debt / RAB", key: "net_debt_rab", desc: "Net Senior Debt / Regulated Asset Base (lower is better)", type: "Ratio", sectors: "Airport, Utility" },
+  { n: 56, row: "Asset Cover Ratio (ACR)", key: "acr", desc: "Net Debt / RAB trigger & default tiers (WBS structures)", type: "Ratio", sectors: "Airport WBS" },
+  { n: 57, row: "Post-Maintenance ICR (PMICR)", key: "pmicr", desc: "(CFADS \u2212 Regulatory Depreciation) / Senior Interest", type: "Ratio", sectors: "Airport, Utility" },
+  { n: 58, row: "Senior ICR (Regulatory Dep.)", key: "senior_icr_reg_dep", desc: "EBITDA after regulatory depreciation / Senior interest", type: "Ratio", sectors: "Airport WBS" },
+  { n: 59, row: "Senior ICR (2% RAB)", key: "senior_icr_2pct_rab", desc: "EBITDA after 2% synthetic RAB depreciation / Senior interest", type: "Ratio", sectors: "Airport WBS" },
+  { n: 60, row: "Class A Net Debt / RAB", key: "class_a_debt_rab", desc: "Class A senior secured debt / RAB", type: "Ratio", sectors: "Airport WBS" },
+  { n: 61, row: "Total Debt / RAB", key: "total_debt_rab", desc: "Total (all classes) debt / RAB", type: "Ratio", sectors: "Airport, Utility" },
+  { n: 62, row: "Solvency Ratio", key: "solvency_ratio", desc: "Total assets / total liabilities (hard & soft default tiers)", type: "Ratio", sectors: "Airport WBS" },
 
   // ── COVENANT RATIOS — SOCIAL INFRA / PPP ──
   { section: "Social Infrastructure / PPP Ratios" },
-  { n: 61, row: "Annual DSCR (Lock-Up)", key: "annual_dscr_lockup", desc: "Annual CFADS / DS with lock-up tier (typically 1.10x\u20131.20x)", type: "Ratio", sectors: "Social Infra, PPP" },
-  { n: 62, row: "Lifecycle Reserve Cover", key: "lifecycle_reserve_cover", desc: "Lifecycle reserve balance / Next 5-year projected lifecycle costs", type: "Ratio", sectors: "Social Infra, PPP" },
-  { n: 63, row: "Maintenance Reserve Cover", key: "mra_cover", desc: "MRA balance / Required MRA target", type: "Ratio", sectors: "Social Infra, PPP, Port" },
+  { n: 63, row: "Annual DSCR (Lock-Up)", key: "annual_dscr_lockup", desc: "Annual CFADS / DS with lock-up tier (typically 1.10x\u20131.20x)", type: "Ratio", sectors: "Social Infra, PPP" },
+  { n: 64, row: "Lifecycle Reserve Cover", key: "lifecycle_reserve_cover", desc: "Lifecycle reserve balance / Next 5-year projected lifecycle costs", type: "Ratio", sectors: "Social Infra, PPP" },
+  { n: 65, row: "Maintenance Reserve Cover", key: "mra_cover", desc: "MRA balance / Required MRA target", type: "Ratio", sectors: "Social Infra, PPP, Port" },
 
   // ── SECTOR-SPECIFIC CLASS / RAB RATIOS ──
   { sub: "class_ratio_labels", subLabel: "Class Ratios", divider: true, section: "Additional class-based ratio rows populated from sector template" },
@@ -149,10 +151,10 @@ const CASHFLOW_MODEL: CashflowRow[] = [
 
   // ── SUPPLEMENTARY P&L ITEMS (non-cash) ──
   { section: "Supplementary P&L Items (non-cash)" },
-  { n: 64, row: "EBITDA Margin (%)", key: "ebitda_margin", desc: "EBITDA / Revenue", type: "Ratio" },
-  { n: 65, row: "Depreciation", key: "depreciation", desc: "Accounting depreciation (non-cash, P&L only)", type: "Currency" },
-  { n: 66, row: "Regulatory Depreciation", key: "regulatory_depreciation", desc: "Regulatory depreciation (RAB-based, WBS specific, non-cash)", type: "Currency" },
-  { n: 67, row: "EBIT", key: "ebit", desc: "EBITDA \u2212 Depreciation (P&L measure, not in cashflow)", type: "Computed" },
+  { n: 66, row: "EBITDA Margin (%)", key: "ebitda_margin", desc: "EBITDA / Revenue", type: "Ratio" },
+  { n: 67, row: "Depreciation", key: "depreciation", desc: "Accounting depreciation (non-cash, P&L only)", type: "Currency" },
+  { n: 68, row: "Regulatory Depreciation", key: "regulatory_depreciation", desc: "Regulatory depreciation (RAB-based, WBS specific, non-cash)", type: "Currency" },
+  { n: 69, row: "EBIT", key: "ebit", desc: "EBITDA \u2212 Depreciation (P&L measure, not in cashflow)", type: "Computed" },
 ];
 
 /* ── Reference sector templates ─────────────────────────────────────── */

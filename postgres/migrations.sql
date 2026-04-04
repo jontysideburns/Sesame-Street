@@ -433,6 +433,21 @@ INSERT INTO line_item_definitions (line_key, section, display_label, row_order, 
 ('adj_net_debt_ebitda',      'moodys_ratios', 'Adj Net Debt / EBITDA (Moody''s)',     12, TRUE,  'moodys_adjusted_net_debt / ebitda',                 'ratio')
 ON CONFLICT (line_key) DO NOTHING;
 
+-- ── Cash sweep line items (excluded from DSCR calculation) ──────────────────
+-- Senior Cash Sweep: after Total Senior DS, NOT included in DS for DSCR purposes
+UPDATE line_item_definitions SET row_order = 6, display_label = 'Senior Cash Sweep' WHERE line_key = 'senior_principal_sweep';
+UPDATE line_item_definitions SET row_order = 3, computation_formula = 'senior_interest + senior_principal' WHERE line_key = 'senior_debt_service';
+UPDATE line_item_definitions SET row_order = 4 WHERE line_key = 'cf_after_senior_ds';
+
+-- Junior Cash Sweep and CF After Junior DS
+INSERT INTO line_item_definitions (line_key, section, display_label, row_order, is_generic, is_computed, computation_formula, unit)
+VALUES ('junior_principal_sweep', 'junior_ds', 'Junior Cash Sweep', 5, TRUE, FALSE, NULL, 'currency')
+ON CONFLICT (line_key) DO NOTHING;
+INSERT INTO line_item_definitions (line_key, section, display_label, row_order, is_generic, is_computed, computation_formula, unit)
+VALUES ('cf_after_junior_ds', 'junior_ds', 'CF After Junior Debt Service', 4, TRUE, TRUE, 'cf_after_senior_ds - junior_debt_service', 'currency')
+ON CONFLICT (line_key) DO NOTHING;
+UPDATE line_item_definitions SET row_order = 3, computation_formula = 'junior_interest + junior_principal' WHERE line_key = 'junior_debt_service';
+
 -- ── Security ranking on deals ────────────────────────────────────────────────
 -- Distinct from enforcement_class (instrument-level). This is the deal-level security ranking.
 -- Values: Senior Secured, Senior Unsecured, Second Lien, Mezzanine, Subordinated,
