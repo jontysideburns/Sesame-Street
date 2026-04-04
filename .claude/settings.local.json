@@ -101,7 +101,8 @@
       "Bash(find /c/Users/jpste/OneDrive/Documents/Startups/DEMO/xsesamestreet -type f \\\\\\(-name *.ts -o -name *.py \\\\\\) -path *api*)",
       "Bash(find /c/Users/jpste/OneDrive/Documents/Startups/DEMO/xsesamestreet -type f -name *.py -path *api*)",
       "Bash(find /c/Users/jpste/OneDrive/Documents/Startups/DEMO/xsesamestreet -type f -name *.py -not -path */.venv/* -not -path */.next/*)",
-      "Bash(find /c/Users/jpste/OneDrive/Documents/Startups/DEMO/xsesamestreet/.claude/worktrees/romantic-tu/server -type f -name *.py)"
+      "Bash(find /c/Users/jpste/OneDrive/Documents/Startups/DEMO/xsesamestreet/.claude/worktrees/romantic-tu/server -type f -name *.py)",
+      "Bash(curl -s -X POST \"http://localhost:4000/api/deals/wigmore-solar/analytics/compute-grade\")"
     ]
   }
 }
