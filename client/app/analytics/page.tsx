@@ -97,7 +97,7 @@ Starts at 100, deducts average penalty from variance materiality:
 - ≥ 85 → Grade 1 (Outperforming)
 - 60–84 → Grade 2 (In Line)
 - 40–59 → Grade 3 (Underperforming)
-- < 40 → Grade 4 (Stressed)
+- < 40 → Grade 4 (Watchlist)
 
 **Score → Monitoring posture:**
 - ≥ 70 → Standard monitoring
@@ -111,7 +111,7 @@ Starts at 100, deducts average penalty from variance materiality:
     summary: "Automatic watchlist flagging when grade or trend deteriorates beyond thresholds.",
     detail: `A deal is automatically placed on the watchlist when either condition is met:
 
-1. **Performance grade ≥ 3** (Underperforming or Stressed)
+1. **Performance grade ≥ 3** (Underperforming or Watchlist)
 2. **Performance trend** is "deteriorating" or "deteriorating_rapidly"
 
 The watchlist flag is set on the deals table: \`deals.watchlist = TRUE\`.

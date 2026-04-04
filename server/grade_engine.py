@@ -28,7 +28,7 @@ GRADE_LABELS = {
     1: "Outperforming",
     2: "In Line",
     3: "Underperforming",
-    4: "Below Lock-Up / Default",
+    4: "Watchlist",
 }
 
 TREND_LABELS = {

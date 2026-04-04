@@ -224,8 +224,7 @@ export default function PortfolioSummary({ deals }: { deals: Deal[] }) {
       { grade: "1 - Outperforming", tone: "good" },
       { grade: "2 - In Line", tone: "neutral" },
       { grade: "3 - Underperforming", tone: "warning" },
-      { grade: "4 - Stressed", tone: "critical" },
-      { grade: "Watchlist", tone: "critical" },
+      { grade: "4 - Watchlist", tone: "critical" },
     ];
     const gradeMap: Record<string, { grade: string; count: number; exposure: number }> = {};
     for (const slot of GRADE_SLOTS) {
@@ -235,10 +234,6 @@ export default function PortfolioSummary({ deals }: { deals: Deal[] }) {
       if (gradeMap[d.grade]) {
         gradeMap[d.grade].count++;
         gradeMap[d.grade].exposure += d.exposure;
-      }
-      if (d.watchlist) {
-        gradeMap["Watchlist"].count++;
-        gradeMap["Watchlist"].exposure += d.exposure;
       }
     }
     const gradeData = GRADE_SLOTS

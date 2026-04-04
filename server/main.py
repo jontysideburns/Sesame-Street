@@ -5435,7 +5435,7 @@ def grade_from_score(score: float):
         return "2 - In Line"
     if score >= 40:
         return "3 - Underperforming"
-    return "4 - Stressed"
+    return "4 - Watchlist"
 
 
 def monitoring_posture_from_score(score: float):
