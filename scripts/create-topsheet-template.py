@@ -419,9 +419,13 @@ for i in range(1, 13):
     if i == 12: label += " (Other Opex)"
     add_field(ws10, r, label); r += 1
 
-r += 1; make_section(ws10, r, 3, "CAPEX LINES (up to 5)"); r += 1
+r += 1; make_section(ws10, r, 3, "GROWTH CAPEX LINES (up to 5)"); r += 1
 for i in range(1, 6):
-    add_field(ws10, r, f"Capex Line {i}"); r += 1
+    add_field(ws10, r, f"Growth Capex Line {i}"); r += 1
+
+r += 1; make_section(ws10, r, 3, "MAINTENANCE CAPEX LINES (up to 5)"); r += 1
+for i in range(1, 6):
+    add_field(ws10, r, f"Maintenance Capex Line {i}"); r += 1
 
 r += 1; make_section(ws10, r, 3, "SECTOR KPI LABELS (up to 10)"); r += 1
 for i in range(1, 11):
@@ -660,13 +664,45 @@ CASHFLOW_ROWS = [
     # (section_header, line_key, label, is_section, is_computed)
     ("OPERATING CASH FLOW", None, None, True, False),
     (None, "total_revenue", "Total Revenue", False, True),
+    (None, "revenue_1", "Revenue 1", False, False),
+    (None, "revenue_2", "Revenue 2", False, False),
+    (None, "revenue_3", "Revenue 3", False, False),
+    (None, "revenue_4", "Revenue 4", False, False),
+    (None, "revenue_5", "Revenue 5", False, False),
+    (None, "revenue_6", "Revenue 6", False, False),
+    (None, "revenue_7", "Revenue 7", False, False),
+    (None, "revenue_8", "Revenue 8", False, False),
     (None, "amort_deferred_income", "Amortisation of Deferred Income", False, False),
     (None, "total_operating_costs", "Total Operating Costs", False, True),
+    (None, "cost_1", "Cost 1", False, False),
+    (None, "cost_2", "Cost 2", False, False),
+    (None, "cost_3", "Cost 3", False, False),
+    (None, "cost_4", "Cost 4", False, False),
+    (None, "cost_5", "Cost 5", False, False),
+    (None, "cost_6", "Cost 6", False, False),
+    (None, "cost_7", "Cost 7", False, False),
+    (None, "cost_8", "Cost 8", False, False),
+    (None, "cost_9", "Cost 9", False, False),
+    (None, "cost_10", "Cost 10", False, False),
+    (None, "cost_11", "Cost 11", False, False),
+    (None, "cost_12", "Cost 12", False, False),
     (None, "disallowed_costs", "Disallowed Costs", False, False),
     (None, "exceptional_items", "Exceptional Items", False, False),
     (None, "ebitda", "EBITDA", False, True),
     ("CAPITAL EXPENDITURE", None, None, True, False),
-    (None, "capital_expenditure", "Capital Expenditure", False, True),
+    (None, "growth_capex", "Growth Capex", False, True),
+    (None, "growth_capex_1", "Growth Capex 1", False, False),
+    (None, "growth_capex_2", "Growth Capex 2", False, False),
+    (None, "growth_capex_3", "Growth Capex 3", False, False),
+    (None, "growth_capex_4", "Growth Capex 4", False, False),
+    (None, "growth_capex_5", "Growth Capex 5", False, False),
+    (None, "maintenance_capex", "Maintenance Capex", False, True),
+    (None, "maintenance_capex_1", "Maintenance Capex 1", False, False),
+    (None, "maintenance_capex_2", "Maintenance Capex 2", False, False),
+    (None, "maintenance_capex_3", "Maintenance Capex 3", False, False),
+    (None, "maintenance_capex_4", "Maintenance Capex 4", False, False),
+    (None, "maintenance_capex_5", "Maintenance Capex 5", False, False),
+    (None, "capital_expenditure", "Total Capital Expenditure", False, True),
     (None, "charger_replacement_costs", "Charger / Equipment Replacement", False, False),
     ("WORKING CAPITAL, RESERVES & TAX", None, None, True, False),
     (None, "working_capital_movement", "Working Capital Movement", False, False),
@@ -915,6 +951,6 @@ ws13.cell(row=next_row, column=3).border = border
 
 # Save
 import os
-out = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs", "topsheet-data-template.xlsx")
+out = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs", "topsheet-data-template-v4.xlsx")
 wb.save(out)
 print(f"Saved to {out}")

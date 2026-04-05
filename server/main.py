@@ -18011,7 +18011,8 @@ def upsert_intercreditor(slug: str, body: dict):
 
 _FINANCIAL_TEMPLATE_COLS = [
     "sector_template", "revenue_line_labels", "cost_line_labels",
-    "capex_line_labels", "funding_line_labels", "ds_line_labels",
+    "capex_line_labels", "growth_capex_labels", "maintenance_capex_labels",
+    "funding_line_labels", "ds_line_labels",
     "equity_line_labels", "sector_kpi_labels", "class_ratio_labels",
     "rab_leverage_labels", "notes",
 ]

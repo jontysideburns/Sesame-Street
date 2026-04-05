@@ -84,6 +84,8 @@ export default async function PlumbingPage() {
           const categoryMap: [string, string][] = [
             ["revenue_line_labels", "Revenue"],
             ["cost_line_labels", "Operating Costs"],
+            ["growth_capex_labels", "Growth Capex"],
+            ["maintenance_capex_labels", "Maintenance Capex"],
             ["capex_line_labels", "Capital Expenditure"],
             ["funding_line_labels", "Funding / Debt"],
             ["ds_line_labels", "Debt Service"],

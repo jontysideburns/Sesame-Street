@@ -628,5 +628,57 @@ CREATE TABLE IF NOT EXISTS deal_trigger_events (
 CREATE INDEX IF NOT EXISTS idx_dte_deal ON deal_trigger_events(deal_id);
 
 -- ═══════════════════════════════════════════════════════════════════════════════
+-- Growth Capex / Maintenance Capex split
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+-- Add growth_capex and maintenance_capex computed parents
+INSERT INTO line_item_definitions (line_key, section, display_label, row_order, is_computed, computation_formula, unit) VALUES
+('growth_capex',       'capex', 'Growth Capex',       3, TRUE,  'SUM(growth_capex_1..growth_capex_N)', 'currency'),
+('maintenance_capex',  'capex', 'Maintenance Capex',  6, TRUE,  'SUM(maintenance_capex_1..maintenance_capex_N)', 'currency')
+ON CONFLICT (line_key) DO NOTHING;
+
+-- Growth capex subcategory slots (up to 5)
+INSERT INTO line_item_definitions (line_key, section, display_label, row_order, is_generic, parent_line_key, unit) VALUES
+('growth_capex_1', 'capex', 'Growth Capex Line 1', 111, FALSE, 'growth_capex', 'currency'),
+('growth_capex_2', 'capex', 'Growth Capex Line 2', 112, FALSE, 'growth_capex', 'currency'),
+('growth_capex_3', 'capex', 'Growth Capex Line 3', 113, FALSE, 'growth_capex', 'currency'),
+('growth_capex_4', 'capex', 'Growth Capex Line 4', 114, FALSE, 'growth_capex', 'currency'),
+('growth_capex_5', 'capex', 'Growth Capex Line 5', 115, FALSE, 'growth_capex', 'currency')
+ON CONFLICT (line_key) DO NOTHING;
+
+-- Maintenance capex subcategory slots (up to 5)
+INSERT INTO line_item_definitions (line_key, section, display_label, row_order, is_generic, parent_line_key, unit) VALUES
+('maintenance_capex_1', 'capex', 'Maintenance Capex Line 1', 121, FALSE, 'maintenance_capex', 'currency'),
+('maintenance_capex_2', 'capex', 'Maintenance Capex Line 2', 122, FALSE, 'maintenance_capex', 'currency'),
+('maintenance_capex_3', 'capex', 'Maintenance Capex Line 3', 123, FALSE, 'maintenance_capex', 'currency'),
+('maintenance_capex_4', 'capex', 'Maintenance Capex Line 4', 124, FALSE, 'maintenance_capex', 'currency'),
+('maintenance_capex_5', 'capex', 'Maintenance Capex Line 5', 125, FALSE, 'maintenance_capex', 'currency')
+ON CONFLICT (line_key) DO NOTHING;
+
+-- Update capital_expenditure formula to sum growth + maintenance
+UPDATE line_item_definitions
+SET computation_formula = 'growth_capex + maintenance_capex'
+WHERE line_key = 'capital_expenditure';
+
+-- Add growth/maintenance capex label columns to deal_financial_template
+ALTER TABLE deal_financial_template ADD COLUMN IF NOT EXISTS growth_capex_labels JSONB DEFAULT '[]';
+ALTER TABLE deal_financial_template ADD COLUMN IF NOT EXISTS maintenance_capex_labels JSONB DEFAULT '[]';
+
+-- Update Aurora Prime (deal_id=1) template with growth/maintenance split
+UPDATE deal_financial_template
+SET growth_capex_labels = '["IT Infrastructure","Power & Cooling Plant","Building & Civil Works","Network Equipment"]'::jsonb,
+    maintenance_capex_labels = '["Other Capex"]'::jsonb
+WHERE deal_id = 1;
+
+-- Add Aurora Prime growth/maintenance capex labels to materialised table
+INSERT INTO deal_line_item_labels (deal_id, line_key, display_label, ordinal) VALUES
+(1, 'growth_capex_1', 'IT Infrastructure',         1),
+(1, 'growth_capex_2', 'Power & Cooling Plant',     2),
+(1, 'growth_capex_3', 'Building & Civil Works',    3),
+(1, 'growth_capex_4', 'Network Equipment',         4),
+(1, 'maintenance_capex_1', 'Other Capex',          1)
+ON CONFLICT (deal_id, line_key) DO NOTHING;
+
+-- ═══════════════════════════════════════════════════════════════════════════════
 -- End of migrations — all statements above are idempotent
 -- ═══════════════════════════════════════════════════════════════════════════════

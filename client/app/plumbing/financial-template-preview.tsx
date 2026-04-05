@@ -30,116 +30,122 @@ type CashflowRow = {
 const CASHFLOW_MODEL: CashflowRow[] = [
   // ── OPERATING CASH FLOW ──
   { section: "Operating Cash Flow" },
-  { n: 1, row: "Total Revenue", key: "total_revenue", desc: "Total operating revenue", type: "Computed", sub: "revenue_line_labels", subLabel: "Revenue" },
+  { n: 1, row: "Total Revenue", key: "total_revenue", desc: "Sum of Revenue 1\u20138 (labelled per sector)", type: "Computed", sub: "revenue_line_labels", subLabel: "Revenue" },
+  { n: null, row: "Revenue 1 \u2013 8", key: "revenue_1_8", desc: "Up to 8 revenue lines, labelled per sector sub-template", type: "Currency", sub: "revenue_line_labels", subLabel: "Revenue" },
   { n: 2, row: "Amortisation of Deferred Income", key: "amort_deferred_income", desc: "Amortisation of deferred / pre-paid income", type: "Currency" },
-  { n: 3, row: "Total Operating Costs", key: "total_operating_costs", desc: "Total operating costs (negative)", type: "Computed", sub: "cost_line_labels", subLabel: "Operating Costs" },
+  { n: 3, row: "Total Operating Costs", key: "total_operating_costs", desc: "Sum of Cost 1\u201312 (labelled per sector)", type: "Computed", sub: "cost_line_labels", subLabel: "Operating Costs" },
+  { n: null, row: "Cost 1 \u2013 12", key: "cost_1_12", desc: "Up to 12 cost lines, labelled per sector sub-template", type: "Currency", sub: "cost_line_labels", subLabel: "Operating Costs" },
   { n: 4, row: "Disallowed Costs", key: "disallowed_costs", desc: "Disallowed / corporate costs (WBS structures)", type: "Currency" },
   { n: 5, row: "Exceptional Items", key: "exceptional_items", desc: "Pension contributions, separation costs, etc.", type: "Currency" },
   { n: 6, row: "EBITDA", key: "ebitda", desc: "Revenue + Deferred Income \u2212 Opex \u2212 Disallowed \u2212 Exceptional", type: "Computed" },
 
   // ── CAPEX ──
   { section: "Capital Expenditure" },
-  { n: 7, row: "Capital Expenditure", key: "capital_expenditure", desc: "Total capex (negative)", type: "Computed", sub: "capex_line_labels", subLabel: "Capital Expenditure" },
-  { n: 8, row: "Charger / Equipment Replacement", key: "charger_replacement_costs", desc: "Replacement capex for equipment lifecycle", type: "Currency" },
+  { n: 7, row: "Growth Capex", key: "growth_capex", desc: "Sum of Growth Capex 1\u20135 (labelled per sector)", type: "Computed", sub: "growth_capex_labels", subLabel: "Growth Capex" },
+  { n: null, row: "Growth Capex 1 \u2013 5", key: "growth_capex_1_5", desc: "Up to 5 growth capex lines, labelled per sector sub-template", type: "Currency", sub: "growth_capex_labels", subLabel: "Growth Capex" },
+  { n: 8, row: "Maintenance Capex", key: "maintenance_capex", desc: "Sum of Maintenance Capex 1\u20135 (labelled per sector)", type: "Computed", sub: "maintenance_capex_labels", subLabel: "Maintenance Capex" },
+  { n: null, row: "Maintenance Capex 1 \u2013 5", key: "maintenance_capex_1_5", desc: "Up to 5 maintenance capex lines, labelled per sector sub-template", type: "Currency", sub: "maintenance_capex_labels", subLabel: "Maintenance Capex" },
+  { n: 9, row: "Total Capital Expenditure", key: "capital_expenditure", desc: "Growth Capex + Maintenance Capex (negative)", type: "Computed" },
+  { n: 10, row: "Charger / Equipment Replacement", key: "charger_replacement_costs", desc: "Replacement capex for equipment lifecycle", type: "Currency" },
 
   // ── WORKING CAPITAL & RESERVES ──
   { section: "Working Capital, Reserves & Tax" },
-  { n: 9, row: "Working Capital Movement", key: "working_capital_movement", desc: "Change in working capital (receivables, payables, inventory)", type: "Currency" },
-  { n: 10, row: "Reserve Account Movements", key: "reserve_account_movements", desc: "DSRA, MRA, TRA, capex reserves, lock-up, escrow, liquidity reserves", type: "Currency" },
-  { n: 11, row: "Pre-Finance, Pre-Tax Cash Flow", key: "pre_finance_pre_tax_cf", desc: "EBITDA \u2212 Capex \u00b1 Working Capital \u00b1 Reserves", type: "Computed" },
-  { n: 12, row: "Tax Paid", key: "tax_paid", desc: "Corporation tax paid (negative)", type: "Currency" },
-  { n: 13, row: "Pre-Finance, Post-Tax Cash Flow", key: "pre_finance_post_tax_cf", desc: "Pre-finance cash flow after tax", type: "Computed" },
+  { n: 11, row: "Working Capital Movement", key: "working_capital_movement", desc: "Change in working capital (receivables, payables, inventory)", type: "Currency" },
+  { n: 12, row: "Reserve Account Movements", key: "reserve_account_movements", desc: "DSRA, MRA, TRA, capex reserves, lock-up, escrow, liquidity reserves", type: "Currency" },
+  { n: 13, row: "Pre-Finance, Pre-Tax Cash Flow", key: "pre_finance_pre_tax_cf", desc: "EBITDA \u2212 Capex \u00b1 Working Capital \u00b1 Reserves", type: "Computed" },
+  { n: 14, row: "Tax Paid", key: "tax_paid", desc: "Corporation tax paid (negative)", type: "Currency" },
+  { n: 15, row: "Pre-Finance, Post-Tax Cash Flow", key: "pre_finance_post_tax_cf", desc: "Pre-finance cash flow after tax", type: "Computed" },
 
   // ── ADDITIONAL SOURCES ──
   { section: "Additional Sources / Income" },
-  { n: 14, row: "Interest on Cash Balances", key: "interest_on_cash", desc: "Interest earned on cash balances", type: "Currency" },
-  { n: 15, row: "Customer Pre-Payments", key: "customer_prepayment", desc: "Customer pre-payments received", type: "Currency" },
-  { n: 16, row: "Grant / Subsidy Income", key: "grant_income", desc: "Government grants or subsidy income", type: "Currency" },
+  { n: 16, row: "Interest on Cash Balances", key: "interest_on_cash", desc: "Interest earned on cash balances", type: "Currency" },
+  { n: 17, row: "Customer Pre-Payments", key: "customer_prepayment", desc: "Customer pre-payments received", type: "Currency" },
+  { n: 18, row: "Grant / Subsidy Income", key: "grant_income", desc: "Government grants or subsidy income", type: "Currency" },
 
   // ── FUNDING SOURCES ──
   { section: "Funding Sources" },
-  { n: 17, row: "Senior Debt Drawdown", key: "senior_debt_drawdown", desc: "Senior debt drawn", type: "Currency" },
-  { n: 18, row: "Capex Facility Drawdown", key: "capex_facility_drawdown", desc: "Capex facility drawn (airport / WBS specific)", type: "Currency" },
-  { n: 19, row: "Junior / Mezzanine Debt Drawdown", key: "junior_debt_drawdown", desc: "Junior or mezzanine debt drawn", type: "Currency" },
-  { n: 20, row: "Shareholder Loan Drawdown", key: "shareholder_loan_drawdown", desc: "Shareholder loan drawn", type: "Currency" },
-  { n: 21, row: "Equity Drawdown", key: "equity_drawdown", desc: "Equity injected", type: "Currency" },
-  { n: 22, row: "Total Funding", key: "total_funding", desc: "Sum of all funding sources", type: "Computed", sub: "funding_line_labels", subLabel: "Funding / Debt" },
+  { n: 19, row: "Senior Debt Drawdown", key: "senior_debt_drawdown", desc: "Senior debt drawn", type: "Currency" },
+  { n: 20, row: "Capex Facility Drawdown", key: "capex_facility_drawdown", desc: "Capex facility drawn (airport / WBS specific)", type: "Currency" },
+  { n: 21, row: "Junior / Mezzanine Debt Drawdown", key: "junior_debt_drawdown", desc: "Junior or mezzanine debt drawn", type: "Currency" },
+  { n: 22, row: "Shareholder Loan Drawdown", key: "shareholder_loan_drawdown", desc: "Shareholder loan drawn", type: "Currency" },
+  { n: 23, row: "Equity Drawdown", key: "equity_drawdown", desc: "Equity injected", type: "Currency" },
+  { n: 24, row: "Total Funding", key: "total_funding", desc: "Sum of all funding sources", type: "Computed", sub: "funding_line_labels", subLabel: "Funding / Debt" },
 
   // ── CFADS ──
   { section: "Cash Available for Debt Service" },
-  { n: 23, row: "CFADS", key: "cfads", desc: "Post-tax CF + Additional Sources + Funding", type: "Computed" },
+  { n: 25, row: "CFADS", key: "cfads", desc: "Post-tax CF + Additional Sources + Funding", type: "Computed" },
 
   // ── SENIOR DEBT SERVICE ──
   { section: "Senior Debt Service" },
-  { n: 24, row: "Senior Interest", key: "senior_interest", desc: "Senior interest + commitment fees", type: "Currency" },
-  { n: 25, row: "Senior Principal (Scheduled)", key: "senior_principal", desc: "Senior principal repayment (scheduled amortisation)", type: "Currency" },
-  { n: 26, row: "Total Senior Debt Service", key: "senior_debt_service", desc: "Senior interest + scheduled principal (excludes cash sweep)", type: "Computed" },
-  { n: 27, row: "CF After Senior Debt Service", key: "cf_after_senior_ds", desc: "CFADS \u2212 Senior Debt Service", type: "Computed" },
-  { n: 28, row: "Senior Cash Sweep", key: "senior_principal_sweep", desc: "Cash sweep repayment from excess cash (NOT included in DSCR)", type: "Currency" },
+  { n: 26, row: "Senior Interest", key: "senior_interest", desc: "Senior interest + commitment fees", type: "Currency" },
+  { n: 27, row: "Senior Principal (Scheduled)", key: "senior_principal", desc: "Senior principal repayment (scheduled amortisation)", type: "Currency" },
+  { n: 28, row: "Total Senior Debt Service", key: "senior_debt_service", desc: "Senior interest + scheduled principal (excludes cash sweep)", type: "Computed" },
+  { n: 29, row: "CF After Senior Debt Service", key: "cf_after_senior_ds", desc: "CFADS \u2212 Senior Debt Service", type: "Computed" },
+  { n: 30, row: "Senior Cash Sweep", key: "senior_principal_sweep", desc: "Cash sweep repayment from excess cash (NOT included in DSCR)", type: "Currency" },
 
   // ── JUNIOR DEBT SERVICE ──
   { section: "Junior Debt Service" },
-  { n: 29, row: "Junior Interest", key: "junior_interest", desc: "Junior / mezzanine interest", type: "Currency" },
-  { n: 30, row: "Junior Principal", key: "junior_principal", desc: "Junior principal repayment", type: "Currency" },
-  { n: 31, row: "Total Junior Debt Service", key: "junior_debt_service", desc: "Junior interest + principal (excludes cash sweep)", type: "Computed" },
-  { n: 32, row: "CF After Junior Debt Service", key: "cf_after_junior_ds", desc: "CF After Senior DS \u2212 Junior Debt Service", type: "Computed" },
-  { n: 33, row: "Junior Cash Sweep", key: "junior_principal_sweep", desc: "Junior cash sweep from excess cash (NOT included in DSCR)", type: "Currency" },
+  { n: 31, row: "Junior Interest", key: "junior_interest", desc: "Junior / mezzanine interest", type: "Currency" },
+  { n: 32, row: "Junior Principal", key: "junior_principal", desc: "Junior principal repayment", type: "Currency" },
+  { n: 33, row: "Total Junior Debt Service", key: "junior_debt_service", desc: "Junior interest + principal (excludes cash sweep)", type: "Computed" },
+  { n: 34, row: "CF After Junior Debt Service", key: "cf_after_junior_ds", desc: "CF After Senior DS \u2212 Junior Debt Service", type: "Computed" },
+  { n: 35, row: "Junior Cash Sweep", key: "junior_principal_sweep", desc: "Junior cash sweep from excess cash (NOT included in DSCR)", type: "Currency" },
 
   // ── SHAREHOLDER / INTERCOMPANY ──
   { section: "Shareholder & Intercompany" },
-  { n: 34, row: "Shareholder Loan Interest", key: "shareholder_loan_interest", desc: "SHL interest (may capitalise)", type: "Currency" },
-  { n: 35, row: "Shareholder Loan Repayment", key: "shareholder_loan_repayment", desc: "SHL principal repayment", type: "Currency" },
-  { n: 36, row: "Intercompany Interest (Net)", key: "intercompany_interest_net", desc: "Net intercompany interest income / (expense)", type: "Currency" },
+  { n: 36, row: "Shareholder Loan Interest", key: "shareholder_loan_interest", desc: "SHL interest (may capitalise)", type: "Currency" },
+  { n: 37, row: "Shareholder Loan Repayment", key: "shareholder_loan_repayment", desc: "SHL principal repayment", type: "Currency" },
+  { n: 38, row: "Intercompany Interest (Net)", key: "intercompany_interest_net", desc: "Net intercompany interest income / (expense)", type: "Currency" },
 
   // ── OTHER FEES ──
   { section: "Other Fees & Costs" },
-  { n: 37, row: "Ticking / Commitment Fees", key: "ticking_commitment_fees", desc: "Ticking fees, commitment fees (separate from interest)", type: "Currency" },
-  { n: 38, row: "Debt Arrangement Fees", key: "debt_arrangement_fees", desc: "Arrangement / issuance fees", type: "Currency" },
-  { n: 39, row: "Liquidity Facility Drawdown", key: "liquidity_facility_drawdown", desc: "Drawdown from liquidity reserves / facilities", type: "Currency" },
+  { n: 39, row: "Ticking / Commitment Fees", key: "ticking_commitment_fees", desc: "Ticking fees, commitment fees (separate from interest)", type: "Currency" },
+  { n: 40, row: "Debt Arrangement Fees", key: "debt_arrangement_fees", desc: "Arrangement / issuance fees", type: "Currency" },
+  { n: 41, row: "Liquidity Facility Drawdown", key: "liquidity_facility_drawdown", desc: "Drawdown from liquidity reserves / facilities", type: "Currency" },
 
   // ── NET CF & CLOSING ──
   { section: "Net Cashflow & Closing" },
-  { n: 40, row: "Net Cashflow", key: "net_cashflow", desc: "CF after all debt service, fees and intercompany", type: "Computed" },
-  { n: 41, row: "Opening Cash Balance", key: "cash_bf", desc: "Cash balance brought forward", type: "Currency" },
-  { n: 42, row: "Distributions", key: "distributions", desc: "Dividends to equity (negative)", type: "Currency", sub: "equity_line_labels", subLabel: "Equity Returns" },
-  { n: 43, row: "Share Capital Redemption", key: "share_capital_redemption", desc: "Share capital / preference share redemption", type: "Currency" },
-  { n: 44, row: "Closing Cash Balance", key: "cash_cf", desc: "Opening + Net CF \u2212 Distributions \u2212 Redemptions", type: "Computed" },
+  { n: 42, row: "Net Cashflow", key: "net_cashflow", desc: "CF after all debt service, fees and intercompany", type: "Computed" },
+  { n: 43, row: "Opening Cash Balance", key: "cash_bf", desc: "Cash balance brought forward", type: "Currency" },
+  { n: 44, row: "Distributions", key: "distributions", desc: "Dividends to equity (negative)", type: "Currency", sub: "equity_line_labels", subLabel: "Equity Returns" },
+  { n: 45, row: "Share Capital Redemption", key: "share_capital_redemption", desc: "Share capital / preference share redemption", type: "Currency" },
+  { n: 46, row: "Closing Cash Balance", key: "cash_cf", desc: "Opening + Net CF \u2212 Distributions \u2212 Redemptions", type: "Computed" },
 
   // ── COVENANT RATIOS — CORE (all sectors) ──
   { section: "Core Covenant Ratios (all sectors)" },
-  { n: 45, row: "Senior DSCR", key: "senior_dscr", desc: "CFADS / Senior Debt Service (excludes cash sweep)", type: "Ratio", sectors: "All" },
-  { n: 46, row: "Senior Annual DSCR", key: "senior_annual_dscr", desc: "Annualised CFADS / Senior Debt Service (excludes cash sweep)", type: "Ratio", sectors: "All" },
-  { n: 47, row: "Net Debt / EBITDA", key: "net_debt_ebitda", desc: "Senior Net Debt / EBITDA", type: "Ratio", sectors: "All" },
-  { n: 48, row: "Interest Coverage Ratio (ICR)", key: "icr", desc: "EBITDA / Interest Expense", type: "Ratio", sectors: "All" },
-  { n: 49, row: "Fixed Charge Coverage Ratio", key: "fccr", desc: "EBITDA / (Interest + Scheduled Principal + Lease Payments)", type: "Ratio", sectors: "All" },
+  { n: 47, row: "Senior DSCR", key: "senior_dscr", desc: "CFADS / Senior Debt Service (excludes cash sweep)", type: "Ratio", sectors: "All" },
+  { n: 48, row: "Senior Annual DSCR", key: "senior_annual_dscr", desc: "Annualised CFADS / Senior Debt Service (excludes cash sweep)", type: "Ratio", sectors: "All" },
+  { n: 49, row: "Net Debt / EBITDA", key: "net_debt_ebitda", desc: "Senior Net Debt / EBITDA", type: "Ratio", sectors: "All" },
+  { n: 50, row: "Interest Coverage Ratio (ICR)", key: "icr", desc: "EBITDA / Interest Expense", type: "Ratio", sectors: "All" },
+  { n: 51, row: "Fixed Charge Coverage Ratio", key: "fccr", desc: "EBITDA / (Interest + Scheduled Principal + Lease Payments)", type: "Ratio", sectors: "All" },
 
   // ── COVENANT RATIOS — PROJECT FINANCE ──
   { section: "Project Finance Ratios (ports, wind, toll roads, clean tech)" },
-  { n: 50, row: "Loan Life Coverage Ratio (LLCR)", key: "llcr", desc: "NPV of projected cash flows to final repayment / Outstanding debt", type: "Ratio", sectors: "Port, Wind, Toll Road, Clean Tech" },
-  { n: 51, row: "Project Life Coverage Ratio (PLCR)", key: "plcr", desc: "NPV of projected cash flows over project life / Outstanding debt", type: "Ratio", sectors: "Port, Wind, Toll Road" },
+  { n: 52, row: "Loan Life Coverage Ratio (LLCR)", key: "llcr", desc: "NPV of projected cash flows to final repayment / Outstanding debt", type: "Ratio", sectors: "Port, Wind, Toll Road, Clean Tech" },
+  { n: 53, row: "Project Life Coverage Ratio (PLCR)", key: "plcr", desc: "NPV of projected cash flows over project life / Outstanding debt", type: "Ratio", sectors: "Port, Wind, Toll Road" },
 
   // ── COVENANT RATIOS — REAL ESTATE ──
   { section: "Real Estate Ratios" },
-  { n: 52, row: "Loan-to-Value (LTV)", key: "ltv", desc: "Loan Balance / Appraised Property Value", type: "Ratio", sectors: "Real Estate" },
-  { n: 53, row: "Rental Coverage Ratio", key: "rental_coverage", desc: "Net Rental Income / Debt Service", type: "Ratio", sectors: "Real Estate" },
-  { n: 54, row: "Debt Yield", key: "debt_yield", desc: "Net Operating Income / Loan Balance", type: "Ratio", sectors: "Real Estate" },
+  { n: 54, row: "Loan-to-Value (LTV)", key: "ltv", desc: "Loan Balance / Appraised Property Value", type: "Ratio", sectors: "Real Estate" },
+  { n: 55, row: "Rental Coverage Ratio", key: "rental_coverage", desc: "Net Rental Income / Debt Service", type: "Ratio", sectors: "Real Estate" },
+  { n: 56, row: "Debt Yield", key: "debt_yield", desc: "Net Operating Income / Loan Balance", type: "Ratio", sectors: "Real Estate" },
 
   // ── COVENANT RATIOS — REGULATED UTILITY / WBS ──
   { section: "Regulated Utility / WBS Ratios (airports, utilities)" },
-  { n: 55, row: "Net Debt / RAB", key: "net_debt_rab", desc: "Net Senior Debt / Regulated Asset Base (lower is better)", type: "Ratio", sectors: "Airport, Utility" },
-  { n: 56, row: "Asset Cover Ratio (ACR)", key: "acr", desc: "Net Debt / RAB trigger & default tiers (WBS structures)", type: "Ratio", sectors: "Airport WBS" },
-  { n: 57, row: "Post-Maintenance ICR (PMICR)", key: "pmicr", desc: "(CFADS \u2212 Regulatory Depreciation) / Senior Interest", type: "Ratio", sectors: "Airport, Utility" },
-  { n: 58, row: "Senior ICR (Regulatory Dep.)", key: "senior_icr_reg_dep", desc: "EBITDA after regulatory depreciation / Senior interest", type: "Ratio", sectors: "Airport WBS" },
-  { n: 59, row: "Senior ICR (2% RAB)", key: "senior_icr_2pct_rab", desc: "EBITDA after 2% synthetic RAB depreciation / Senior interest", type: "Ratio", sectors: "Airport WBS" },
-  { n: 60, row: "Class A Net Debt / RAB", key: "class_a_debt_rab", desc: "Class A senior secured debt / RAB", type: "Ratio", sectors: "Airport WBS" },
-  { n: 61, row: "Total Debt / RAB", key: "total_debt_rab", desc: "Total (all classes) debt / RAB", type: "Ratio", sectors: "Airport, Utility" },
-  { n: 62, row: "Solvency Ratio", key: "solvency_ratio", desc: "Total assets / total liabilities (hard & soft default tiers)", type: "Ratio", sectors: "Airport WBS" },
+  { n: 57, row: "Net Debt / RAB", key: "net_debt_rab", desc: "Net Senior Debt / Regulated Asset Base (lower is better)", type: "Ratio", sectors: "Airport, Utility" },
+  { n: 58, row: "Asset Cover Ratio (ACR)", key: "acr", desc: "Net Debt / RAB trigger & default tiers (WBS structures)", type: "Ratio", sectors: "Airport WBS" },
+  { n: 59, row: "Post-Maintenance ICR (PMICR)", key: "pmicr", desc: "(CFADS \u2212 Regulatory Depreciation) / Senior Interest", type: "Ratio", sectors: "Airport, Utility" },
+  { n: 60, row: "Senior ICR (Regulatory Dep.)", key: "senior_icr_reg_dep", desc: "EBITDA after regulatory depreciation / Senior interest", type: "Ratio", sectors: "Airport WBS" },
+  { n: 61, row: "Senior ICR (2% RAB)", key: "senior_icr_2pct_rab", desc: "EBITDA after 2% synthetic RAB depreciation / Senior interest", type: "Ratio", sectors: "Airport WBS" },
+  { n: 62, row: "Class A Net Debt / RAB", key: "class_a_debt_rab", desc: "Class A senior secured debt / RAB", type: "Ratio", sectors: "Airport WBS" },
+  { n: 63, row: "Total Debt / RAB", key: "total_debt_rab", desc: "Total (all classes) debt / RAB", type: "Ratio", sectors: "Airport, Utility" },
+  { n: 64, row: "Solvency Ratio", key: "solvency_ratio", desc: "Total assets / total liabilities (hard & soft default tiers)", type: "Ratio", sectors: "Airport WBS" },
 
   // ── COVENANT RATIOS — SOCIAL INFRA / PPP ──
   { section: "Social Infrastructure / PPP Ratios" },
-  { n: 63, row: "Annual DSCR (Lock-Up)", key: "annual_dscr_lockup", desc: "Annual CFADS / DS with lock-up tier (typically 1.10x\u20131.20x)", type: "Ratio", sectors: "Social Infra, PPP" },
-  { n: 64, row: "Lifecycle Reserve Cover", key: "lifecycle_reserve_cover", desc: "Lifecycle reserve balance / Next 5-year projected lifecycle costs", type: "Ratio", sectors: "Social Infra, PPP" },
-  { n: 65, row: "Maintenance Reserve Cover", key: "mra_cover", desc: "MRA balance / Required MRA target", type: "Ratio", sectors: "Social Infra, PPP, Port" },
+  { n: 65, row: "Annual DSCR (Lock-Up)", key: "annual_dscr_lockup", desc: "Annual CFADS / DS with lock-up tier (typically 1.10x\u20131.20x)", type: "Ratio", sectors: "Social Infra, PPP" },
+  { n: 66, row: "Lifecycle Reserve Cover", key: "lifecycle_reserve_cover", desc: "Lifecycle reserve balance / Next 5-year projected lifecycle costs", type: "Ratio", sectors: "Social Infra, PPP" },
+  { n: 67, row: "Maintenance Reserve Cover", key: "mra_cover", desc: "MRA balance / Required MRA target", type: "Ratio", sectors: "Social Infra, PPP, Port" },
 
   // ── SECTOR-SPECIFIC CLASS / RAB RATIOS ──
   { sub: "class_ratio_labels", subLabel: "Class Ratios", divider: true, section: "Additional class-based ratio rows populated from sector template" },
@@ -151,10 +157,10 @@ const CASHFLOW_MODEL: CashflowRow[] = [
 
   // ── SUPPLEMENTARY P&L ITEMS (non-cash) ──
   { section: "Supplementary P&L Items (non-cash)" },
-  { n: 66, row: "EBITDA Margin (%)", key: "ebitda_margin", desc: "EBITDA / Revenue", type: "Ratio" },
-  { n: 67, row: "Depreciation", key: "depreciation", desc: "Accounting depreciation (non-cash, P&L only)", type: "Currency" },
-  { n: 68, row: "Regulatory Depreciation", key: "regulatory_depreciation", desc: "Regulatory depreciation (RAB-based, WBS specific, non-cash)", type: "Currency" },
-  { n: 69, row: "EBIT", key: "ebit", desc: "EBITDA \u2212 Depreciation (P&L measure, not in cashflow)", type: "Computed" },
+  { n: 68, row: "EBITDA Margin (%)", key: "ebitda_margin", desc: "EBITDA / Revenue", type: "Ratio" },
+  { n: 69, row: "Depreciation", key: "depreciation", desc: "Accounting depreciation (non-cash, P&L only)", type: "Currency" },
+  { n: 70, row: "Regulatory Depreciation", key: "regulatory_depreciation", desc: "Regulatory depreciation (RAB-based, WBS specific, non-cash)", type: "Currency" },
+  { n: 71, row: "EBIT", key: "ebit", desc: "EBITDA \u2212 Depreciation (P&L measure, not in cashflow)", type: "Computed" },
 ];
 
 /* ── Reference sector templates ─────────────────────────────────────── */
@@ -172,7 +178,8 @@ const REFERENCE_SECTORS: RefSectorTemplate[] = [
     categories: {
       revenue_line_labels: ["GPU/Compute Revenue", "Colocation Revenue", "Power Recharge", "Connectivity Revenue", "Managed Services", "Storage Revenue", "Edge Services", "Other Revenue"],
       cost_line_labels: ["Power Cost", "Cooling Cost", "Network/Connectivity", "Managed Infrastructure Platform (MIP)", "Facilities Management", "Security & Access", "Insurance", "Land Lease / Rent", "Management Fee", "Marketing & Sales", "General & Admin", "Other Opex"],
-      capex_line_labels: ["IT Infrastructure", "Power & Cooling Plant", "Building & Civil Works", "Network Equipment", "Other Capex"],
+      growth_capex_labels: ["IT Infrastructure", "Power & Cooling Plant", "Building & Civil Works", "Network Equipment"],
+      maintenance_capex_labels: ["Other Capex"],
       funding_line_labels: ["Senior Term Loan Drawdown", "RCF Drawdown"],
       ds_line_labels: ["Senior Interest", "Senior Principal", "Commitment Fee", "Hedge Settlements"],
       equity_line_labels: ["Distributions to Shareholders", "Share Capital Redemption"],
@@ -184,7 +191,8 @@ const REFERENCE_SECTORS: RefSectorTemplate[] = [
     categories: {
       revenue_line_labels: ["PPA Revenue (Contracted)", "Merchant Revenue (Spot)", "ROC / CfD Subsidy Income", "Capacity Market Revenue", "Ancillary Services Revenue", "Curtailment Compensation", "Other Revenue"],
       cost_line_labels: ["O&M Contract (Turbine Maintenance)", "Balance of Plant Maintenance", "Power Cost", "Land Lease / Rent", "Insurance (Property & BI)", "Grid Connection Charges", "Management Fee", "General & Admin", "Environmental / Community Obligations", "Other Opex"],
-      capex_line_labels: ["Major Component Replacement (Gearbox / Blade)", "Substation & Grid Upgrade", "Access Roads & Foundations", "Other Capex"],
+      growth_capex_labels: ["Substation & Grid Upgrade"],
+      maintenance_capex_labels: ["Major Component Replacement (Gearbox / Blade)", "Access Roads & Foundations", "Other Capex"],
       funding_line_labels: ["Senior Project Finance Drawdown", "Mezzanine Drawdown", "Equity Bridge Loan"],
       ds_line_labels: ["Senior Interest", "Senior Principal (Sculpted)", "Mezzanine Interest", "Hedge Settlements"],
       equity_line_labels: ["Distributions to Equity", "Subordinated Loan Repayment"],
@@ -196,7 +204,8 @@ const REFERENCE_SECTORS: RefSectorTemplate[] = [
     categories: {
       revenue_line_labels: ["Container Handling Revenue (TEU)", "Bulk Cargo Revenue", "Vessel Berthing & Pilotage Fees", "Storage & Warehousing Revenue", "Concession Fee Income", "Ancillary / Logistics Revenue", "Other Revenue"],
       cost_line_labels: ["Labour & Stevedoring", "Equipment Maintenance", "Dredging & Marine Maintenance", "Power Cost", "Fuel & Energy", "Insurance", "Concession Fee Payable", "Security & Compliance", "Land Lease / Rent", "Management Fee", "General & Admin", "Other Opex"],
-      capex_line_labels: ["Quay & Berth Extension", "Crane & Equipment Acquisition", "Yard & Pavement Works", "IT / Automation Systems", "Environmental / Remediation"],
+      growth_capex_labels: ["Quay & Berth Extension", "Crane & Equipment Acquisition"],
+      maintenance_capex_labels: ["Yard & Pavement Works", "IT / Automation Systems", "Environmental / Remediation"],
       funding_line_labels: ["Senior Term Loan Drawdown", "ECA / DFI Facility Drawdown", "Working Capital Facility"],
       ds_line_labels: ["Senior Interest", "Senior Principal (Amortising)", "ECA Interest & Principal", "Commitment Fee"],
       equity_line_labels: ["Distributions to Shareholders", "Concession Equity Return"],
@@ -208,7 +217,8 @@ const REFERENCE_SECTORS: RefSectorTemplate[] = [
     categories: {
       revenue_line_labels: ["Aeronautical Revenue (Tariff per PAX)", "Retail / Commercial Revenue", "Car Parking Revenue", "Property / Real Estate Income", "Cargo Handling Revenue", "Other Non-Aero Revenue", "Other Revenue"],
       cost_line_labels: ["Staff Costs", "Security & Policing", "Maintenance & Facilities", "Utilities (Power, Water)", "Insurance", "Rates & Property Tax", "Management Fee", "Marketing & Route Development", "IT & Systems", "General & Admin", "Other Opex"],
-      capex_line_labels: ["Terminal Expansion / Refurbishment", "Runway & Airfield Works", "Retail & Commercial Fit-Out", "IT & Security Systems", "Regulatory / Safety Compliance"],
+      growth_capex_labels: ["Terminal Expansion / Refurbishment", "Runway & Airfield Works", "Retail & Commercial Fit-Out"],
+      maintenance_capex_labels: ["IT & Security Systems", "Regulatory / Safety Compliance"],
       funding_line_labels: ["Class A Bond Drawdown", "Class B Bond Drawdown", "Capex Facility Drawdown", "Working Capital Facility"],
       ds_line_labels: ["Class A Interest", "Class A Principal (Scheduled)", "Class B Interest", "Class B Principal", "Capex Facility Interest"],
       equity_line_labels: ["Distributions to Shareholders", "Preference Share Redemption"],
@@ -222,7 +232,8 @@ const REFERENCE_SECTORS: RefSectorTemplate[] = [
     categories: {
       revenue_line_labels: ["Toll Revenue (Light Vehicles)", "Toll Revenue (Heavy Vehicles)", "Shadow Toll / Availability Payment", "Ancillary Revenue (Service Areas)", "Congestion / Dynamic Pricing Uplift", "Other Revenue"],
       cost_line_labels: ["Road Maintenance (Routine)", "Major Periodic Maintenance", "Toll Collection & ITS Operations", "Power Cost", "Insurance", "Policing & Incident Response", "Land Lease / Concession Fee", "Management Fee", "General & Admin", "Other Opex"],
-      capex_line_labels: ["Pavement Rehabilitation", "Bridge & Structure Works", "Toll System / ITS Upgrade", "Safety & Barrier Works", "Expansion / Lane Addition"],
+      growth_capex_labels: ["Expansion / Lane Addition"],
+      maintenance_capex_labels: ["Pavement Rehabilitation", "Bridge & Structure Works", "Toll System / ITS Upgrade", "Safety & Barrier Works"],
       funding_line_labels: ["Senior Term Loan Drawdown", "Subordinated Loan Drawdown", "EIB / DFI Facility"],
       ds_line_labels: ["Senior Interest", "Senior Principal (Sculpted)", "Subordinated Interest", "Commitment Fee"],
       equity_line_labels: ["Distributions to Equity", "Concession Equity Return"],
@@ -234,7 +245,8 @@ const REFERENCE_SECTORS: RefSectorTemplate[] = [
     categories: {
       revenue_line_labels: ["Unitary Charge / Availability Payment", "Facilities Management Revenue", "Third Party Revenue", "Energy / Utility Recharge", "Insurance Recovery Income", "Other Revenue"],
       cost_line_labels: ["Hard FM (Building Maintenance)", "Soft FM (Cleaning, Catering, Security)", "Lifecycle / Planned Maintenance", "Power Cost", "Insurance", "SPV Management Fee", "Helpdesk & IT Systems", "General & Admin", "Other Opex"],
-      capex_line_labels: ["Lifecycle Replacement (Major Components)", "Enhancement / Variation Works", "Handback Condition Works"],
+      growth_capex_labels: ["Enhancement / Variation Works"],
+      maintenance_capex_labels: ["Lifecycle Replacement (Major Components)", "Handback Condition Works"],
       funding_line_labels: ["Senior Bond / Loan Drawdown", "EIB Tranche Drawdown", "Subordinated Loan Drawdown"],
       ds_line_labels: ["Senior Interest", "Senior Principal (Amortising)", "EIB Interest & Principal", "Subordinated Interest"],
       equity_line_labels: ["Distributions to Equity", "Subordinated Loan Repayment"],
@@ -246,7 +258,8 @@ const REFERENCE_SECTORS: RefSectorTemplate[] = [
     categories: {
       revenue_line_labels: ["Gross Rental Income", "Service Charge Income", "Car Parking Income", "Turnover Rent / Overage", "Surrender Premium / Dilapidations", "Other Property Income", "Other Revenue"],
       cost_line_labels: ["Property Management Fee", "Service Charge Shortfall", "Void Costs / Empty Rates", "Power Cost", "Insurance", "Ground Rent", "Letting & Marketing Costs", "Legal & Professional Fees", "General & Admin", "Other Opex"],
-      capex_line_labels: ["Tenant Fit-Out / Incentives", "Building Refurbishment", "Plant & Equipment Replacement", "Sustainability / EPC Upgrade"],
+      growth_capex_labels: ["Tenant Fit-Out / Incentives", "Building Refurbishment"],
+      maintenance_capex_labels: ["Plant & Equipment Replacement", "Sustainability / EPC Upgrade"],
       funding_line_labels: ["Senior Loan Drawdown", "Mezzanine Drawdown", "Development Facility"],
       ds_line_labels: ["Senior Interest", "Senior Principal (Bullet / Amortising)", "Mezzanine Interest", "Hedge Settlements"],
       equity_line_labels: ["Distributions to Shareholders", "Equity Redemption"],
@@ -258,7 +271,8 @@ const REFERENCE_SECTORS: RefSectorTemplate[] = [
     categories: {
       revenue_line_labels: ["EV Charging Revenue", "Battery Storage Revenue (Arbitrage)", "Grid Services / Frequency Response", "Solar PV Generation Revenue", "Advertising / Retail Revenue", "Fleet Charging Contracts", "Other Revenue"],
       cost_line_labels: ["Electricity Purchase Cost", "Network / Grid Charges", "Equipment Maintenance (Chargers)", "Battery Degradation / Replacement Reserve", "Site Lease / Rent", "Insurance", "Platform & Software Costs", "General & Admin", "Other Opex"],
-      capex_line_labels: ["EV Charger Installation", "Battery Storage System", "Solar PV Array", "Grid Connection Upgrade", "Civil & Electrical Works"],
+      growth_capex_labels: ["EV Charger Installation", "Battery Storage System", "Solar PV Array", "Grid Connection Upgrade"],
+      maintenance_capex_labels: ["Civil & Electrical Works"],
       funding_line_labels: ["Senior Green Loan Drawdown", "Equipment Finance Facility", "Innovation Grant Drawdown"],
       ds_line_labels: ["Senior Interest", "Senior Principal (Sculpted)", "Equipment Finance Repayment", "Commitment Fee"],
       equity_line_labels: ["Distributions to Equity", "Share Capital Redemption"],
@@ -512,7 +526,7 @@ export default function FinancialTemplatePreview({ templates }: { templates: Tem
       <div style={{ padding: "16px 20px", background: "var(--accent-soft)", borderBottom: "1px solid var(--line)" }}>
         <strong style={{ fontSize: "1rem" }}>Generic cashflow model (F.5.2)</strong>
         <div style={{ fontSize: "0.82rem", color: "var(--ink-soft)", marginTop: 2 }}>
-          67 standard rows: 42 cashflow lines, 21 covenant ratios across all sectors, and 4 supplementary P&L items.
+          71 standard rows: 46 cashflow lines (with growth/maintenance capex split), 21 covenant ratios across all sectors, and 4 supplementary P&L items.
           Click on rows with <span style={{ color: "var(--accent)", fontWeight: 600 }}>sector subcategories</span> to view the sector-specific line items.
         </div>
       </div>

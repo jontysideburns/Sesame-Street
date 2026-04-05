@@ -1,7 +1,7 @@
 # TopSheet Data Template — Instructions for Completion
 
-**Template Version:** v3 (April 2026)
-**Template File:** `topsheet-data-template-v3.xlsx`
+**Template Version:** v4 (April 2026)
+**Template File:** `topsheet-data-template-v4.xlsx`
 
 This document explains how to complete the TopSheet data template. These instructions are written for both human users and AI assistants (Claude, ChatGPT, etc.) that may be populating the template from source documents.
 
@@ -165,7 +165,9 @@ Select the sector template and define the custom line item labels for this deal'
 - **Sector Template** must be selected (dropdown)
 - Revenue lines: enter each distinct revenue stream (e.g. "PPA Revenue", "Merchant Revenue", "Ancillary Services"). Up to 8.
 - Cost lines: enter each distinct cost category (e.g. "O&M Contract", "Insurance", "Land Lease"). Up to 12. Always include "Power Cost" and "Other Opex".
-- Capex lines: maintenance/lifecycle capex categories. Up to 5.
+- Growth Capex lines: capital expenditure for expansion, new capacity, or enhancement. Up to 5. Examples: "Terminal Expansion", "New Battery Storage System", "IT Infrastructure".
+- Maintenance Capex lines: capital expenditure for replacement, lifecycle, and upkeep. Up to 5. Examples: "Major Component Replacement", "Plant & Equipment Replacement", "Pavement Rehabilitation".
+- Total Capital Expenditure is computed as Growth Capex + Maintenance Capex.
 - Sector KPIs: the operational metrics you want to track. Up to 10. These should match the KPI Targets in Tab 9.
 
 ### Tab 11: Development Phases
@@ -227,6 +229,7 @@ These are the full cashflow forecast grids. Each tab has the same structure:
 
 **Computed rows (grey — do not enter):**
 - Total Revenue, Total Operating Costs, EBITDA
+- Growth Capex, Maintenance Capex, Total Capital Expenditure
 - Total Funding, CFADS
 - Total Senior DS, CF After Senior DS
 - Total Junior DS, CF After Junior DS
@@ -234,7 +237,10 @@ These are the full cashflow forecast grids. Each tab has the same structure:
 - DSCR, LLCR (ratios)
 
 **Input rows (yellow — enter these):**
-- Individual revenue, cost, capex subcategory lines
+- Individual revenue subcategory lines (Revenue 1–8, labelled per sector)
+- Individual cost subcategory lines (Cost 1–12, labelled per sector)
+- Growth Capex subcategory lines (Growth Capex 1–5)
+- Maintenance Capex subcategory lines (Maintenance Capex 1–5)
 - Tax Paid, Working Capital Movement, Reserve Account Movements
 - Interest on Cash, Customer Pre-Payments, Grant Income
 - Debt drawdowns (senior, capex, mezzanine, SHL, equity)

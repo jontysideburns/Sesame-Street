@@ -377,7 +377,9 @@ The `deals` table is the central record. Fields organised by TopSheet section.
 | sector_template | Text | data_centre, wind_farm, port, airport, toll_road, social_infrastructure, real_estate, clean_tech_hub, solar |
 | revenue_line_labels | JSONB | Up to 8 custom revenue line names |
 | cost_line_labels | JSONB | Up to 12 custom cost line names |
-| capex_line_labels | JSONB | Up to 5 custom capex line names |
+| capex_line_labels | JSONB | Up to 5 custom capex line names (legacy — use growth/maintenance split) |
+| growth_capex_labels | JSONB | Up to 5 growth capex line names |
+| maintenance_capex_labels | JSONB | Up to 5 maintenance capex line names |
 | funding_line_labels | JSONB | Up to 4 |
 | ds_line_labels | JSONB | Up to 5 |
 | equity_line_labels | JSONB | Up to 4 |
@@ -591,7 +593,9 @@ The `deals` table is the central record. Fields organised by TopSheet section.
 ### Sector Subcategory Slots (56 slots)
 | revenue_1 to revenue_8 | Revenue lines | Up to 8 per deal |
 | cost_1 to cost_12 | Cost lines | Up to 12 per deal |
-| capex_1 to capex_5 | Capex lines | Up to 5 per deal |
+| capex_1 to capex_5 | Capex lines (legacy) | Up to 5 per deal |
+| growth_capex_1 to growth_capex_5 | Growth capex lines | Up to 5 per deal |
+| maintenance_capex_1 to maintenance_capex_5 | Maintenance capex lines | Up to 5 per deal |
 | funding_1 to funding_4 | Funding lines | Up to 4 per deal |
 | ds_1 to ds_5 | Debt service lines | Up to 5 per deal |
 | equity_1 to equity_4 | Equity lines | Up to 4 per deal |

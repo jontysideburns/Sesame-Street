@@ -210,6 +210,8 @@ const TABLES: Table[] = [
       { name: "revenue_line_labels", type: "JSONB" },
       { name: "cost_line_labels", type: "JSONB" },
       { name: "capex_line_labels", type: "JSONB" },
+      { name: "growth_capex_labels", type: "JSONB" },
+      { name: "maintenance_capex_labels", type: "JSONB" },
       { name: "sector_kpi_labels", type: "JSONB" },
     ],
   },
