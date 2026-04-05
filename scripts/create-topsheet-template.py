@@ -197,6 +197,18 @@ add_field(ws, r, "Reference Rate", guidance="SONIA, SOFR, Euribor, GILT"); r += 
 add_field(ws, r, "Facility Agent", guidance=""); r += 1
 add_field(ws, r, "Security Trustee", guidance=""); r += 1
 
+r += 1; make_section(ws, r, 3, "CHANGE OF CONTROL"); r += 1
+add_field(ws, r, "CoC Regime Exists", guidance="Yes/No", validation=dv_yesno); r += 1
+add_field(ws, r, "CoC Definition", guidance="How is 'control' defined?"); r += 1
+add_field(ws, r, "CoC Consequence", guidance="Mandatory prepayment, EoD, consent required"); r += 1
+add_field(ws, r, "CoC Prepayment Basis", guidance="par, make_whole, market_value"); r += 1
+
+r += 1; make_section(ws, r, 3, "EQUITY CURE & MODEL"); r += 1
+add_field(ws, r, "Equity Cure Available", guidance="Yes/No", validation=dv_yesno); r += 1
+add_field(ws, r, "Equity Cure Regime", guidance="Max frequency, amount limits, mechanism"); r += 1
+add_field(ws, r, "Model Version", guidance="e.g. v3.2"); r += 1
+add_field(ws, r, "Model Date", guidance="YYYY-MM-DD"); r += 1
+
 r += 1; make_section(ws, r, 3, "MONITORING"); r += 1
 add_field(ws, r, "Assigned HAM", guidance="Human Asset Manager"); r += 1
 add_field(ws, r, "Assigned PM", guidance="Portfolio Manager"); r += 1
@@ -508,9 +520,92 @@ for i, (section, note) in enumerate(sections, 3):
 
 
 # ═══════════════════════════════════════════════════════════════════
-# TAB 13A: Period Definition
+# TAB 13: Holdings & Allocations
 # ═══════════════════════════════════════════════════════════════════
-ws_pd = wb.create_sheet("13. Period Definition")
+ws_hold = wb.create_sheet("13. Holdings")
+ws_hold.merge_cells("A1:F1")
+ws_hold["A1"] = "HOLDINGS — Which accounts hold this deal and how much"
+ws_hold["A1"].font = version_font
+
+headers_hold = ["Account Name", "Holding Amount", "Instrument Name", "Tranche Amount", "Acquisition Date", "Acquisition Price"]
+for i, h in enumerate(headers_hold, 1):
+    cell = ws_hold.cell(row=2, column=i, value=h)
+    cell.font = hdr_font; cell.fill = hdr_fill; cell.border = border
+    cell.alignment = Alignment(wrap_text=True, vertical="top")
+add_table_rows(ws_hold, 3, 8, len(headers_hold))
+for c in range(1, len(headers_hold) + 1):
+    ws_hold.column_dimensions[get_column_letter(c)].width = 22
+
+# ═══════════════════════════════════════════════════════════════════
+# TAB 13B: Investor Allocations
+# ═══════════════════════════════════════════════════════════════════
+ws_inv = wb.create_sheet("13B. Investors")
+ws_inv.merge_cells("A1:F1")
+ws_inv["A1"] = "INVESTOR ALLOCATIONS — External investors and their mandates"
+ws_inv["A1"].font = version_font
+
+headers_inv = ["Investor Name", "Account / Mandate", "Tranche", "Amount", "Mandate Size", "% of Mandate"]
+for i, h in enumerate(headers_inv, 1):
+    cell = ws_inv.cell(row=2, column=i, value=h)
+    cell.font = hdr_font; cell.fill = hdr_fill; cell.border = border
+    cell.alignment = Alignment(wrap_text=True, vertical="top")
+add_table_rows(ws_inv, 3, 8, len(headers_inv))
+for c in range(1, len(headers_inv) + 1):
+    ws_inv.column_dimensions[get_column_letter(c)].width = 22
+
+# ═══════════════════════════════════════════════════════════════════
+# TAB 13C: Intercreditor Terms
+# ═══════════════════════════════════════════════════════════════════
+ws_ica = wb.create_sheet("13C. Intercreditor")
+ws_ica.column_dimensions["A"].width = 30
+ws_ica.column_dimensions["B"].width = 40
+ws_ica.column_dimensions["C"].width = 45
+ws_ica.merge_cells("A1:C1")
+ws_ica["A1"] = "INTERCREDITOR TERMS"
+ws_ica["A1"].font = version_font
+
+r = 2
+make_header(ws_ica, r, 3)
+ws_ica.cell(row=r, column=1, value="Provision")
+ws_ica.cell(row=r, column=2, value="Value")
+ws_ica.cell(row=r, column=3, value="Guidance")
+r = 3
+add_field(ws_ica, r, "Agreement Type", guidance="ICA, STID, Common Terms"); r += 1
+add_field(ws_ica, r, "Governing Law", guidance="English, New York, etc."); r += 1
+add_field(ws_ica, r, "Enforcement Standstill (days)", guidance="e.g. 180"); r += 1
+add_field(ws_ica, r, "Non-Petition Clause", guidance="Yes/No", validation=dv_yesno); r += 1
+add_field(ws_ica, r, "Turnover Provisions", guidance="Description"); r += 1
+add_field(ws_ica, r, "Permitted Payments", guidance="Description"); r += 1
+add_field(ws_ica, r, "Release Conditions", guidance="Description"); r += 1
+add_field(ws_ica, r, "Subrogation Rights", guidance="Description"); r += 1
+
+# ═══════════════════════════════════════════════════════════════════
+# TAB 13D: Enforcement Classes
+# ═══════════════════════════════════════════════════════════════════
+ws_ec = wb.create_sheet("13D. Enforcement Classes")
+ws_ec.merge_cells("A1:F1")
+ws_ec["A1"] = "ENFORCEMENT CLASSES — For multi-class capital structures (WBS, bond structures)"
+ws_ec["A1"].font = version_font
+
+headers_ec = ["Class Name", "Class Code", "Priority", "Included Instruments", "Distribution Conditions", "Notes"]
+for i, h in enumerate(headers_ec, 1):
+    cell = ws_ec.cell(row=2, column=i, value=h)
+    cell.font = hdr_font; cell.fill = hdr_fill; cell.border = border
+    cell.alignment = Alignment(wrap_text=True, vertical="top")
+add_table_rows(ws_ec, 3, 5, len(headers_ec))
+ws_ec.column_dimensions["A"].width = 22
+ws_ec.column_dimensions["B"].width = 12
+ws_ec.column_dimensions["C"].width = 10
+ws_ec.column_dimensions["D"].width = 35
+ws_ec.column_dimensions["E"].width = 35
+ws_ec.column_dimensions["F"].width = 30
+
+# ═══════════════════════════════════════════════════════════════════
+# TAB 14: Period Definition (was 13A)
+# ═══════════════════════════════════════════════════════════════════
+ws_pd = wb.create_sheet("14. Period Definition")
+# ═══════════════════════════════════════════════════════════════════
+# Old 13. Period Definition tab already created above as 14
 ws_pd.merge_cells("A1:D1")
 ws_pd["A1"] = "REPORTING PERIOD CALENDAR — Define the period structure before entering forecast data"
 ws_pd["A1"].font = version_font
@@ -649,10 +744,10 @@ thin_grid = Side(style="thin", color="DDDDDD")
 border_grid = Border(top=thin_grid, bottom=thin_grid, left=thin_grid, right=thin_grid)
 
 CASE_TABS = [
-    ("14. Management Case", "MANAGEMENT CASE FORECAST — Line items (rows) x periods (columns). Values in deal currency."),
-    ("15. Credit Case", "CREDIT CASE FORECAST — Stress assumptions applied to management case."),
-    ("16. Combined Downside", "COMBINED DOWNSIDE FORECAST — Worst-case scenario across all risk factors."),
-    ("17. Actuals", "ACTUAL REPORTED DATA — From compliance certificates and financial statements."),
+    ("15. Management Case", "MANAGEMENT CASE FORECAST — Line items (rows) x periods (columns). Values in deal currency."),
+    ("16. Credit Case", "CREDIT CASE FORECAST — Stress assumptions applied to management case."),
+    ("17. Combined Downside", "COMBINED DOWNSIDE FORECAST — Worst-case scenario across all risk factors."),
+    ("18. Actuals", "ACTUAL REPORTED DATA — From compliance certificates and financial statements."),
 ]
 
 for tab_name, tab_desc in CASE_TABS:
@@ -734,7 +829,7 @@ for tab_name, tab_desc in CASE_TABS:
 # ═══════════════════════════════════════════════════════════════════
 # TAB 18: Key Risks
 # ═══════════════════════════════════════════════════════════════════
-ws_risk = wb.create_sheet("18. Key Risks")
+ws_risk = wb.create_sheet("19. Key Risks")
 ws_risk.merge_cells("A1:L1")
 ws_risk["A1"] = "KEY RISKS — Record the main risks as you see them. You do not need to complete all 236 taxonomy items. Focus on the risks that matter most for this deal."
 ws_risk["A1"].font = version_font
