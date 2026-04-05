@@ -731,6 +731,93 @@ for tab_name, tab_desc in CASE_TABS:
     ws_fc.freeze_panes = "C3"
 
 
+# ═══════════════════════════════════════════════════════════════════
+# TAB 18: Key Risks
+# ═══════════════════════════════════════════════════════════════════
+ws_risk = wb.create_sheet("18. Key Risks")
+ws_risk.merge_cells("A1:L1")
+ws_risk["A1"] = "KEY RISKS — Record the main risks as you see them. You do not need to complete all 236 taxonomy items. Focus on the risks that matter most for this deal."
+ws_risk["A1"].font = version_font
+ws_risk["A1"].alignment = Alignment(wrap_text=True)
+ws_risk.row_dimensions[1].height = 35
+
+headers_risk = [
+    "Risk ID", "Risk Name", "Category", "Description",
+    "Likelihood (1-5)", "Severity (1-6)", "Risk Score",
+    "Trend", "Mitigation Party", "Mitigation Detail",
+    "Capital at Risk", "Monitoring KPI"
+]
+for i, h in enumerate(headers_risk, 1):
+    cell = ws_risk.cell(row=2, column=i, value=h)
+    cell.font = hdr_font
+    cell.fill = hdr_fill
+    cell.border = border
+    cell.alignment = Alignment(wrap_text=True, vertical="top")
+
+# Notes row
+notes_risk = [
+    "From taxonomy (e.g. RISK-MK-024) or custom",
+    "Short name",
+    "Credit & Financial, Structural, Operational, Market & Macro, Regulatory, ESG, Sector-Specific",
+    "What is the risk and how does it apply to this deal?",
+    "1=Remote, 2=Unlikely, 3=Possible, 4=Likely, 5=Almost Certain",
+    "1=Negligible, 2=Low, 3=Moderate, 4=High, 5=Critical, 6=Fatal",
+    "Likelihood x Severity (auto or manual)",
+    "improving, stable, deteriorating",
+    "M1=None, M2=Reputational, M3=Contractual, M4=Insured, M5=Guaranteed",
+    "Who mitigates and how?",
+    "C1=None, C2=Comfort, C3=Reserve, C4=Funded, C5=Overcollateralised",
+    "KPI to watch for early warning"
+]
+for i, n in enumerate(notes_risk, 1):
+    cell = ws_risk.cell(row=3, column=i, value=n)
+    cell.font = note_font
+    cell.border = border
+    cell.alignment = Alignment(wrap_text=True, vertical="top")
+ws_risk.row_dimensions[3].height = 45
+
+# Validations
+dv_likelihood = DataValidation(type="list", formula1='"1,2,3,4,5"')
+dv_severity = DataValidation(type="list", formula1='"1,2,3,4,5,6"')
+dv_risk_cat = DataValidation(type="list", formula1='"Credit & Financial,Structural & Documentation,Business & Operational,Market & Macroeconomic,Regulatory & Legal,ESG & Climate,Sector-Specific"')
+dv_trend_risk = DataValidation(type="list", formula1='"improving,stable,deteriorating"')
+dv_mit_party = DataValidation(type="list", formula1='"M1 - None,M2 - Reputational,M3 - Contractual,M4 - Insured,M5 - Guaranteed/Sovereign"')
+dv_mit_capital = DataValidation(type="list", formula1='"C1 - None,C2 - Comfort,C3 - Reserve,C4 - Funded,C5 - Overcollateralised"')
+
+add_table_rows(ws_risk, 4, 20, len(headers_risk), {
+    3: dv_risk_cat,
+    5: dv_likelihood,
+    6: dv_severity,
+    8: dv_trend_risk,
+    9: dv_mit_party,
+    11: dv_mit_capital,
+})
+
+# Column widths
+col_widths_risk = [14, 25, 22, 40, 12, 12, 10, 12, 20, 35, 20, 25]
+for i, w in enumerate(col_widths_risk, 1):
+    ws_risk.column_dimensions[get_column_letter(i)].width = w
+
+# Add risk score formula (Likelihood x Severity) for all 20 rows
+for r in range(4, 24):
+    ws_risk.cell(row=r, column=7, value=f"=IF(AND(E{r}<>\"\",F{r}<>\"\"),E{r}*F{r},\"\")")
+    ws_risk.cell(row=r, column=7).font = Font(size=10, bold=True, name="Arial")
+    ws_risk.cell(row=r, column=7).fill = computed_fill
+
+# Freeze header
+ws_risk.freeze_panes = "A4"
+
+# Update Validation tab to include Key Risks
+ws13 = wb["Validation"]
+next_row = 15  # After existing 12 sections
+ws13.cell(row=next_row, column=1, value="18. Key Risks").font = label_font
+ws13.cell(row=next_row, column=1).border = border
+ws13.cell(row=next_row, column=2).border = border
+ws13.cell(row=next_row, column=2).fill = input_fill
+ws13.cell(row=next_row, column=3, value="Top 5-10 risks recommended. Include forecast optimism if relevant.").font = note_font
+ws13.cell(row=next_row, column=3).border = border
+
+
 # Save
 import os
 out = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs", "topsheet-data-template.xlsx")
