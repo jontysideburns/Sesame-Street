@@ -507,6 +507,230 @@ for i, (section, note) in enumerate(sections, 3):
     ws13.cell(row=i, column=3).border = border
 
 
+# ═══════════════════════════════════════════════════════════════════
+# TAB 13A: Period Definition
+# ═══════════════════════════════════════════════════════════════════
+ws_pd = wb.create_sheet("13. Period Definition")
+ws_pd.merge_cells("A1:D1")
+ws_pd["A1"] = "REPORTING PERIOD CALENDAR — Define the period structure before entering forecast data"
+ws_pd["A1"].font = version_font
+
+r = 2
+make_header(ws_pd, r, 4)
+ws_pd.cell(row=r, column=1, value="Field")
+ws_pd.cell(row=r, column=2, value="Value")
+ws_pd.cell(row=r, column=3, value="Guidance")
+ws_pd.column_dimensions["A"].width = 30
+ws_pd.column_dimensions["B"].width = 25
+ws_pd.column_dimensions["C"].width = 50
+
+r = 3
+dv_periodicity = DataValidation(type="list", formula1='"semi_annual,quarterly,annual"')
+add_field(ws_pd, r, "Periodicity *", True, "Frequency of reporting periods", dv_periodicity); r += 1
+add_field(ws_pd, r, "First Period Start *", True, "YYYY-MM-DD"); r += 1
+add_field(ws_pd, r, "Final Period End *", True, "YYYY-MM-DD (maturity or concession expiry)"); r += 1
+add_field(ws_pd, r, "Fiscal Year End Month *", True, "1-12"); r += 1
+add_field(ws_pd, r, "Total Periods", guidance="Auto-calculated or enter manually (max 80)"); r += 1
+add_field(ws_pd, r, "Reporting Lag Days", guidance="Days after period end until report expected (default 45)"); r += 1
+
+r += 2
+ws_pd.merge_cells(start_row=r, start_column=1, end_row=r, end_column=3)
+ws_pd.cell(row=r, column=1, value="PERIOD HEADERS — Fill in below. These become column headers on forecast tabs. Max 80 periods.").font = note_font
+r += 1
+
+make_header(ws_pd, r, 4)
+ws_pd.cell(row=r, column=1, value="#")
+ws_pd.cell(row=r, column=2, value="Period Label")
+ws_pd.cell(row=r, column=3, value="Period Start")
+ws_pd.cell(row=r, column=4, value="Period End")
+r += 1
+
+for p in range(1, 81):
+    ws_pd.cell(row=r, column=1, value=p).font = label_font
+    ws_pd.cell(row=r, column=1).border = border
+    for c in range(2, 5):
+        cell = ws_pd.cell(row=r, column=c)
+        cell.border = border
+        cell.fill = input_fill
+        cell.font = input_font
+    r += 1
+
+
+# ═══════════════════════════════════════════════════════════════════
+# FORECAST GRID TABS — One per case
+# ═══════════════════════════════════════════════════════════════════
+
+# Define the cashflow line items (rows)
+CASHFLOW_ROWS = [
+    # (section_header, line_key, label, is_section, is_computed)
+    ("OPERATING CASH FLOW", None, None, True, False),
+    (None, "total_revenue", "Total Revenue", False, True),
+    (None, "amort_deferred_income", "Amortisation of Deferred Income", False, False),
+    (None, "total_operating_costs", "Total Operating Costs", False, True),
+    (None, "disallowed_costs", "Disallowed Costs", False, False),
+    (None, "exceptional_items", "Exceptional Items", False, False),
+    (None, "ebitda", "EBITDA", False, True),
+    ("CAPITAL EXPENDITURE", None, None, True, False),
+    (None, "capital_expenditure", "Capital Expenditure", False, True),
+    (None, "charger_replacement_costs", "Charger / Equipment Replacement", False, False),
+    ("WORKING CAPITAL, RESERVES & TAX", None, None, True, False),
+    (None, "working_capital_movement", "Working Capital Movement", False, False),
+    (None, "reserve_account_movements", "Reserve Account Movements", False, False),
+    (None, "pre_finance_pre_tax_cf", "Pre-Finance, Pre-Tax Cash Flow", False, True),
+    (None, "tax_paid", "Tax Paid", False, False),
+    (None, "pre_finance_post_tax_cf", "Pre-Finance, Post-Tax Cash Flow", False, True),
+    ("ADDITIONAL SOURCES / INCOME", None, None, True, False),
+    (None, "interest_on_cash", "Interest on Cash Balances", False, False),
+    (None, "customer_prepayment", "Customer Pre-Payments", False, False),
+    (None, "grant_income", "Grant / Subsidy Income", False, False),
+    ("FUNDING SOURCES", None, None, True, False),
+    (None, "senior_debt_drawdown", "Senior Debt Drawdown", False, False),
+    (None, "capex_facility_drawdown", "Capex Facility Drawdown", False, False),
+    (None, "junior_debt_drawdown", "Junior / Mezzanine Debt Drawdown", False, False),
+    (None, "shareholder_loan_drawdown", "Shareholder Loan Drawdown", False, False),
+    (None, "equity_drawdown", "Equity Drawdown", False, False),
+    (None, "total_funding", "Total Funding", False, True),
+    ("CASH AVAILABLE FOR DEBT SERVICE", None, None, True, False),
+    (None, "cfads", "CFADS", False, True),
+    ("SENIOR DEBT SERVICE", None, None, True, False),
+    (None, "senior_interest", "Senior Interest", False, False),
+    (None, "senior_principal", "Senior Principal (Scheduled)", False, False),
+    (None, "senior_debt_service", "Total Senior Debt Service", False, True),
+    (None, "cf_after_senior_ds", "CF After Senior Debt Service", False, True),
+    (None, "senior_principal_sweep", "Senior Cash Sweep", False, False),
+    ("JUNIOR DEBT SERVICE", None, None, True, False),
+    (None, "junior_interest", "Junior Interest", False, False),
+    (None, "junior_principal", "Junior Principal", False, False),
+    (None, "junior_debt_service", "Total Junior Debt Service", False, True),
+    (None, "cf_after_junior_ds", "CF After Junior Debt Service", False, True),
+    (None, "junior_principal_sweep", "Junior Cash Sweep", False, False),
+    ("SHAREHOLDER & INTERCOMPANY", None, None, True, False),
+    (None, "shareholder_loan_interest", "Shareholder Loan Interest", False, False),
+    (None, "shareholder_loan_repayment", "Shareholder Loan Repayment", False, False),
+    (None, "intercompany_interest_net", "Intercompany Interest (Net)", False, False),
+    ("OTHER FEES & COSTS", None, None, True, False),
+    (None, "ticking_commitment_fees", "Ticking / Commitment Fees", False, False),
+    (None, "debt_arrangement_fees", "Debt Arrangement Fees", False, False),
+    (None, "liquidity_facility_drawdown", "Liquidity Facility Drawdown", False, False),
+    ("NET CASHFLOW & CLOSING", None, None, True, False),
+    (None, "net_cashflow", "Net Cashflow", False, True),
+    (None, "cash_bf", "Opening Cash Balance", False, False),
+    (None, "distributions", "Distributions", False, False),
+    (None, "share_capital_redemption", "Share Capital Redemption", False, False),
+    (None, "cash_cf", "Closing Cash Balance", False, True),
+    ("COVENANT RATIOS", None, None, True, False),
+    (None, "senior_dscr", "Senior DSCR", False, True),
+    (None, "senior_annual_dscr", "Senior Annual DSCR", False, True),
+    (None, "net_debt_ebitda", "Net Debt / EBITDA", False, True),
+    (None, "llcr", "LLCR", False, True),
+    ("SECTOR KPIs", None, None, True, False),
+    (None, "sector_kpi_1", "Sector KPI 1", False, False),
+    (None, "sector_kpi_2", "Sector KPI 2", False, False),
+    (None, "sector_kpi_3", "Sector KPI 3", False, False),
+    (None, "sector_kpi_4", "Sector KPI 4", False, False),
+    (None, "sector_kpi_5", "Sector KPI 5", False, False),
+    (None, "sector_kpi_6", "Sector KPI 6", False, False),
+    (None, "sector_kpi_7", "Sector KPI 7", False, False),
+    (None, "sector_kpi_8", "Sector KPI 8", False, False),
+    (None, "sector_kpi_9", "Sector KPI 9", False, False),
+    (None, "sector_kpi_10", "Sector KPI 10", False, False),
+]
+
+NUM_PERIODS = 80
+
+section_fill_grid = PatternFill("solid", fgColor="1F6FA5")
+section_font_grid = Font(bold=True, size=9, name="Arial", color="FFFFFF")
+row_label_font = Font(size=9, name="Arial", bold=True)
+row_sub_font = Font(size=9, name="Arial")
+computed_row_font = Font(size=9, name="Arial", italic=True, color="888888")
+cell_input_fill = PatternFill("solid", fgColor="FFFFEE")
+cell_font = Font(size=9, color="0000FF", name="Arial")
+thin_grid = Side(style="thin", color="DDDDDD")
+border_grid = Border(top=thin_grid, bottom=thin_grid, left=thin_grid, right=thin_grid)
+
+CASE_TABS = [
+    ("14. Management Case", "MANAGEMENT CASE FORECAST — Line items (rows) x periods (columns). Values in deal currency."),
+    ("15. Credit Case", "CREDIT CASE FORECAST — Stress assumptions applied to management case."),
+    ("16. Combined Downside", "COMBINED DOWNSIDE FORECAST — Worst-case scenario across all risk factors."),
+    ("17. Actuals", "ACTUAL REPORTED DATA — From compliance certificates and financial statements."),
+]
+
+for tab_name, tab_desc in CASE_TABS:
+    ws_fc = wb.create_sheet(tab_name)
+
+    # Title row
+    ws_fc.merge_cells(start_row=1, start_column=1, end_row=1, end_column=5)
+    ws_fc["A1"] = tab_desc
+    ws_fc["A1"].font = version_font
+    ws_fc["A1"].alignment = Alignment(wrap_text=True)
+    ws_fc.row_dimensions[1].height = 30
+
+    # Column A = line key, Column B = label, Columns C onwards = periods
+    ws_fc.column_dimensions["A"].width = 22
+    ws_fc.column_dimensions["B"].width = 30
+
+    # Header row: line_key | label | Period 1 | Period 2 | ... | Period 80
+    header_row = 2
+    ws_fc.cell(row=header_row, column=1, value="Line Key").font = hdr_font
+    ws_fc.cell(row=header_row, column=1).fill = hdr_fill
+    ws_fc.cell(row=header_row, column=1).border = border_grid
+    ws_fc.cell(row=header_row, column=2, value="Line Item").font = hdr_font
+    ws_fc.cell(row=header_row, column=2).fill = hdr_fill
+    ws_fc.cell(row=header_row, column=2).border = border_grid
+
+    for p in range(1, NUM_PERIODS + 1):
+        col = p + 2
+        cell = ws_fc.cell(row=header_row, column=col, value=f"Period {p}")
+        cell.font = Font(bold=True, size=8, name="Arial", color="FFFFFF")
+        cell.fill = hdr_fill
+        cell.border = border_grid
+        cell.alignment = Alignment(horizontal="center")
+        ws_fc.column_dimensions[get_column_letter(col)].width = 11
+
+    # Data rows
+    data_row = 3
+    for item in CASHFLOW_ROWS:
+        section_header, line_key, label, is_section, is_computed = item
+
+        if is_section:
+            # Section header row — spans all columns
+            ws_fc.cell(row=data_row, column=1, value="").border = border_grid
+            ws_fc.cell(row=data_row, column=1).fill = section_fill_grid
+            ws_fc.cell(row=data_row, column=2, value=section_header).font = section_font_grid
+            ws_fc.cell(row=data_row, column=2).fill = section_fill_grid
+            ws_fc.cell(row=data_row, column=2).border = border_grid
+            for p in range(1, NUM_PERIODS + 1):
+                cell = ws_fc.cell(row=data_row, column=p + 2)
+                cell.fill = section_fill_grid
+                cell.border = border_grid
+        else:
+            # Data row
+            ws_fc.cell(row=data_row, column=1, value=line_key).font = Font(size=8, name="Arial", color="888888")
+            ws_fc.cell(row=data_row, column=1).border = border_grid
+
+            label_cell = ws_fc.cell(row=data_row, column=2, value=label)
+            label_cell.border = border_grid
+            if is_computed:
+                label_cell.font = computed_row_font
+            else:
+                label_cell.font = row_label_font
+
+            for p in range(1, NUM_PERIODS + 1):
+                cell = ws_fc.cell(row=data_row, column=p + 2)
+                cell.border = border_grid
+                if is_computed:
+                    cell.fill = computed_fill
+                    cell.font = computed_font
+                else:
+                    cell.fill = cell_input_fill
+                    cell.font = cell_font
+
+        data_row += 1
+
+    # Freeze panes: freeze column A+B and header row
+    ws_fc.freeze_panes = "C3"
+
+
 # Save
 import os
 out = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs", "topsheet-data-template.xlsx")
