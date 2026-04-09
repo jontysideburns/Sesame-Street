@@ -610,9 +610,8 @@ export default async function DealPage({
                           {entry.severity}
                         </span>
                       </div>
-                      <p>{entry.summary}</p>
-                      <p className="meta-note">
-                        {entry.ownerName} · next review {entry.nextReviewDate}
+                      <p style={{ fontSize: "0.8rem", lineHeight: 1.5 }}>
+                        {entry.generatedNarrative ?? entry.summary}
                       </p>
                     </div>
                   ))}

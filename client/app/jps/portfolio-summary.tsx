@@ -143,19 +143,33 @@ function TreemapContent(props: {
   name: string; value: number; fill: string;
 }) {
   const { x, y, width, height, name, value, fill } = props;
-  if (width < 50 || height < 30) return null;
+  if (width <= 0 || height <= 0) return null;
+  const showFullLabels = width >= 50 && height >= 30;
+  const showShortLabel = !showFullLabels && width >= 24 && height >= 18;
   return (
     <g>
-      <rect x={x} y={y} width={width} height={height} rx={6}
-        style={{ fill, stroke: "rgba(255,255,255,0.4)", strokeWidth: 1 }} />
-      <text x={x + width / 2} y={y + height / 2 - 7} textAnchor="middle"
-        style={{ fontSize: width < 80 ? 10 : 12, fill: "#fff", fontWeight: 700 }}>
-        {name}
-      </text>
-      <text x={x + width / 2} y={y + height / 2 + 10} textAnchor="middle"
-        style={{ fontSize: width < 80 ? 9 : 11, fill: "rgba(255,255,255,0.8)" }}>
-        {fmtCompact(value)}
-      </text>
+      <rect x={x} y={y} width={width} height={height} rx={Math.min(6, width / 4, height / 4)}
+        style={{ fill, stroke: "rgba(255,255,255,0.4)", strokeWidth: 1 }}>
+        <title>{`${name}: ${fmtCompact(value)}`}</title>
+      </rect>
+      {showFullLabels && (
+        <>
+          <text x={x + width / 2} y={y + height / 2 - 7} textAnchor="middle"
+            style={{ fontSize: width < 80 ? 10 : 12, fill: "#fff", fontWeight: 700 }}>
+            {name}
+          </text>
+          <text x={x + width / 2} y={y + height / 2 + 10} textAnchor="middle"
+            style={{ fontSize: width < 80 ? 9 : 11, fill: "rgba(255,255,255,0.8)" }}>
+            {fmtCompact(value)}
+          </text>
+        </>
+      )}
+      {showShortLabel && (
+        <text x={x + width / 2} y={y + height / 2 + 3} textAnchor="middle"
+          style={{ fontSize: 9, fill: "#fff", fontWeight: 600 }}>
+          {name.length > 4 ? name.slice(0, 3) : name}
+        </text>
+      )}
     </g>
   );
 }

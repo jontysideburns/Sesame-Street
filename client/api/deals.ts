@@ -137,6 +137,7 @@ export type DealResponse = {
       ownerName: string;
       title: string;
       summary: string;
+      generatedNarrative: string | null;
       mitigant: string;
       nextReviewDate: string;
       openedAt: string;

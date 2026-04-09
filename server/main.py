@@ -4979,6 +4979,109 @@ def serialize_document_supersession(row):
     }
 
 
+_LIKELIHOOD_PHRASE = {
+    1: "is remote",
+    2: "is unlikely",
+    3: "is possible",
+    4: "is likely",
+    5: "is almost certain",
+}
+_SEVERITY_PHRASE = {
+    1: "negligible capital impact",
+    2: "low capital impact",
+    3: "moderate capital impact",
+    4: "high capital impact",
+    5: "critical capital impact",
+    6: "fatal capital impact",
+}
+_TREND_PHRASE = {
+    "improving": "The risk has been improving over recent reviews",
+    "stable": "The risk has remained stable over recent reviews",
+    "deteriorating": "The risk has been deteriorating over recent reviews",
+    "deteriorating_rapidly": "The risk has been deteriorating rapidly over recent reviews",
+    "new": "This is a newly identified risk",
+}
+_CATEGORY_PHRASE = {
+    "Credit & Financial": "credit and financial",
+    "Market & Macro": "market and macroeconomic",
+    "Market & Macroeconomic": "market and macroeconomic",
+    "Business & Operational": "business and operational",
+    "Regulatory & Legal": "regulatory and legal",
+    "ESG & Climate": "ESG and climate",
+    "Structural & Documentation": "structural and documentation",
+    "Sector-Specific": "sector-specific",
+    "Contract & Concession Renewal": "contract and concession renewal",
+}
+
+def _score_band(score):
+    if score is None:
+        return "unscored"
+    s = int(score)
+    if s <= 4: return "low"
+    if s <= 9: return "medium"
+    if s <= 14: return "high"
+    if s <= 19: return "very high"
+    return "critical"
+
+
+def generate_risk_narrative(row):
+    """Template-driven narrative synthesis from the structured risk register fields.
+
+    Deterministic, auditable, does not depend on free-text summary. The generator
+    assembles sentences from likelihood/severity/score/trend/category/mitigant/KPI
+    using fixed phrase templates.
+    """
+    if not row:
+        return None
+
+    title = row.get("title") or "This risk"
+    cat = _CATEGORY_PHRASE.get(row.get("risk_category") or "", "this category")
+    likelihood = row.get("likelihood") or row.get("probability")
+    severity = row.get("severity") or row.get("impact")
+    score = row.get("score")
+    trend = row.get("trend")
+    kpi = row.get("monitoring_kpi")
+    mitigant = row.get("mitigant")
+    owner = row.get("owner_name")
+    next_rev = row.get("next_review_date")
+
+    parts = []
+
+    # Sentence 1 — classification
+    parts.append(
+        f"{title} is a {cat} risk currently scored {_score_band(score)}"
+        f"{' (' + str(int(score)) + '/30)' if score is not None else ''}."
+    )
+
+    # Sentence 2 — likelihood & severity
+    if likelihood and severity:
+        parts.append(
+            f"The probability of occurrence {_LIKELIHOOD_PHRASE.get(int(likelihood), 'is unclear')} "
+            f"({int(likelihood)}/5) with {_SEVERITY_PHRASE.get(int(severity), 'unknown impact')} "
+            f"if it crystallises ({int(severity)}/6)."
+        )
+
+    # Sentence 3 — trend
+    if trend and trend in _TREND_PHRASE:
+        parts.append(_TREND_PHRASE[trend] + ".")
+
+    # Sentence 4 — monitoring KPI
+    if kpi:
+        parts.append(f"Monitored via the \"{kpi}\" indicator.")
+
+    # Sentence 5 — mitigant
+    if mitigant and mitigant.strip() and mitigant.strip().lower() not in ("none", "n/a", "-"):
+        parts.append(f"Mitigant in place: {mitigant}.")
+
+    # Sentence 6 — ownership
+    if owner and next_rev:
+        parts.append(f"Owned by {owner}; next review scheduled for {next_rev.isoformat() if hasattr(next_rev, 'isoformat') else next_rev}.")
+    elif owner:
+        parts.append(f"Owned by {owner}.")
+
+    return " ".join(parts)
+
+
 def serialize_risk_entry(row):
     if not row:
         return None
@@ -4993,6 +5096,7 @@ def serialize_risk_entry(row):
         "ownerName": row["owner_name"],
         "title": row["title"],
         "summary": row["summary"],
+        "generatedNarrative": generate_risk_narrative(row),
         "mitigant": row["mitigant"],
         "nextReviewDate": row["next_review_date"].isoformat(),
         "openedAt": row["opened_at"].isoformat(),
@@ -19248,6 +19352,27 @@ def assess_distribution(slug: str):
 # ── 4F. Trend Detection ───────────────────────────────────────────────────
 # Analyses metrics across periods to detect deteriorating/improving trends.
 
+# Metric direction preferences — which direction is "good"
+_METRIC_DIRECTION = {
+    # higher is better
+    "dscr": "higher", "llcr": "higher", "plcr": "higher", "icr": "higher",
+    "revenue": "higher", "ebitda": "higher", "cfads": "higher", "net_income": "higher",
+    "ebitda_margin": "higher",
+    # lower is better
+    "opex": "lower", "capex": "lower", "debt_service": "lower",
+    "net_debt_ebitda": "lower", "leverage": "lower", "ltv": "lower",
+}
+
+# Breach thresholds for covenant-aware signalling. Applied when the metric
+# dips below (for higher-is-better) or above (for lower-is-better) the level.
+_BREACH_THRESHOLDS = {
+    "dscr": {"default": 1.00, "lockup": 1.20, "preference": "higher"},
+    "llcr": {"default": 1.10, "lockup": 1.20, "preference": "higher"},
+    "icr": {"default": 1.50, "lockup": 2.00, "preference": "higher"},
+    "net_debt_ebitda": {"default": 8.00, "lockup": 6.00, "preference": "lower"},
+}
+
+
 @app.post("/api/deals/{slug}/analytics/detect-trends")
 def detect_trends(slug: str, body: dict | None = None):
     """Detect trends across the last N periods for key metrics.
@@ -19255,7 +19380,7 @@ def detect_trends(slug: str, body: dict | None = None):
     periods_back = (body or {}).get("periodsBack", 4)
     target_metrics = (body or {}).get("metrics", [
         "dscr", "llcr", "plcr", "revenue", "ebitda", "cfads",
-        "opex", "capex", "debt_service", "net_income",
+        "opex", "capex", "debt_service", "net_income", "net_debt_ebitda",
     ])
 
     with get_connection() as conn:
@@ -19300,14 +19425,26 @@ def detect_trends(slug: str, body: dict | None = None):
             total_change = values[-1] - values[0]
             total_change_pct = round((total_change / values[0]) * 100, 2) if values[0] != 0 else 0
 
-            if second_half > first_half * 1.03:
-                direction = "improving"
-            elif second_half < first_half * 0.97:
-                direction = "deteriorating"
-            else:
-                direction = "stable"
+            # Direction preference: which way is "good" for this metric?
+            preference = _METRIC_DIRECTION.get(metric, "higher")
 
-            # Severity for deteriorating metrics
+            # Raw numerical move
+            if second_half > first_half * 1.03:
+                move = "up"
+            elif second_half < first_half * 0.97:
+                move = "down"
+            else:
+                move = "flat"
+
+            # Map move to direction using preference
+            if move == "flat":
+                direction = "stable"
+            elif (move == "up" and preference == "higher") or (move == "down" and preference == "lower"):
+                direction = "improving"
+            else:
+                direction = "deteriorating"
+
+            # Severity based on magnitude and direction
             abs_change = abs(total_change_pct)
             if direction == "deteriorating":
                 severity = "critical" if abs_change > 20 else "high" if abs_change > 10 else "moderate" if abs_change > 5 else "low"
@@ -19316,6 +19453,62 @@ def detect_trends(slug: str, body: dict | None = None):
 
             trend_type = "monotonic" if all(values[i] >= values[i-1] for i in range(1, len(values))) or \
                          all(values[i] <= values[i-1] for i in range(1, len(values))) else "volatile"
+
+            # ── Covenant-aware breach / recovery detection ────────────────
+            breach_info = None
+            th = _BREACH_THRESHOLDS.get(metric)
+            if th:
+                default_level = th["default"]
+                lockup_level = th["lockup"]
+                pref = th["preference"]
+
+                def is_breach(v, level):
+                    return (v < level) if pref == "higher" else (v > level)
+
+                breached_periods = [i for i, v in enumerate(values) if is_breach(v, default_level)]
+                lockup_periods = [i for i, v in enumerate(values) if is_breach(v, lockup_level)]
+                latest_breached = len(values) > 0 and is_breach(values[-1], default_level)
+                latest_lockup = len(values) > 0 and is_breach(values[-1], lockup_level)
+                ever_breached = len(breached_periods) > 0
+                ever_lockup = len(lockup_periods) > 0
+
+                if latest_breached:
+                    state = "currently_breached"
+                elif latest_lockup:
+                    state = "currently_lockup"
+                elif ever_breached:
+                    state = "breached_and_recovered"
+                elif ever_lockup:
+                    state = "lockup_and_recovered"
+                else:
+                    state = "always_compliant"
+
+                worst_value = min(values) if pref == "higher" else max(values)
+                worst_period_idx = values.index(worst_value)
+                worst_period = actuals[worst_period_idx]["period_label"] if worst_period_idx < len(actuals) else None
+                current_value = values[-1]
+                distance_to_default = (current_value - default_level) if pref == "higher" else (default_level - current_value)
+
+                breach_info = {
+                    "state": state,
+                    "defaultLevel": default_level,
+                    "lockupLevel": lockup_level,
+                    "everBreachedDefault": ever_breached,
+                    "everBreachedLockup": ever_lockup,
+                    "periodsInBreach": len(breached_periods),
+                    "worstValue": worst_value,
+                    "worstPeriod": worst_period,
+                    "currentValue": current_value,
+                    "distanceToDefault": round(distance_to_default, 4),
+                }
+
+                # Promote severity for covenant metrics that have been breached
+                if state == "currently_breached":
+                    severity = "critical"
+                    direction = "deteriorating" if direction != "deteriorating" else direction
+                elif state == "breached_and_recovered":
+                    if severity == "none":
+                        severity = "moderate"
 
             trend = {
                 "metricKey": metric,
@@ -19326,6 +19519,8 @@ def detect_trends(slug: str, body: dict | None = None):
                 "severity": severity,
                 "values": values,
                 "periodLabels": [a["period_label"] for a in actuals[:len(values)]],
+                "directionPreference": preference,
+                "breach": breach_info,
             }
             trends.append(trend)
 

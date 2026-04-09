@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { ReactNode } from "react";
 import Script from "next/script";
 import { SidebarNav } from "../components/sidebar-nav";
+import FindInPage from "../components/find-in-page";
 import { getViewerDirectory } from "../api/entitlements";
 import { getUiConfigBootstrapScript } from "../lib/ux-config";
 
@@ -29,6 +30,7 @@ export default async function RootLayout({
           <SidebarNav viewerDirectory={viewerDirectory} />
           <div className="app-main">{children}</div>
         </div>
+        <FindInPage />
       </body>
     </html>
   );

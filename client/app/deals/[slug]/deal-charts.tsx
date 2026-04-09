@@ -76,9 +76,12 @@ function ChartTooltipContent({ active, payload, label }: any) {
   );
 }
 
+type Horizon = "5" | "10" | "max";
+
 export default function DealCharts({ slug, currency, lockupLevel, defaultLevel }: Props) {
   const [data, setData] = useState<PeriodData[]>([]);
   const [loading, setLoading] = useState(true);
+  const [horizon, setHorizon] = useState<Horizon>("10");
 
   const sym = CURRENCY_SYMBOLS[currency ?? "USD"] ?? "$";
 
@@ -178,14 +181,51 @@ export default function DealCharts({ slug, currency, lockupLevel, defaultLevel }
   if (loading) return <div style={{ padding: 20, color: "var(--ink-soft)", fontSize: "0.82rem" }}>Loading charts...</div>;
   if (data.length === 0) return null;
 
-  const hasActuals = data.some((d) => d.a_revenue != null);
-  const hasLeverage = data.some((d) => d.f_leverage != null || d.a_leverage != null);
+  // Horizon filtering: always show all past periods (with actuals or up to current year),
+  // plus N years of forecast beyond the current year. "max" shows everything.
+  const currentYear = new Date().getFullYear();
+  const horizonYears = horizon === "max" ? 999 : parseInt(horizon, 10);
+  const cutoffYear = currentYear + horizonYears;
+  const filtered = data.filter((d) => {
+    const y = parseInt(d.label.replace(/[^0-9]/g, ""), 10);
+    if (Number.isNaN(y)) return true;
+    return y <= cutoffYear;
+  });
+
+  const hasActuals = filtered.some((d) => d.a_revenue != null);
+  const hasLeverage = filtered.some((d) => d.f_leverage != null || d.a_leverage != null);
+
+  const toggleBtn = (value: Horizon, label: string) => (
+    <button
+      key={value}
+      onClick={() => setHorizon(value)}
+      style={{
+        padding: "3px 10px",
+        fontSize: "0.72rem",
+        fontWeight: 600,
+        border: "1px solid var(--line)",
+        background: horizon === value ? "var(--accent)" : "var(--panel)",
+        color: horizon === value ? "#fff" : "var(--ink-soft)",
+        cursor: "pointer",
+      }}
+    >
+      {label}
+    </button>
+  );
 
   return (
     <article className="topsheet-card" style={{ marginBottom: 16 }}>
-      <strong>Financial Performance Charts</strong>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+        <strong>Financial Performance Charts</strong>
+        <div style={{ display: "inline-flex", borderRadius: 6, overflow: "hidden", border: "1px solid var(--line)" }}>
+          {toggleBtn("5", "5yr")}
+          {toggleBtn("10", "10yr")}
+          {toggleBtn("max", "Max")}
+        </div>
+      </div>
       <p className="topsheet-meta-note" style={{ marginBottom: 12 }}>
         Management case forecast (light) overlaid with reported actuals (bold) where available.
+        {horizon !== "max" && ` Showing ${horizon} years of forecast from ${currentYear}.`}
       </p>
 
       {/* Chart 1: Cashflows */}
@@ -194,7 +234,7 @@ export default function DealCharts({ slug, currency, lockupLevel, defaultLevel }
           Cashflow Performance ({sym}&apos;000s, annual)
         </div>
         <ResponsiveContainer width="100%" height={220}>
-          <LineChart data={data} margin={{ top: 5, right: 20, bottom: 5, left: 10 }}>
+          <LineChart key={`cf-${horizon}`} data={filtered} margin={{ top: 5, right: 20, bottom: 5, left: 10 }}>
             <XAxis dataKey="label" tick={{ fontSize: 9 }} />
             <YAxis tickFormatter={(v: number) => fmtK(v)} tick={{ fontSize: 9 }} width={50} />
             <Tooltip content={<ChartTooltipContent />} />
@@ -221,14 +261,15 @@ export default function DealCharts({ slug, currency, lockupLevel, defaultLevel }
           Key Financial Ratios
         </div>
         <ResponsiveContainer width="100%" height={200}>
-          <LineChart data={data} margin={{ top: 5, right: 55, bottom: 5, left: 10 }}>
+          <LineChart key={`rt-${horizon}`} data={filtered} margin={{ top: 5, right: 55, bottom: 5, left: 10 }}>
             <XAxis dataKey="label" tick={{ fontSize: 9 }} />
             {/* Left Y-axis: DSCR (coverage ratios) — starts at 0 */}
             <YAxis
               yAxisId="left"
               tick={{ fontSize: 9, fill: ACTUAL_COLORS.dscr }}
               width={40}
-              domain={[0, (dataMax: number) => Math.ceil(dataMax * 10) / 10]}
+              domain={[0, 5]}
+              allowDataOverflow
               allowDataOverflow
               tickFormatter={(v: number) => v.toFixed(1) + "x"}
               label={{ value: "DSCR", angle: -90, position: "insideLeft", fontSize: 9, fill: ACTUAL_COLORS.dscr, dx: -5 }}

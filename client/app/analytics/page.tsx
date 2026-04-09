@@ -67,6 +67,137 @@ const RULES: AnalyticsRule[] = [
 Ranking: deteriorating_rapidly > deteriorating > flat > improving.`,
   },
   {
+    id: "trend-detection-engine",
+    name: "Trend Detection Engine",
+    category: "Performance & Grading",
+    summary: "Period-by-period trend detection on historical actuals with direction preference and covenant-aware breach/recovery signalling.",
+    detail: `The Trend Detection Engine analyses the last N periods of reported actuals for each deal and classifies each tracked metric as **improving**, **stable**, or **deteriorating**. It is distinct from the Performance Trend used by the grading engine: that rule works on headroom erosion deltas over 3 periods; this engine works on absolute metric values over N periods (default 6).
+
+The engine runs on every deal via \`POST /api/deals/{slug}/analytics/detect-trends\` and can be invoked with custom parameters in the request body.
+
+---
+
+**Data source**
+Reads from the legacy \`actual_periods.actual_metrics\` JSONB column. Deals ingested through the new normalised line-item pipeline (\`period_financial_items\`) are backfilled into \`actual_periods\` using a standard aggregation: the line keys \`total_revenue\`, \`total_operating_costs\`, \`ebitda\`, \`cfads\`, \`capital_expenditure\`, \`senior_debt_service\`, \`senior_dscr\`, \`llcr\`, \`net_debt_ebitda\` map to the metric keys \`revenue\`, \`opex\`, \`ebitda\`, \`cfads\`, \`capex\`, \`debt_service\`, \`dscr\`, \`llcr\`, \`net_debt_ebitda\`.
+
+---
+
+**Tracked metrics**
+By default: \`dscr\`, \`llcr\`, \`plcr\`, \`revenue\`, \`ebitda\`, \`cfads\`, \`opex\`, \`capex\`, \`debt_service\`, \`net_income\`, \`net_debt_ebitda\`. Additional metrics can be requested via the \`metrics\` body parameter.
+
+---
+
+**Direction preference map (new)**
+Each metric is tagged as either **higher-is-better** or **lower-is-better**. This is critical: a 48% increase in EBITDA is good news, but a 48% increase in opex is bad news. The engine uses the preference map to classify the direction correctly.
+
+- **higher-is-better:** dscr, llcr, plcr, icr, revenue, ebitda, cfads, net_income, ebitda_margin
+- **lower-is-better:** opex, capex, debt_service, net_debt_ebitda, leverage, ltv
+
+**Classification logic:**
+1. Split the value series into first half and second half
+2. Compute the mean of each half
+3. Determine the **raw move**: up (second_half > first_half × 1.03), down (second_half < first_half × 0.97), or flat
+4. Map the raw move to a **direction** using the preference:
+   - preference = higher, move up → improving; move down → deteriorating
+   - preference = lower, move up → deteriorating; move down → improving
+   - move flat → stable
+
+**Severity bands** (only applied when direction = deteriorating):
+- total_change > 20% → critical
+- 10–20% → high
+- 5–10% → moderate
+- < 5% → low
+
+---
+
+**Covenant-aware breach and recovery detection (new)**
+For metrics that carry contractual default/lockup thresholds, the engine layers a second signal on top of the directional classification. This handles the case where a metric breached a covenant and then recovered (e.g. DSCR dropped below 1.0x during Covid then climbed back above 2.0x). The directional trend alone would mark this "improving" and lose the signal that the deal went through a breach.
+
+**Thresholds registered (configurable per deal in future):**
+
+| Metric | Default | Lockup | Preference |
+|---|---|---|---|
+| dscr | 1.00 | 1.20 | higher |
+| llcr | 1.10 | 1.20 | higher |
+| icr | 1.50 | 2.00 | higher |
+| net_debt_ebitda | 8.00 | 6.00 | lower |
+
+**State classification (newest to oldest priority):**
+- **currently_breached** — latest value is below default (or above for lower-is-better). Severity promoted to **critical** regardless of directional move.
+- **currently_lockup** — latest value is between lockup and default.
+- **breached_and_recovered** — at least one historical value was below default, but the latest value is above default. Severity promoted to **moderate** if the directional severity was "none".
+- **lockup_and_recovered** — same but for lockup threshold.
+- **always_compliant** — no period ever touched a threshold.
+
+**Breach info object returned per metric:**
+\`\`\`json
+{
+  "state": "breached_and_recovered",
+  "defaultLevel": 1.00,
+  "lockupLevel": 1.20,
+  "everBreachedDefault": true,
+  "everBreachedLockup": true,
+  "periodsInBreach": 1,
+  "worstValue": 0.96,
+  "worstPeriod": "FY 2021",
+  "currentValue": 3.29,
+  "distanceToDefault": 2.29
+}
+\`\`\`
+
+---
+
+**Trend type**
+Separately from direction, each series is classified as:
+- **monotonic** — the series never reverses direction period-on-period (strictly rising or strictly falling)
+- **volatile** — the series has at least one reversal
+
+A monotonic deteriorating trend is a stronger signal than a volatile one because there is no evidence of any improvement step. A breach-and-recovered metric will always be classified volatile (by definition), which the breach info object discloses independently.
+
+---
+
+**Worked example: Getlink FY2019-FY2024 DSCR series**
+
+Raw values: 2.18, 1.37, **0.96**, 1.99, 3.06, 3.29
+
+Before the fix:
+- Directional: second half avg (2.78) > first half avg (1.50) × 1.03 → **improving**, severity none
+- No breach signal
+
+After the fix:
+- Directional: still improving (+50.9% total change)
+- Breach detection: \`currentValue = 3.29\` > default 1.00 so not currently breached; \`worstValue = 0.96\` < 1.00, so \`everBreachedDefault = true\`
+- **State: breached_and_recovered**
+- **Severity promoted from none → moderate**
+- The full Covid-era breach is now visible in the response, and a reviewer can see both "the deal is improving" and "the deal briefly failed its DSCR covenant" at the same time.
+
+**Worked example: Getlink FY2019-FY2024 opex series**
+
+Raw values: €525m, €488m, €481m, €720m, €850m, €781m
+
+Before the fix:
+- Directional: second half avg (€784m) > first half avg (€498m) × 1.03 → **improving**
+- Incorrect: opex growing by 48% is bad news.
+
+After the fix:
+- Direction preference: opex = lower-is-better
+- Raw move: up (+48% total change)
+- Preference + move: lower-is-better + up → **deteriorating**
+- Severity: critical (total change > 20%)
+
+---
+
+**Persistence**
+Deteriorating trends are written to the \`trend_records\` table with the latest financial period ID, so the grading engine and score computations can consume them. Improving and stable trends are returned in the API response but not persisted.
+
+---
+
+**Known limitations**
+- Thresholds are currently hardcoded in \`_BREACH_THRESHOLDS\`. A future enhancement should load per-deal thresholds from the \`covenants\` table.
+- The first-half vs second-half comparator does not distinguish between "V-shaped recovery" and "slow drift" within the same direction. The \`monotonic\` vs \`volatile\` trend_type partly addresses this.
+- Backfilling \`actual_periods\` from \`period_financial_items\` requires manual SQL today. A dedicated endpoint for this migration should be added.`,
+  },
+  {
     id: "score",
     name: "Score",
     category: "Performance & Grading",
@@ -126,6 +257,40 @@ When the grade improves below 3 AND the trend improves to "flat" or "improving",
   },
   // ── Covenant & Ratio Analysis ──
   {
+    id: "covenant-testing-engine",
+    name: "Covenant Testing Engine",
+    category: "Covenant & Ratio Analysis",
+    summary: "Runs every configured covenant threshold against the latest actual period and writes tiered test results to the database.",
+    detail: `The Covenant Testing Engine is the workhorse of period-end compliance. It runs via \`POST /api/deals/{slug}/analytics/run-covenant-tests\` and:
+
+1. **Resolves an actual period.** By default the latest. Callers can pass \`{"periodFlag": "2026Q1"}\` to test a specific period.
+
+2. **Loads all configured thresholds** from \`covenant_thresholds\` for the deal. Each threshold has: covenant_name, ratio_name, composition_tag, direction (\`min\` or \`max\`), and up to three threshold levels: lockup, trigger, default.
+
+3. **Resolves the ratio value** from the actual period. The engine looks in three sources in priority order:
+   - \`actual_periods.platform_computed_ratios\` (ratios the platform recalculated from raw metrics — preferred)
+   - \`actual_periods.borrower_reported_ratios\` (borrower's own compliance certificate)
+   - \`actual_periods.actual_metrics\` (raw metric values)
+
+   First match wins. Any mismatch between platform and borrower numbers is surfaced separately by the Ratio Reconciliation Engine.
+
+4. **Assigns a tier** for each covenant:
+   - For \`min\` direction (e.g. DSCR ≥ 1.20x): performing if value ≥ lockup, distribution_lockup if between trigger and lockup, trigger_event if between default and trigger, event_of_default if below default
+   - For \`max\` direction (e.g. Net Debt / EBITDA ≤ 6.00x): comparisons reversed
+
+5. **Computes headroom** to each threshold. Sign-aware: for \`max\` direction covenants the headroom is inverted so that positive always means "more cushion".
+
+6. **Persists one row per threshold** to \`covenant_tests\` with: actual_period_id, threshold_id, ratio value, borrower value (if different), all three headrooms, tier status, and source citation.
+
+7. **Updates deal-level overall status.** The deal's \`overall_covenant_status\` is set to the worst tier across all covenants (rank: performing < distribution_lockup < trigger_event < event_of_default).
+
+8. **Tracks consecutive lockup periods.** If the overall status is lockup or worse, \`consecutive_lockup_periods\` is incremented; otherwise reset to 0. This feeds the cash sweep / distribution assessment logic.
+
+**Inputs:** \`actual_periods\`, \`covenant_thresholds\`
+**Outputs:** \`covenant_tests\` rows, \`deals.overall_covenant_status\`, \`deals.consecutive_lockup_periods\`
+**Downstream consumers:** Performance Grade engine, Distribution Assessment engine, the Covenant Status and Headroom analytics on this page.`,
+  },
+  {
     id: "covenant-status",
     name: "Covenant Status",
     category: "Covenant & Ratio Analysis",
@@ -184,6 +349,101 @@ The portfolio-level "Avg Headroom" KPI is an exposure-weighted average of deal-l
 - Material: |variance %| ≥ 5%
 - Notable: |variance %| ≥ 2%
 - Minor: |variance %| < 2%`,
+  },
+  {
+    id: "variance-engine",
+    name: "Variance Engine (actuals vs management case)",
+    category: "Covenant & Ratio Analysis",
+    summary: "Compares each reported actual metric against the management case forecast for the same period, classifies direction and materiality, and persists the result.",
+    detail: `The Variance Engine answers the fundamental question "is the deal tracking plan?". It runs via \`POST /api/deals/{slug}/analytics/run-variance\` and is the primary source of the variance numbers shown on deal pages and the portfolio dashboard.
+
+**Step-by-step:**
+
+1. **Resolve the actual period** (latest by default, or \`{"periodFlag": "2026Q1"}\`).
+
+2. **Find the matching forecast period** from the active management case:
+   - Primary lookup: \`forecast_case_periods\` joined to \`forecast_case_versions\` with \`is_active = TRUE\` and \`case_type = 'management_case'\`
+   - Fallback 1: any forecast case with \`drives_monitoring = TRUE\`
+   - Fallback 2: \`financial_periods.expected_metrics\` for legacy deals
+
+3. **For every metric in the actual period that has a matching forecast value**, compute:
+   - \`variance_value\` = actual − forecast
+   - \`variance_pct\` = (variance_value / forecast) × 100
+   - \`direction\` = favourable (variance ≥ 0) or adverse (variance < 0)
+
+4. **Classify materiality:**
+   - ≥ 10% absolute: material
+   - 5–10%: notable
+   - < 5%: immaterial
+
+5. **Persist** to \`financial_variances\` (one row per metric) if the period has a matching \`financial_periods\` row. Old variances for the same period are deleted first.
+
+**Note on direction semantics:** The engine treats "variance ≥ 0" as favourable across all metrics, which means it shares the same limitation as the old Trend Detection engine did: a positive variance on opex (costs above plan) is technically "favourable" under this rule but is actually bad news. The upcoming enhancement will apply the same direction preference map used by the Trend Detection Engine.
+
+**Output:** per-metric variance list with \`actualValue\`, \`forecastValue\`, \`varianceValue\`, \`variancePct\`, \`direction\`, \`materiality\`, plus counts of total metrics and material variances.
+
+**Downstream consumers:** Performance Grade engine (feeds variance score), the Score rule (20% weight), the Variance Materiality analytic displayed on the portfolio summary.`,
+  },
+  {
+    id: "three-case-comparison-engine",
+    name: "Three-Case Comparison Engine",
+    category: "Covenant & Ratio Analysis",
+    summary: "Compares actuals simultaneously against management case, credit case, and combined downside — escalates when actuals breach the floor.",
+    detail: `Where the Variance Engine compares actuals to only the management case, the Three-Case Comparison Engine runs the same comparison against all three tiers of forecast simultaneously and classifies the overall signal based on which tier (if any) has been breached. It runs via \`POST /api/deals/{slug}/analytics/three-case-comparison\`.
+
+**The three cases:**
+
+| Case | Role | Used for |
+|---|---|---|
+| \`management_case\` (priority 1) | primary | Drives grade and monitoring actions |
+| \`credit_case\` (priority 2) | secondary | Lender/borrower comparator — informational only |
+| \`combined_downside\` (priority 3) | floor | Breach triggers alarm escalation |
+
+All three cases must be populated in \`forecast_cases\` with matching \`forecast_case_versions\` and period entries in \`forecast_case_periods\` for the actual period's \`period_flag\`.
+
+**Per-case processing:**
+For each case, every metric present in both the actuals and the forecast is compared. The engine computes variance value, variance percentage, direction (favourable / adverse), and materiality (material / notable / immaterial — same thresholds as the Variance Engine). Results are sorted by absolute variance percentage descending.
+
+**Downside breach tracking:**
+Any metric that is both adverse AND at least notable material in the combined downside case is captured as a "downside breach" — these are the cases where actuals have fallen below the stressed floor lenders modelled. Each breach records the actual value, the floor value, the shortfall, and the shortfall percentage.
+
+**Overall signal classification (first match wins):**
+
+1. **alarm** — any downside breach exists. Message: "Actuals have breached the combined downside on N metric(s) — escalation recommended."
+2. **warning** — no downside breach but management case has material adverse variances. Message: "Management case shows N material adverse variance(s) — grade impact likely."
+3. **monitor** — only minor adverse variances vs management case. Message: "Minor adverse variances vs management case — continue monitoring."
+4. **clear** — actuals tracking at or above all forecast cases. Message: "Actuals are tracking at or above all forecast cases."
+
+**Output:** \`overallSignal\`, \`signalSummary\`, \`downsideBreaches[]\`, and one \`cases[]\` entry per forecast case containing its role, signal note, variance list, and counts.
+
+**Why this engine exists in addition to the Variance Engine:** the Variance Engine focuses on plan vs actual for monitoring purposes. The Three-Case Comparison Engine focuses on *structural underwriting integrity* — "are we still within the risk envelope we underwrote to?" A deal can be adverse to management case but still well above the combined downside, in which case no IC action is needed. Conversely, a deal that breaches the combined downside demands an escalation meeting regardless of how the management case comparison looks.`,
+  },
+  {
+    id: "ratio-reconciliation-engine",
+    name: "Ratio Reconciliation Engine",
+    category: "Covenant & Ratio Analysis",
+    summary: "Compares the borrower's reported covenant ratios against the platform's independently computed ratios from the same raw metrics.",
+    detail: `When a borrower submits a compliance certificate they provide **both** the raw metric values and the calculated ratios. The Ratio Reconciliation Engine recomputes those ratios from the raw metrics using the platform's own formulas and compares the results.
+
+**Purpose:** to catch cases where the borrower has mis-calculated a covenant (whether deliberately or by accident). A borrower reporting DSCR as 1.35x when the underlying metrics imply 1.18x is a red flag that requires immediate follow-up.
+
+**Data model:**
+- \`actual_periods.borrower_reported_ratios\` JSONB — what the borrower said
+- \`actual_periods.platform_computed_ratios\` JSONB — what the platform calculates
+- \`actual_periods.ratio_reconciliation_detail\` JSONB — per-ratio diff
+- \`actual_periods.ratio_reconciliation_status\` — overall status: \`matched\`, \`discrepancy\`, \`unreconciled\`
+
+**The engine itself** runs as part of the ingestion pipeline (not a standalone API endpoint). When an actual period is ingested:
+1. The platform parses raw metrics from the compliance certificate or financial statements
+2. It runs the platform covenant formulas to compute each ratio independently
+3. It compares each platform-computed ratio against the borrower-reported version
+4. Differences beyond a tolerance are flagged in \`ratio_reconciliation_detail\`
+
+**Tolerance:** a ratio match is considered valid if the difference is less than the smaller of 0.01 (one hundredth) or 1% of the larger value. Anything outside tolerance gets a \`discrepancy\` flag.
+
+**Retrieval:** \`GET /api/topsheet/{slug}/reconciliation/{period_flag}\` returns the reconciliation detail for a specific period. The Covenant Testing Engine uses the platform-computed ratio when available, falling back to the borrower-reported value only when the platform cannot recompute independently.
+
+**Why this matters:** covenant testing is often a dispute flashpoint. Having an independent platform calculation that matches (or doesn't match) the borrower's number gives the portfolio manager an objective basis for negotiation. If the borrower is right, the match is obvious. If the borrower is wrong, the discrepancy is documented with the underlying raw metrics as evidence.`,
   },
   // ── Portfolio Aggregations ──
   {
@@ -274,6 +534,61 @@ Only deals with a populated WAL value are included.`,
 - C: 30–50 (moderate risk)
 - D: 50–70 (elevated risk)
 - E: 70+ (high risk)`,
+  },
+  {
+    id: "risk-narrative-generator",
+    name: "Risk Narrative Generator",
+    category: "Risk Assessment",
+    summary: "Template-driven deterministic synthesis of risk register narratives from the structured fields (likelihood, severity, trend, KPI, mitigant, owner).",
+    detail: `Historically the narrative shown on the Risk Register card of the deal page was a free-text \`summary\` field stored alongside the structured risk data. This was fine for demo purposes but created three problems:
+
+1. **No guarantee the narrative matched the structured fields.** A risk could be tagged likelihood 4, severity 5, trend deteriorating but have a narrative saying "low risk, stable". Nothing enforced consistency.
+2. **Not auditable.** Different deals had narratives written in different styles, at different times, by different people (or AI assistants).
+3. **No update on change.** If the likelihood score was revised upwards, the narrative text did not automatically reflect that.
+
+The Risk Narrative Generator replaces free-text with a **template-driven, deterministic** narrative synthesiser implemented in \`server/main.py\` as \`generate_risk_narrative()\`. It assembles up to six sentences from the structured risk register fields using fixed phrase dictionaries. The output is returned as \`generatedNarrative\` on every risk entry from the deal API and displayed on the Risk Register card in place of (or alongside) the free-text summary.
+
+**Sentence templates:**
+
+**Sentence 1 — classification (always present if title exists):**
+\`{title} is a {category_phrase} risk currently scored {band} ({score}/30).\`
+
+Category phrase mapping for the nine risk categories is hardcoded (e.g. \`Market & Macro\` → "market and macroeconomic"). Band is derived from the score: 1–4 low, 5–9 medium, 10–14 high, 15–19 very high, 20–30 critical.
+
+**Sentence 2 — likelihood and severity (present if both fields populated):**
+\`The probability of occurrence {likelihood_phrase} ({L}/5) with {severity_phrase} if it crystallises ({S}/6).\`
+
+Likelihood phrase mapping: 1 is remote, 2 is unlikely, 3 is possible, 4 is likely, 5 is almost certain. Severity phrase mapping: 1–6 maps to negligible / low / moderate / high / critical / fatal capital impact.
+
+**Sentence 3 — trend (present if trend field populated):**
+Maps \`improving\`, \`stable\`, \`deteriorating\`, \`deteriorating_rapidly\`, \`new\` to a corresponding "The risk has been {…} over recent reviews." sentence.
+
+**Sentence 4 — monitoring KPI (present if monitoring_kpi set):**
+\`Monitored via the "{monitoring_kpi}" indicator.\`
+
+**Sentence 5 — mitigant (present if mitigant is populated and not "none", "n/a", or empty):**
+\`Mitigant in place: {mitigant}.\`
+
+**Sentence 6 — ownership (present if owner_name set):**
+\`Owned by {owner_name}; next review scheduled for {next_review_date}.\`
+
+**Properties:**
+- **Deterministic:** same inputs always produce the same output. Pure template substitution.
+- **Auditable:** every sentence maps back to a specific structured field. You can trace any word in the narrative to its source column.
+- **Fails gracefully:** any missing field simply omits its sentence; the narrative always renders something useful as long as there is a title.
+- **No external dependencies:** pure Python string templates, no LLM calls, no per-deal cost, no rate limits, no hallucinations.
+- **Update-on-change:** because it is computed at API query time, editing a likelihood score or trend field automatically updates the narrative on the next fetch.
+
+**Example output for M6 Toll RISK-MK-001:**
+
+> "Traffic Volume Decline (HS2 disruption) is a market and macroeconomic risk currently scored very high (16/30). The probability of occurrence is likely (4/5) with high capital impact if it crystallises (4/6). The risk has been deteriorating over recent reviews. Monitored via the 'Annual Traffic' indicator. Mitigant in place: See risk detail. Owned by Portfolio Manager; next review scheduled for 2026-10-09."
+
+**Location:**
+- Server: \`server/main.py\` function \`generate_risk_narrative(row)\`
+- Phrase dictionaries: \`_LIKELIHOOD_PHRASE\`, \`_SEVERITY_PHRASE\`, \`_TREND_PHRASE\`, \`_CATEGORY_PHRASE\`
+- Band helper: \`_score_band(score)\`
+- Injected into API response via \`serialize_risk_entry()\` as the \`generatedNarrative\` field
+- Client: Risk Register card on the deal page prefers \`entry.generatedNarrative\` over \`entry.summary\``,
   },
   {
     id: "deviation-to-stress",
@@ -497,7 +812,7 @@ The flag level is computed from the combination of the renewal profile and the t
 | **hand_back_zero_value** | OK (0% reliance only) | **Amber** (zero cushion) | **HARD FAIL** |
 | **no_anchor_contract** | n/a | n/a | n/a |
 
-**The two bottom rows (`competitive_tender_clean_sheet` and `hand_back_zero_value`) behave identically for hard-fail logic because the economic outcome is the same: the incumbent cannot realistically continue operating the asset beyond the anchor date, either because the asset has been handed back or because they cannot win the clean-sheet retender while carrying legacy debt.**
+**The two bottom rows (\`competitive_tender_clean_sheet\` and \`hand_back_zero_value\`) behave identically for hard-fail logic because the economic outcome is the same: the incumbent cannot realistically continue operating the asset beyond the anchor date, either because the asset has been handed back or because they cannot win the clean-sheet retender while carrying legacy debt.**
 
 **Flag levels:**
 - **OK (green):** Profile within acceptable bounds

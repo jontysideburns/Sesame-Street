@@ -3678,3 +3678,13 @@ blockquote {
     border: 1px solid #ccc !important;
   }
 }
+
+/* ── Find in Page (Ctrl+F) highlights ────────────────────────────── */
+::highlight(find-match) {
+  background-color: #ffe066;
+  color: #000;
+}
+::highlight(find-current) {
+  background-color: #ff9800;
+  color: #000;
+}
