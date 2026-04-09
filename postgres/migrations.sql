@@ -680,5 +680,211 @@ INSERT INTO deal_line_item_labels (deal_id, line_key, display_label, ordinal) VA
 ON CONFLICT (deal_id, line_key) DO NOTHING;
 
 -- ═══════════════════════════════════════════════════════════════════════════════
+-- Tail construct — contracted revenue / concession life vs debt maturity
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- The "tail" is the gap between the end of contracted/concessional cashflow
+-- and the maturity of the debt financing the project. It can be:
+--   positive: contracted revenue outlives debt (typical PF concession 0-2 yrs)
+--   zero:     matched
+--   negative: debt extends beyond contracted revenue (aka "merchant tail")
+-- The anchor depends on deal type:
+--   concession       — concession expiry, asset hand-back at zero value
+--   primary_contract — end of primary offtake (PPA/CfD/lease/unitary charge)
+--   asset_life       — end of economic/physical useful life
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS tail_anchor_type TEXT;
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS tail_anchor_date DATE;
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS tail_anchor_label TEXT;
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS tail_residual_value_treatment TEXT;
+  -- zero_residual | nominal_residual | retained_asset
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS tail_notes TEXT;
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- Contract & Concession Renewal Risk Framework
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- Consolidates fragmented sector-specific renewal risks into a single cross-cutting
+-- framework. Every deal must be classified on a renewal_profile and must disclose
+-- the proportion of debt that relies on post-renewal cashflows. The combination of
+-- renewal_profile and tail_classification forms a 2-D risk matrix.
+
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS renewal_profile TEXT;
+  -- deep_market_repricing | bilateral_negotiation | competitive_tender
+  -- | hand_back_zero_value | no_anchor_contract
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS debt_repayment_from_renewal_pct NUMERIC(5,2);
+  -- % of debt principal scheduled to be repaid from post-renewal cashflows
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS renewal_notes TEXT;
+
+-- New risk taxonomy sub-category REN under CF (Credit & Financial Risk)
+INSERT INTO risk_taxonomy (risk_id, risk_name, category_code, category_name, category_number, description, typical_sectors, key_indicators, sort_order) VALUES
+('RISK-REN-001', 'Contract / concession expiry without renewal', 'REN', 'Contract & Concession Renewal', 3,
+ 'Primary revenue contract or concession ends during or before debt tenor with no assured successor contract. Debt depends on successful renewal.',
+ 'Toll roads, social infrastructure, renewables, PPPs',
+ 'renewal_profile, debt_repayment_from_renewal_pct, tail_years', 801),
+('RISK-REN-002', 'Renewal into deep liquid market', 'REN', 'Contract & Concession Renewal', 3,
+ 'Asset re-contracts at prevailing market prices into a liquid market. Low risk: market pricing is observable and refinanceable.',
+ 'Hub airports, data centres, commercial real estate',
+ 'Market depth, historical repricing outcomes', 802),
+('RISK-REN-003', 'Renewal by bilateral negotiation', 'REN', 'Contract & Concession Renewal', 3,
+ 'Asset renewal depends on bilateral negotiation with a single counterparty. Counterparty bargaining power is a key risk driver.',
+ 'Renewable PPAs, corporate leases, concession extensions',
+ 'Counterparty identity, alternatives, regulatory backstop', 803),
+('RISK-REN-004', 'Concession auction / competitive tender', 'REN', 'Contract & Concession Renewal', 3,
+ 'Renewal requires winning a competitive tender against new bidders. Incumbent advantage is typically modest.',
+ 'Rail franchises, bus concessions, port concessions',
+ 'Tender frequency, incumbent win rate, bid economics', 804),
+('RISK-REN-005', 'Hand-back at zero consideration', 'REN', 'Contract & Concession Renewal', 3,
+ 'No renewal possible. Asset returns to grantor for nil value at end of concession. Debt must be fully repaid before hand-back.',
+ 'PFI, toll road concessions, social infrastructure',
+ 'Hand-back condition, residual works', 805),
+('RISK-REN-006', 'Reliance on extension assumption', 'REN', 'Contract & Concession Renewal', 3,
+ 'Borrower financial model assumes concession or contract extension without binding commitment. Lenders should never rely on uncommitted extension for debt repayment.',
+ 'All concession structures where extension is plausible but not contractual',
+ 'debt_repayment_from_renewal_pct, extension mechanics', 806),
+('RISK-REN-007', 'Incumbent legacy debt disadvantage', 'REN', 'Contract & Concession Renewal', 3,
+ 'Incumbent operator cannot economically win a clean-sheet concession re-tender while carrying legacy debt. Clean-sheet competitors bid with zero legacy cost, so any economically rational bid will defeat the incumbent. Applies to all concession structures where assets revert to the grantor before the tender.',
+ 'All clean-sheet concession retenders (toll roads, PFI, most traditional PF)',
+ 'renewal_profile = competitive_tender_clean_sheet, debt_repayment_from_renewal_pct > 0', 807)
+ON CONFLICT (risk_id) DO NOTHING;
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- Deal Onboarding Snapshots — frozen position at the point of investment
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- A write-once snapshot of everything that mattered at origination. Used for
+-- performance attribution, IC audit trail, and retrospective diligence.
+-- Live fields on the deals table evolve; this snapshot is immutable (except
+-- in cases of a formal restructuring / re-underwriting event).
+CREATE TABLE IF NOT EXISTS deal_onboarding_snapshots (
+    id                                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    deal_id                                 INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+    snapshot_number                         INTEGER NOT NULL DEFAULT 1,
+      -- 1 = original onboarding, 2+ = successive re-underwritings
+    snapshot_reason                         TEXT NOT NULL DEFAULT 'origination',
+      -- origination | restructuring | re_underwriting | covenant_reset
+    snapshot_date                           DATE NOT NULL,
+    is_current                              BOOLEAN NOT NULL DEFAULT TRUE,
+    superseded_by_snapshot_id               UUID REFERENCES deal_onboarding_snapshots(id),
+    superseded_at                           TIMESTAMPTZ,
+    superseded_reason                       TEXT,
+    captured_by                             TEXT,
+    captured_at                             TIMESTAMPTZ DEFAULT NOW(),
+
+    -- ── Group A: Structural position at onboarding ──
+    tail_years_at_onboarding                NUMERIC(6,2),
+    tail_classification_at_onboarding       TEXT,
+    renewal_profile_at_onboarding           TEXT,
+    debt_repayment_from_renewal_pct_at_onboarding NUMERIC(5,2),
+    revenue_risk_code_at_onboarding         TEXT,
+    concession_years_remaining_at_onboarding NUMERIC(5,2),
+
+    -- ── Group B: Financial metrics at onboarding ──
+    entry_leverage                          NUMERIC(6,2),
+    entry_dscr_year_1                       NUMERIC(6,2),
+    entry_dscr_min_life                     NUMERIC(6,2),
+    entry_llcr                              NUMERIC(6,2),
+    entry_loan_life_years                   NUMERIC(5,2),
+    entry_wal_years                         NUMERIC(5,2),
+
+    -- ── Group C: Lender case / stress at onboarding ──
+    lender_case_dscr_min                    NUMERIC(6,2),
+    lender_case_leverage_peak               NUMERIC(6,2),
+    stress_break_even_pct                   NUMERIC(5,2),
+    stress_cases_tested                     TEXT,
+
+    -- ── Group D: IC governance at onboarding ──
+    ic_memo_date                            DATE,
+    ic_memo_reference                       TEXT,
+    ic_approved_by                          TEXT,
+    ic_approval_conditions                  TEXT,
+    ic_vote_margin                          TEXT,
+
+    -- ── Group E: Origination economics ──
+    entry_all_in_margin_bps                 INTEGER,
+    entry_upfront_fees_bps                  INTEGER,
+    entry_secondary_purchase_price_pct      NUMERIC(6,2),
+    entry_yield_to_maturity                 NUMERIC(7,4),
+    expected_hold_period_years              NUMERIC(5,2),
+    exit_strategy                           TEXT,
+
+    -- ── Group F: Market context at onboarding ──
+    entry_risk_free_rate_bps                INTEGER,
+    entry_credit_spread_bps                 INTEGER,
+    entry_relative_value_notes              TEXT,
+
+    -- ── Group G: Initial risk assessment ──
+    initial_risk_score                      NUMERIC(5,2),
+    initial_grade                           TEXT,
+    critical_risks_at_onboarding            TEXT,
+
+    notes                                   TEXT,
+    UNIQUE (deal_id, snapshot_number)
+);
+CREATE INDEX IF NOT EXISTS idx_dos_deal ON deal_onboarding_snapshots(deal_id);
+CREATE INDEX IF NOT EXISTS idx_dos_current ON deal_onboarding_snapshots(deal_id) WHERE is_current = TRUE;
+-- Only one current snapshot per deal
+CREATE UNIQUE INDEX IF NOT EXISTS idx_dos_one_current ON deal_onboarding_snapshots(deal_id) WHERE is_current = TRUE;
+
+-- Write-once immutability: a snapshot that has been superseded cannot be modified.
+-- Only is_current / superseded_by_snapshot_id / superseded_at / superseded_reason
+-- can transition from the "current" state to the "superseded" state.
+CREATE OR REPLACE FUNCTION enforce_onboarding_snapshot_immutability()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Block all updates once a snapshot is superseded
+    IF OLD.is_current = FALSE THEN
+        RAISE EXCEPTION 'deal_onboarding_snapshot % is superseded and immutable', OLD.id;
+    END IF;
+
+    -- When still current, only allow the supersession fields to change
+    IF NEW.snapshot_date IS DISTINCT FROM OLD.snapshot_date
+       OR NEW.snapshot_number IS DISTINCT FROM OLD.snapshot_number
+       OR NEW.snapshot_reason IS DISTINCT FROM OLD.snapshot_reason
+       OR NEW.tail_years_at_onboarding IS DISTINCT FROM OLD.tail_years_at_onboarding
+       OR NEW.tail_classification_at_onboarding IS DISTINCT FROM OLD.tail_classification_at_onboarding
+       OR NEW.renewal_profile_at_onboarding IS DISTINCT FROM OLD.renewal_profile_at_onboarding
+       OR NEW.debt_repayment_from_renewal_pct_at_onboarding IS DISTINCT FROM OLD.debt_repayment_from_renewal_pct_at_onboarding
+       OR NEW.revenue_risk_code_at_onboarding IS DISTINCT FROM OLD.revenue_risk_code_at_onboarding
+       OR NEW.concession_years_remaining_at_onboarding IS DISTINCT FROM OLD.concession_years_remaining_at_onboarding
+       OR NEW.entry_leverage IS DISTINCT FROM OLD.entry_leverage
+       OR NEW.entry_dscr_year_1 IS DISTINCT FROM OLD.entry_dscr_year_1
+       OR NEW.entry_dscr_min_life IS DISTINCT FROM OLD.entry_dscr_min_life
+       OR NEW.entry_llcr IS DISTINCT FROM OLD.entry_llcr
+       OR NEW.entry_loan_life_years IS DISTINCT FROM OLD.entry_loan_life_years
+       OR NEW.entry_wal_years IS DISTINCT FROM OLD.entry_wal_years
+       OR NEW.lender_case_dscr_min IS DISTINCT FROM OLD.lender_case_dscr_min
+       OR NEW.lender_case_leverage_peak IS DISTINCT FROM OLD.lender_case_leverage_peak
+       OR NEW.stress_break_even_pct IS DISTINCT FROM OLD.stress_break_even_pct
+       OR NEW.stress_cases_tested IS DISTINCT FROM OLD.stress_cases_tested
+       OR NEW.ic_memo_date IS DISTINCT FROM OLD.ic_memo_date
+       OR NEW.ic_memo_reference IS DISTINCT FROM OLD.ic_memo_reference
+       OR NEW.ic_approved_by IS DISTINCT FROM OLD.ic_approved_by
+       OR NEW.ic_approval_conditions IS DISTINCT FROM OLD.ic_approval_conditions
+       OR NEW.ic_vote_margin IS DISTINCT FROM OLD.ic_vote_margin
+       OR NEW.entry_all_in_margin_bps IS DISTINCT FROM OLD.entry_all_in_margin_bps
+       OR NEW.entry_upfront_fees_bps IS DISTINCT FROM OLD.entry_upfront_fees_bps
+       OR NEW.entry_secondary_purchase_price_pct IS DISTINCT FROM OLD.entry_secondary_purchase_price_pct
+       OR NEW.entry_yield_to_maturity IS DISTINCT FROM OLD.entry_yield_to_maturity
+       OR NEW.expected_hold_period_years IS DISTINCT FROM OLD.expected_hold_period_years
+       OR NEW.exit_strategy IS DISTINCT FROM OLD.exit_strategy
+       OR NEW.entry_risk_free_rate_bps IS DISTINCT FROM OLD.entry_risk_free_rate_bps
+       OR NEW.entry_credit_spread_bps IS DISTINCT FROM OLD.entry_credit_spread_bps
+       OR NEW.entry_relative_value_notes IS DISTINCT FROM OLD.entry_relative_value_notes
+       OR NEW.initial_risk_score IS DISTINCT FROM OLD.initial_risk_score
+       OR NEW.initial_grade IS DISTINCT FROM OLD.initial_grade
+       OR NEW.critical_risks_at_onboarding IS DISTINCT FROM OLD.critical_risks_at_onboarding
+       OR NEW.notes IS DISTINCT FROM OLD.notes
+    THEN
+        RAISE EXCEPTION 'Onboarding snapshot fields are write-once. Create a new snapshot (snapshot_number = %) instead of updating this one.', OLD.snapshot_number + 1;
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_onboarding_snapshot_immutability ON deal_onboarding_snapshots;
+CREATE TRIGGER trg_onboarding_snapshot_immutability
+    BEFORE UPDATE ON deal_onboarding_snapshots
+    FOR EACH ROW
+    EXECUTE FUNCTION enforce_onboarding_snapshot_immutability();
+
+-- ═══════════════════════════════════════════════════════════════════════════════
 -- End of migrations — all statements above are idempotent
 -- ═══════════════════════════════════════════════════════════════════════════════

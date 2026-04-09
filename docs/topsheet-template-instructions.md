@@ -1,7 +1,7 @@
 # TopSheet Data Template — Instructions for Completion
 
-**Template Version:** v4 (April 2026)
-**Template File:** `topsheet-data-template-v4.xlsx`
+**Template Version:** v5 (April 2026)
+**Template File:** `topsheet-data-template-v5.xlsx`
 
 This document explains how to complete the TopSheet data template. These instructions are written for both human users and AI assistants (Claude, ChatGPT, etc.) that may be populating the template from source documents.
 
@@ -54,6 +54,21 @@ This is the core deal record. Complete as many fields as possible.
 - **Contracted Revenue %** and **Merchant Revenue %** should sum to 100%.
 - **Duration Coverage %** = (Contract life / Debt term) x 100. Above 100% means the contract outlasts the debt.
 - **Ratings:** Enter the agency rating exactly as published (e.g. "Baa2" not "BBB equivalent"). If unrated by all agencies, Internal Credit Score is required.
+
+**Tail construct (new in v5) — must-haves:**
+- **Tail Anchor Type** (required): `concession` for hand-back assets (toll roads, PFI); `primary_contract` for renewables and PPP operations anchored by a PPA/CfD/lease; `asset_life` for corporate infrastructure (data centres, commercial RE)
+- **Tail Anchor Date**: the contractual end date of the anchor (concession expiry or primary offtake end)
+- **Tail Anchor Label**: free-text description of the anchor
+- **Residual Value Treatment** (required): `zero_residual` for concession hand-back (the asset returns to the grantor for nil value); `nominal_residual` for minor residual; `retained_asset` where the project continues post-anchor
+- **Tail Notes**: any narrative explaining the tail position, relevant mitigants, or nuances
+- The system computes tail years automatically as `tail_anchor_date − latest_debt_maturity`. Positive = contracted revenue outlives debt; negative = merchant tail.
+
+**Renewal framework (new in v5) — must-haves:**
+- **Renewal Profile** (required): one of `deep_market_repricing` (hub airports, data centres), `bilateral_negotiation` (renewable PPAs, corporate leases), `competitive_tender_asset_retained` (operator keeps material assets across retender), `competitive_tender_clean_sheet` (pure concession retender with no asset retention), `hand_back_zero_value` (PFI, toll road concessions), or `no_anchor_contract` (fully merchant)
+- **Debt Repayment From Renewal %**: the proportion of debt principal scheduled to be repaid from post-renewal cashflows. **Should be 0 for `hand_back_zero_value` and `competitive_tender_clean_sheet`** — any positive value triggers a HARD FAIL structural flag
+- **Renewal Notes**: narrative explaining the renewal logic
+
+**Why the `competitive_tender_clean_sheet` flag is a HARD FAIL with any debt reliance:** In a pure concession retender, the incumbent cannot economically out-bid clean-sheet competitors while carrying legacy debt. A rational new entrant with zero legacy debt can always bid more aggressively. Relying on winning the retender to repay legacy debt is structurally unsound.
 
 ### Tab 2: Capital Structure
 
@@ -303,6 +318,78 @@ Record the 5-10 most important risks for this deal. You do not need to map every
 - Regulatory/political risk — for concessions and regulated assets
 - Construction risk — if in construction phase
 - Refinancing risk — if bullet maturity approaching
+- **Contract & concession renewal (new REN codes)** — use RISK-REN-001 through RISK-REN-007 for any renewal-adjacent risk. These replace the fragmented legacy codes (RA-001, RL-002, EW-008, RE-023, OP-008, ET-003). See the Analytics tab for full methodology.
+  - RISK-REN-001: Contract / concession expiry without renewal
+  - RISK-REN-002: Renewal into deep liquid market
+  - RISK-REN-003: Renewal by bilateral negotiation
+  - RISK-REN-004: Concession auction / competitive tender
+  - RISK-REN-005: Hand-back at zero consideration
+  - RISK-REN-006: Reliance on extension assumption
+  - RISK-REN-007: Incumbent legacy debt disadvantage
+
+### Tab 20: Onboarding Snapshot (NEW in v5)
+
+A **write-once** frozen capture of the deal position at the point of investment. These fields are immutable once ingested — any change requires a new snapshot via a restructuring event. Populate as many as possible at origination; the ingestion engine will flag gaps but will not reject the deal.
+
+**Purpose:**
+- **Performance attribution** — compare today's position against the position at entry
+- **IC audit trail** — record exactly what the IC signed off on
+- **Retrospective diligence** — support ex-post underwriting review
+
+**Snapshot metadata (required):**
+- **Snapshot Date** — usually the origination date
+- **Snapshot Reason** — for the first ingestion this is always `origination`. Future snapshots use `restructuring`, `re_underwriting`, or `covenant_reset`
+- **Captured By** — name of the IC approver or credit officer
+
+**Group A — Structural position at onboarding:**
+These are the tail and renewal fields frozen at entry, so you can measure drift over time. If you've already filled in the live tail/renewal fields in Tab 1, copy the same values here (they will match at the point of origination but may diverge later).
+
+**Group B — Financial metrics at onboarding:**
+Frozen origination ratios. These tell the retrospective story of how aggressively the deal was underwritten.
+- **Entry Leverage** — Net Debt / EBITDA at purchase
+- **Entry Year-1 DSCR** — the Year 1 management case DSCR. A value close to 1.0x indicates very tight underwriting
+- **Min DSCR Across Life** — minimum management case DSCR across the debt life
+- **Entry LLCR** — Year 1 Loan Life Coverage Ratio
+- **Entry Loan Life** — years from origination to final debt maturity
+- **Entry WAL** — Weighted Average Life of debt at origination
+
+**Group C — Lender case / stress at onboarding:**
+Captures the defensive work done at IC. When a deal is heading toward lender case numbers in real life, you need the original lender case to know how close you are.
+- **Lender Case Min DSCR** — the floor DSCR under the lender stress case
+- **Lender Case Peak Leverage** — the peak Net Debt / EBITDA under lender stress
+- **Stress Break-Even %** — % revenue decline that drives DSCR to 1.0x
+- **Stress Cases Tested** — free-text describing the scenarios stressed at IC
+
+**Group D — IC governance at onboarding:**
+- **IC Memo Date, Reference, Approved By, Conditions, Vote Margin**
+- Record any conditions imposed by the IC as they are part of the approval envelope
+
+**Group E — Origination economics:**
+Tells you what the investment was originally trying to deliver.
+- **Entry All-In Margin (bps)**
+- **Entry Upfront Fees (bps)**
+- **Entry Secondary Purchase Price %** — for secondary purchases only (e.g. 98.50 for 98.5% of par)
+- **Entry Yield to Maturity** — as a decimal (e.g. 0.0920 for 9.20%)
+- **Expected Hold Period (years)**
+- **Exit Strategy** — hold to maturity / sell / refinance / describe
+
+**Group F — Market context at onboarding:**
+Enables performance decomposition into market-wide vs deal-specific movements.
+- **Entry Risk-Free Rate (bps)** — 10yr gilt / Treasury at entry
+- **Entry Credit Spread (bps)** — spread over risk-free
+- **Entry Relative Value Notes** — rationale for the deal at that time
+
+**Group G — Initial risk assessment:**
+- **Initial Risk Score, Initial Grade, Critical Risks at Onboarding**
+- Preserve the origination risk register summary even as new risks emerge later
+
+**Restructuring / re-underwriting — creating a new snapshot:**
+If the deal is later restructured, refinanced, or re-underwritten, the platform will:
+1. Mark the existing snapshot as superseded (`is_current = FALSE`, `superseded_at`, `superseded_reason`)
+2. Create a new snapshot row with `snapshot_number = N+1` and `snapshot_reason = 'restructuring'`
+3. Both rows remain in the database; the TopSheet page shows the current snapshot plus the count of historical snapshots
+
+**A superseded snapshot cannot be edited.** The database enforces this via a trigger. The error message guides you to create a new snapshot instead.
 
 ### Validation Tab
 

@@ -146,6 +146,32 @@ The `deals` table is the central record. Fields organised by TopSheet section.
 | primary_contract_expiry | Date | |
 | duration_coverage_pct | Decimal | Contract life / debt term x 100 |
 
+### F.4.1 Tail Construct (new in v5)
+
+The "tail" measures the time gap between the latest debt maturity and the end of the contracted or concessional revenue stream. The system computes signed tail years and a classification (positive/matched/negative) from these fields + the latest debt maturity from `capital_structure_instruments`.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| tail_anchor_type | Text | `concession` \| `primary_contract` \| `asset_life` |
+| tail_anchor_date | Date | End of concession OR end of primary revenue contract |
+| tail_anchor_label | Text | Free-text description of the anchor |
+| tail_residual_value_treatment | Text | `zero_residual` \| `nominal_residual` \| `retained_asset` |
+| tail_notes | Text | Narrative |
+
+Computed by the API (not stored): `tailYears`, `tailDays`, `classification`.
+
+### F.4.2 Contract & Concession Renewal (new in v5)
+
+The renewal framework codifies how a deal re-contracts its primary revenue source, and whether the structure is economically sound given that renewal mechanism.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| renewal_profile | Text | `deep_market_repricing` \| `bilateral_negotiation` \| `competitive_tender_asset_retained` \| `competitive_tender_clean_sheet` \| `hand_back_zero_value` \| `no_anchor_contract` |
+| debt_repayment_from_renewal_pct | Decimal(5,2) | % of debt principal scheduled to be repaid from post-renewal cashflows. Should be 0 for hand_back_zero_value and competitive_tender_clean_sheet. |
+| renewal_notes | Text | Narrative |
+
+Computed by the API: `profileLabel`, `flagLevel` (ok / amber / red / hard_fail), `flagReasons[]`. The flag level is driven by a 2-D matrix combining `renewal_profile` with `tail_classification`. See Analytics → "Contract & Concession Renewal Profile" for the full rules.
+
 ### F.5 Financial Metrics & Key Outputs
 
 | Field | Type | Description |
@@ -433,6 +459,89 @@ The `deals` table is the central record. Fields organised by TopSheet section.
 | non_consenting_replacement_basis | Text | par, make_whole, market_value |
 | standard_consent_period_days | Integer | |
 | disenfranchisement_triggers | JSONB | |
+
+### Deal Onboarding Snapshots (`deal_onboarding_snapshots`) — new in v5
+
+**Write-once** frozen capture of the deal position at investment. A database trigger blocks any edit to content fields. Restructurings create a new row with incremented `snapshot_number`; the previous row is marked `is_current = FALSE`.
+
+**Supersession fields:**
+| Field | Type | Description |
+|-------|------|-------------|
+| id | UUID | Primary key |
+| deal_id | Integer | FK to deals (multiple rows allowed) |
+| snapshot_number | Integer | 1 = original, 2+ = successive re-underwritings |
+| snapshot_reason | Text | `origination` \| `restructuring` \| `re_underwriting` \| `covenant_reset` |
+| snapshot_date | Date | Effective date of the snapshot |
+| is_current | Boolean | Exactly one TRUE per deal (partial unique index) |
+| superseded_by_snapshot_id | UUID | FK to the replacement row |
+| superseded_at | Timestamp | When the transition happened |
+| superseded_reason | Text | Why this snapshot was superseded |
+| captured_by | Text | IC approver or credit officer |
+| captured_at | Timestamp | Row creation time |
+
+**Group A — Structural position at onboarding:**
+| Field | Type | Description |
+|-------|------|-------------|
+| tail_years_at_onboarding | Decimal(6,2) | Signed (e.g. +3.07) |
+| tail_classification_at_onboarding | Text | positive_tail / matched / negative_tail |
+| renewal_profile_at_onboarding | Text | Frozen renewal profile |
+| debt_repayment_from_renewal_pct_at_onboarding | Decimal(5,2) | |
+| revenue_risk_code_at_onboarding | Text | Frozen P-V-D |
+| concession_years_remaining_at_onboarding | Decimal(5,2) | |
+
+**Group B — Financial metrics at onboarding:**
+| Field | Type | Description |
+|-------|------|-------------|
+| entry_leverage | Decimal(6,2) | Net Debt / EBITDA at purchase |
+| entry_dscr_year_1 | Decimal(6,2) | |
+| entry_dscr_min_life | Decimal(6,2) | |
+| entry_llcr | Decimal(6,2) | |
+| entry_loan_life_years | Decimal(5,2) | |
+| entry_wal_years | Decimal(5,2) | |
+
+**Group C — Lender case / stress at onboarding:**
+| Field | Type | Description |
+|-------|------|-------------|
+| lender_case_dscr_min | Decimal(6,2) | |
+| lender_case_leverage_peak | Decimal(6,2) | |
+| stress_break_even_pct | Decimal(5,2) | % revenue decline to break DSCR 1.0x |
+| stress_cases_tested | Text | Free-text description |
+
+**Group D — IC governance:**
+| Field | Type | Description |
+|-------|------|-------------|
+| ic_memo_date | Date | |
+| ic_memo_reference | Text | |
+| ic_approved_by | Text | |
+| ic_approval_conditions | Text | |
+| ic_vote_margin | Text | unanimous / majority / dissented |
+
+**Group E — Origination economics:**
+| Field | Type | Description |
+|-------|------|-------------|
+| entry_all_in_margin_bps | Integer | |
+| entry_upfront_fees_bps | Integer | |
+| entry_secondary_purchase_price_pct | Decimal(6,2) | % of par |
+| entry_yield_to_maturity | Decimal(7,4) | Decimal (0.0920 = 9.20%) |
+| expected_hold_period_years | Decimal(5,2) | |
+| exit_strategy | Text | |
+
+**Group F — Market context:**
+| Field | Type | Description |
+|-------|------|-------------|
+| entry_risk_free_rate_bps | Integer | 10yr gilt / Treasury |
+| entry_credit_spread_bps | Integer | Spread over risk-free |
+| entry_relative_value_notes | Text | |
+
+**Group G — Initial risk assessment:**
+| Field | Type | Description |
+|-------|------|-------------|
+| initial_risk_score | Decimal(5,2) | |
+| initial_grade | Text | |
+| critical_risks_at_onboarding | Text | Top 3 risks narrative |
+| notes | Text | General snapshot notes |
+
+**Enforcement:** The `enforce_onboarding_snapshot_immutability()` trigger raises an exception on any update to a content field on a current snapshot, or on any update at all to a superseded snapshot. The only allowed edit is the supersession transition itself.
 
 ---
 

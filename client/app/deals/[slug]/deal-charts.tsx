@@ -223,12 +223,12 @@ export default function DealCharts({ slug, currency, lockupLevel, defaultLevel }
         <ResponsiveContainer width="100%" height={200}>
           <LineChart data={data} margin={{ top: 5, right: 55, bottom: 5, left: 10 }}>
             <XAxis dataKey="label" tick={{ fontSize: 9 }} />
-            {/* Left Y-axis: DSCR (coverage ratios) — starts at 1.0x */}
+            {/* Left Y-axis: DSCR (coverage ratios) — starts at 0 */}
             <YAxis
               yAxisId="left"
               tick={{ fontSize: 9, fill: ACTUAL_COLORS.dscr }}
               width={40}
-              domain={[1.0, (dataMax: number) => Math.ceil(dataMax * 10) / 10]}
+              domain={[0, (dataMax: number) => Math.ceil(dataMax * 10) / 10]}
               allowDataOverflow
               tickFormatter={(v: number) => v.toFixed(1) + "x"}
               label={{ value: "DSCR", angle: -90, position: "insideLeft", fontSize: 9, fill: ACTUAL_COLORS.dscr, dx: -5 }}
@@ -252,7 +252,24 @@ export default function DealCharts({ slug, currency, lockupLevel, defaultLevel }
             {/* DSCR — left axis */}
             <Line yAxisId="left" type="monotone" dataKey="f_dscr" name="DSCR (Forecast)" stroke={MGMT_COLORS.dscr} strokeWidth={1.5} strokeDasharray="6 3" dot={false} connectNulls />
             {hasActuals && (
-              <Line yAxisId="left" type="monotone" dataKey="a_dscr" name="DSCR (Actual)" stroke={ACTUAL_COLORS.dscr} strokeWidth={2.5} dot={{ r: 3 }} connectNulls />
+              <Line yAxisId="left" type="monotone" dataKey="a_dscr" name="DSCR (Actual)" stroke={ACTUAL_COLORS.dscr} strokeWidth={2.5} connectNulls
+                dot={(props: { cx?: number; cy?: number; payload?: { a_dscr?: number }; index?: number }) => {
+                  const { cx, cy, payload, index } = props;
+                  if (cx == null || cy == null || payload?.a_dscr == null) return <g key={`dot-${index ?? 0}`} />;
+                  const breached = defaultLevel != null && payload.a_dscr < defaultLevel;
+                  return (
+                    <circle
+                      key={`dot-${index ?? 0}`}
+                      cx={cx}
+                      cy={cy}
+                      r={3.5}
+                      stroke={ACTUAL_COLORS.dscr}
+                      strokeWidth={1.5}
+                      fill={breached ? "#d65454" : "#ffffff"}
+                    />
+                  );
+                }}
+              />
             )}
             {/* Leverage — right axis */}
             {hasLeverage && <>

@@ -18233,6 +18233,17 @@ def get_deal_topsheet(slug: str):
         fin_template = conn.execute(
             "SELECT * FROM deal_financial_template WHERE deal_id = %s", (deal_id,)
         ).fetchone()
+        onboarding_current = conn.execute(
+            "SELECT * FROM deal_onboarding_snapshots WHERE deal_id = %s AND is_current = TRUE",
+            (deal_id,),
+        ).fetchone()
+        onboarding_history = conn.execute(
+            """SELECT id, snapshot_number, snapshot_reason, snapshot_date, is_current,
+                      superseded_at, superseded_reason, captured_by, captured_at
+               FROM deal_onboarding_snapshots WHERE deal_id = %s
+               ORDER BY snapshot_number""",
+            (deal_id,),
+        ).fetchall()
 
         # Risk register summary
         risk_summary = conn.execute(
@@ -18320,8 +18331,181 @@ def get_deal_topsheet(slug: str):
 
     deal = _serialize_row(deal_row, skip_deal_id=False)
 
+    # ── Tail computation ────────────────────────────────────────────────
+    # Tail = days between tail_anchor_date and the LATEST debt maturity across
+    # the capital structure. Positive = contracted revenue outlives debt.
+    # Negative = debt extends beyond contracted revenue (merchant tail).
+    tail = None
+    anchor_date = deal_row.get("tail_anchor_date")
+    if anchor_date and cap_struct:
+        latest_maturity = max(
+            (r["maturity_date"] for r in cap_struct if r.get("maturity_date")),
+            default=None,
+        )
+        if latest_maturity:
+            days = (anchor_date - latest_maturity).days
+            years = round(days / 365.25, 2)
+            if years > 0.25:
+                classification = "positive_tail"
+            elif years < -0.25:
+                classification = "negative_tail"
+            else:
+                classification = "matched"
+            tail = {
+                "anchorType": deal_row.get("tail_anchor_type"),
+                "anchorDate": anchor_date.isoformat(),
+                "anchorLabel": deal_row.get("tail_anchor_label"),
+                "latestDebtMaturity": latest_maturity.isoformat(),
+                "tailYears": years,
+                "tailDays": days,
+                "classification": classification,
+                "residualValueTreatment": deal_row.get("tail_residual_value_treatment"),
+                "notes": deal_row.get("tail_notes"),
+            }
+        else:
+            tail = {
+                "anchorType": deal_row.get("tail_anchor_type"),
+                "anchorDate": anchor_date.isoformat(),
+                "anchorLabel": deal_row.get("tail_anchor_label"),
+                "latestDebtMaturity": None,
+                "tailYears": None,
+                "tailDays": None,
+                "classification": "unknown_no_debt_maturity",
+                "residualValueTreatment": deal_row.get("tail_residual_value_treatment"),
+                "notes": deal_row.get("tail_notes"),
+            }
+
+    # ── Renewal risk analysis ──────────────────────────────────────────
+    # Classifies the renewal profile and combines it with tail_classification
+    # to produce a 2-D matrix assessment.
+    renewal = None
+    profile = deal_row.get("renewal_profile")
+    if profile:
+        reliance_pct = deal_row.get("debt_repayment_from_renewal_pct")
+        reliance = float(reliance_pct) if reliance_pct is not None else None
+        tail_class = (tail or {}).get("classification")
+
+        # Matrix assessment
+        # Cell = f(renewal_profile, tail_classification, reliance_pct)
+        flag_level = "ok"
+        flag_reasons = []
+
+        if profile == "hand_back_zero_value":
+            if reliance is not None and reliance > 0:
+                flag_level = "hard_fail"
+                flag_reasons.append(
+                    f"Hand-back at zero consideration with {reliance:.0f}% of debt relying on "
+                    "post-concession cashflows. Structurally unsound: no cashflow exists "
+                    "after the concession ends."
+                )
+            elif tail_class == "negative_tail":
+                flag_level = "hard_fail"
+                flag_reasons.append(
+                    "Negative tail combined with hand-back at zero consideration. "
+                    "Debt extends past concession end where there is no cashflow."
+                )
+            elif tail_class == "matched":
+                flag_level = "amber"
+                flag_reasons.append(
+                    "Matched debt tenor to concession end with zero cushion. "
+                    "No room for refinancing delays or final cash sweep."
+                )
+        elif profile == "competitive_tender_asset_retained":
+            if reliance is not None and reliance > 25:
+                flag_level = "amber"
+                flag_reasons.append(
+                    f"{reliance:.0f}% debt reliance on competitive tender outcome. "
+                    "Incumbent retains asset advantage but the outcome is not certain; "
+                    "explicit stress case required."
+                )
+            if tail_class == "negative_tail":
+                flag_level = "red"
+                flag_reasons.append(
+                    "Negative tail with competitive tender renewal. Lenders exposed "
+                    "to the outcome of a tender they do not control."
+                )
+        elif profile == "competitive_tender_clean_sheet":
+            # Incumbent legacy debt disadvantage: clean-sheet bidders can always
+            # out-bid an incumbent carrying legacy debt on an economically rational
+            # basis. Treat any reliance as structurally unsound.
+            if reliance is not None and reliance > 0:
+                flag_level = "hard_fail"
+                flag_reasons.append(
+                    f"Incumbent legacy debt disadvantage: {reliance:.0f}% of debt "
+                    "relies on winning a clean-sheet competitive tender. A new entrant "
+                    "with zero legacy debt will always be able to bid more aggressively "
+                    "than the incumbent carrying legacy obligations. Structurally "
+                    "unsound: the incumbent cannot economically out-bid clean-sheet "
+                    "competitors."
+                )
+            elif tail_class == "negative_tail":
+                flag_level = "hard_fail"
+                flag_reasons.append(
+                    "Negative tail with clean-sheet competitive tender. Debt extends "
+                    "past a point where the incumbent cannot realistically win the "
+                    "retender."
+                )
+            elif tail_class == "matched":
+                flag_level = "amber"
+                flag_reasons.append(
+                    "Matched debt tenor to a clean-sheet tender with zero cushion. "
+                    "No room for tender delays or transition costs."
+                )
+        elif profile == "bilateral_negotiation":
+            if reliance is not None and reliance > 50:
+                flag_level = "amber"
+                flag_reasons.append(
+                    f"{reliance:.0f}% debt reliance on bilateral renewal. "
+                    "Counterparty bargaining power is a key risk driver."
+                )
+            if tail_class == "negative_tail" and (reliance or 0) > 25:
+                flag_level = "amber" if flag_level == "ok" else flag_level
+                flag_reasons.append(
+                    "Negative tail with bilateral renewal. Stress merchant price "
+                    "curve in the tail period."
+                )
+        elif profile == "deep_market_repricing":
+            # Generally low risk — only flag if extreme reliance
+            if reliance is not None and reliance > 60:
+                flag_level = "amber"
+                flag_reasons.append(
+                    f"{reliance:.0f}% debt reliance even in a deep market. "
+                    "Monitor market depth assumptions."
+                )
+        elif profile == "no_anchor_contract":
+            # Not applicable — deal has no anchor, all merchant
+            pass
+
+        if not flag_reasons:
+            flag_reasons.append(
+                "Profile within acceptable bounds; no structural renewal concerns."
+            )
+
+        profile_labels = {
+            "deep_market_repricing": "Deep market repricing",
+            "bilateral_negotiation": "Bilateral negotiation",
+            "competitive_tender_asset_retained": "Competitive tender (asset retained)",
+            "competitive_tender_clean_sheet": "Competitive tender (clean sheet)",
+            "hand_back_zero_value": "Hand-back at zero consideration",
+            "no_anchor_contract": "No anchor contract (fully merchant)",
+        }
+
+        renewal = {
+            "profile": profile,
+            "profileLabel": profile_labels.get(profile, profile),
+            "debtRelianceOnRenewalPct": reliance,
+            "tailClassification": tail_class,
+            "flagLevel": flag_level,
+            "flagReasons": flag_reasons,
+            "notes": deal_row.get("renewal_notes"),
+        }
+
     return {
         "deal": deal,
+        "tail": tail,
+        "renewalAnalysis": renewal,
+        "onboardingSnapshot": _serialize_row(onboarding_current) if onboarding_current else None,
+        "onboardingHistory": [_serialize_row(r) for r in onboarding_history],
         "capitalStructure": [_serialize_row(r) for r in cap_struct],
         "enforcementClasses": [_serialize_row(r) for r in enforcement],
         "corporateEntities": [_serialize_row(r) for r in entities],

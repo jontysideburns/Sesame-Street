@@ -178,6 +178,18 @@ add_field(ws, r, "Merchant Revenue %", guidance="0-100 (should sum to 100 with c
 add_field(ws, r, "Primary Contract Expiry", guidance="YYYY-MM-DD"); r += 1
 add_field(ws, r, "Duration Coverage %", guidance="Contract life / debt term x 100"); r += 1
 
+r += 1; make_section(ws, r, 3, "TAIL CONSTRUCT (gap between anchor and debt maturity)"); r += 1
+add_field(ws, r, "Tail Anchor Type *", True, "concession | primary_contract | asset_life"); r += 1
+add_field(ws, r, "Tail Anchor Date", guidance="End of concession OR end of primary revenue contract (YYYY-MM-DD)"); r += 1
+add_field(ws, r, "Tail Anchor Label", guidance="e.g. M6 Toll Concession expiry; Wigmore Solar PPA end"); r += 1
+add_field(ws, r, "Residual Value Treatment *", True, "zero_residual | nominal_residual | retained_asset"); r += 1
+add_field(ws, r, "Tail Notes", guidance="Narrative describing the tail position and any mitigants"); r += 1
+
+r += 1; make_section(ws, r, 3, "CONTRACT & CONCESSION RENEWAL"); r += 1
+add_field(ws, r, "Renewal Profile *", True, "deep_market_repricing | bilateral_negotiation | competitive_tender_asset_retained | competitive_tender_clean_sheet | hand_back_zero_value | no_anchor_contract"); r += 1
+add_field(ws, r, "Debt Repayment From Renewal %", guidance="% of debt principal scheduled to be repaid from post-renewal cashflows. Should be 0 for hand_back_zero_value and competitive_tender_clean_sheet."); r += 1
+add_field(ws, r, "Renewal Notes", guidance="Narrative explaining the renewal assumptions and any mitigants"); r += 1
+
 r += 1; make_section(ws, r, 3, "RATINGS"); r += 1
 add_field(ws, r, "Moody's Rating", guidance="e.g. Baa2, Ba1, or n/a"); r += 1
 add_field(ws, r, "Moody's Outlook", guidance="stable, positive, negative"); r += 1
@@ -949,8 +961,108 @@ ws13.cell(row=next_row, column=3, value="Top 5-10 risks recommended. Include for
 ws13.cell(row=next_row, column=3).border = border
 
 
+# ═══════════════════════════════════════════════════════════════════
+# TAB 20: Onboarding Snapshot (write-once, frozen at investment)
+# ═══════════════════════════════════════════════════════════════════
+ws_ob = wb.create_sheet("20. Onboarding Snapshot")
+ws_ob.merge_cells("A1:C1")
+ws_ob["A1"] = "ONBOARDING SNAPSHOT — Frozen at investment. WRITE-ONCE in the database: edits are blocked by trigger; restructurings create a new snapshot with snapshot_number + 1."
+ws_ob["A1"].font = version_font
+ws_ob["A1"].alignment = Alignment(wrap_text=True)
+ws_ob.row_dimensions[1].height = 40
+
+r = 3
+ws_ob.cell(row=r, column=1, value="Field").font = hdr_font
+ws_ob.cell(row=r, column=1).fill = hdr_fill
+ws_ob.cell(row=r, column=1).border = border
+ws_ob.cell(row=r, column=2, value="Value").font = hdr_font
+ws_ob.cell(row=r, column=2).fill = hdr_fill
+ws_ob.cell(row=r, column=2).border = border
+ws_ob.cell(row=r, column=3, value="Guidance").font = hdr_font
+ws_ob.cell(row=r, column=3).fill = hdr_fill
+ws_ob.cell(row=r, column=3).border = border
+r += 1
+
+ws_ob.column_dimensions["A"].width = 42
+ws_ob.column_dimensions["B"].width = 30
+ws_ob.column_dimensions["C"].width = 65
+
+# Metadata
+make_section(ws_ob, r, 3, "SNAPSHOT METADATA"); r += 1
+add_field(ws_ob, r, "Snapshot Date *", True, "Usually the origination date (YYYY-MM-DD)"); r += 1
+add_field(ws_ob, r, "Snapshot Reason *", True, "origination | restructuring | re_underwriting | covenant_reset"); r += 1
+add_field(ws_ob, r, "Captured By", guidance="IC approver or credit officer"); r += 1
+
+# Group A
+r += 1; make_section(ws_ob, r, 3, "A. STRUCTURAL POSITION AT ONBOARDING"); r += 1
+add_field(ws_ob, r, "Tail Years at Onboarding", guidance="Signed number of years (e.g. +3.07 or -2.50)"); r += 1
+add_field(ws_ob, r, "Tail Classification at Onboarding", guidance="positive_tail | matched | negative_tail"); r += 1
+add_field(ws_ob, r, "Renewal Profile at Onboarding", guidance="Same values as main Renewal Profile field"); r += 1
+add_field(ws_ob, r, "Debt Repayment From Renewal % at Onboarding", guidance="0-100"); r += 1
+add_field(ws_ob, r, "Revenue Risk Code at Onboarding", guidance="Frozen P-V-D code (e.g. P3-V5-D5)"); r += 1
+add_field(ws_ob, r, "Concession Years Remaining at Onboarding", guidance="Years remaining at investment date"); r += 1
+
+# Group B
+r += 1; make_section(ws_ob, r, 3, "B. FINANCIAL METRICS AT ONBOARDING"); r += 1
+add_field(ws_ob, r, "Entry Leverage", guidance="Net Debt / EBITDA at purchase (e.g. 6.50)"); r += 1
+add_field(ws_ob, r, "Entry Year-1 DSCR", guidance="Year 1 management case DSCR (e.g. 1.35)"); r += 1
+add_field(ws_ob, r, "Min DSCR Across Life", guidance="Minimum management case DSCR over debt life"); r += 1
+add_field(ws_ob, r, "Entry LLCR", guidance="Year 1 Loan Life Coverage Ratio"); r += 1
+add_field(ws_ob, r, "Entry Loan Life (years)", guidance="Years from origination to final debt maturity"); r += 1
+add_field(ws_ob, r, "Entry Weighted Average Life", guidance="Debt WAL at origination"); r += 1
+
+# Group C
+r += 1; make_section(ws_ob, r, 3, "C. LENDER CASE / STRESS AT ONBOARDING"); r += 1
+add_field(ws_ob, r, "Lender Case Min DSCR", guidance="Minimum DSCR under lender downside"); r += 1
+add_field(ws_ob, r, "Lender Case Peak Leverage", guidance="Peak Net Debt / EBITDA under lender downside"); r += 1
+add_field(ws_ob, r, "Stress Break-Even %", guidance="% revenue decline required to breach DSCR 1.0x"); r += 1
+add_field(ws_ob, r, "Stress Cases Tested", guidance="Free text describing the scenarios stressed at IC"); r += 1
+
+# Group D
+r += 1; make_section(ws_ob, r, 3, "D. IC GOVERNANCE AT ONBOARDING"); r += 1
+add_field(ws_ob, r, "IC Memo Date", guidance="Date the IC memo was approved (YYYY-MM-DD)"); r += 1
+add_field(ws_ob, r, "IC Memo Reference", guidance="Document reference / ID"); r += 1
+add_field(ws_ob, r, "IC Approved By", guidance="Committee name or delegated approver"); r += 1
+add_field(ws_ob, r, "IC Approval Conditions", guidance="Any conditions imposed by the IC"); r += 1
+add_field(ws_ob, r, "IC Vote Margin", guidance="unanimous | majority | dissented"); r += 1
+
+# Group E
+r += 1; make_section(ws_ob, r, 3, "E. ORIGINATION ECONOMICS"); r += 1
+add_field(ws_ob, r, "Entry All-In Margin (bps)", guidance="All-in margin at entry over reference rate"); r += 1
+add_field(ws_ob, r, "Entry Upfront Fees (bps)", guidance="Fees earned at origination"); r += 1
+add_field(ws_ob, r, "Entry Secondary Purchase Price %", guidance="e.g. 98.50 for 98.5% of par (for secondary purchases)"); r += 1
+add_field(ws_ob, r, "Entry Yield to Maturity", guidance="Expected YTM at origination (decimal, e.g. 0.0920 for 9.20%)"); r += 1
+add_field(ws_ob, r, "Expected Hold Period (years)", guidance="Expected investment horizon"); r += 1
+add_field(ws_ob, r, "Exit Strategy", guidance="hold to maturity | sell | refinance | describe"); r += 1
+
+# Group F
+r += 1; make_section(ws_ob, r, 3, "F. MARKET CONTEXT AT ONBOARDING"); r += 1
+add_field(ws_ob, r, "Entry Risk-Free Rate (bps)", guidance="10yr gilt / Treasury at entry"); r += 1
+add_field(ws_ob, r, "Entry Credit Spread (bps)", guidance="Spread over risk-free rate at entry"); r += 1
+add_field(ws_ob, r, "Entry Relative Value Notes", guidance="Rationale for the deal at that time"); r += 1
+
+# Group G
+r += 1; make_section(ws_ob, r, 3, "G. INITIAL RISK ASSESSMENT"); r += 1
+add_field(ws_ob, r, "Initial Risk Score", guidance="Risk register score at origination"); r += 1
+add_field(ws_ob, r, "Initial Grade", guidance="Grade at origination (e.g. 2 - In Line)"); r += 1
+add_field(ws_ob, r, "Critical Risks at Onboarding", guidance="Top 3 risks summary narrative"); r += 1
+
+r += 1
+add_field(ws_ob, r, "Snapshot Notes", guidance="Any general notes about this snapshot"); r += 1
+
+# Update Validation tab
+ws13 = wb["Validation"]
+next_row = 16
+ws13.cell(row=next_row, column=1, value="20. Onboarding Snapshot").font = label_font
+ws13.cell(row=next_row, column=1).border = border
+ws13.cell(row=next_row, column=2).border = border
+ws13.cell(row=next_row, column=2).fill = input_fill
+ws13.cell(row=next_row, column=3, value="Write-once snapshot frozen at investment. Fill in as much as is available at origination.").font = note_font
+ws13.cell(row=next_row, column=3).border = border
+
+
 # Save
 import os
-out = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs", "topsheet-data-template-v4.xlsx")
+out = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs", "topsheet-data-template-v5.xlsx")
 wb.save(out)
 print(f"Saved to {out}")

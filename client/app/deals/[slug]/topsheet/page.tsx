@@ -147,6 +147,85 @@ export default async function TopSheetPage({ params }: { params: Promise<{ slug:
           ["Concession Expiry", fmtDate(d.concession_expiry_date)],
           ["Fiscal Year End", d.fiscal_year_end_month ? `Month ${d.fiscal_year_end_month}` : "\u2014"],
         ]} />
+        {ts.tail && (() => {
+          const t = ts.tail;
+          const tone = t.classification === "positive_tail" ? "good"
+                      : t.classification === "negative_tail" ? "critical"
+                      : t.classification === "matched" ? "neutral" : "warning";
+          const label = t.classification === "positive_tail" ? "Positive tail"
+                      : t.classification === "negative_tail" ? "Negative tail (merchant)"
+                      : t.classification === "matched" ? "Matched"
+                      : "Unknown";
+          const anchorType = t.anchorType === "concession" ? "Concession expiry"
+                             : t.anchorType === "primary_contract" ? "Primary revenue contract"
+                             : t.anchorType === "asset_life" ? "Economic asset life"
+                             : "Unknown anchor";
+          const residual = t.residualValueTreatment === "zero_residual" ? "Zero (hand-back)"
+                           : t.residualValueTreatment === "nominal_residual" ? "Nominal"
+                           : t.residualValueTreatment === "retained_asset" ? "Retained asset"
+                           : "\u2014";
+          return (
+            <>
+              <h3 style={{ fontSize: "0.80rem", fontWeight: 700, marginTop: 16, marginBottom: 8, color: "var(--accent)" }}>
+                Tail Analysis
+                {" "}
+                <span className={`badge ${tone}`} style={{ marginLeft: 8, fontSize: "0.7rem" }}>
+                  {label} {t.tailYears != null ? `${t.tailYears > 0 ? "+" : ""}${t.tailYears}y` : ""}
+                </span>
+              </h3>
+              <DL items={[
+                ["Anchor Type", anchorType],
+                ["Anchor Date", fmtDate(t.anchorDate)],
+                ["Anchor Description", t.anchorLabel],
+                ["Latest Debt Maturity", fmtDate(t.latestDebtMaturity)],
+                ["Tail (years)", t.tailYears != null ? `${t.tailYears > 0 ? "+" : ""}${t.tailYears} years` : "\u2014"],
+                ["Residual Value", residual],
+              ]} />
+              {t.notes && (
+                <p style={{ fontSize: "0.78rem", color: "var(--ink-soft)", marginTop: 8, lineHeight: 1.45 }}>
+                  {t.notes}
+                </p>
+              )}
+            </>
+          );
+        })()}
+        {ts.renewalAnalysis && (() => {
+          const r = ts.renewalAnalysis;
+          const tone = r.flagLevel === "hard_fail" ? "critical"
+                      : r.flagLevel === "red" ? "critical"
+                      : r.flagLevel === "amber" ? "warning"
+                      : "good";
+          const flagLabel = r.flagLevel === "hard_fail" ? "HARD FAIL"
+                          : r.flagLevel === "red" ? "Red flag"
+                          : r.flagLevel === "amber" ? "Amber flag"
+                          : "OK";
+          return (
+            <>
+              <h3 style={{ fontSize: "0.80rem", fontWeight: 700, marginTop: 16, marginBottom: 8, color: "var(--accent)" }}>
+                Renewal Analysis
+                {" "}
+                <span className={`badge ${tone}`} style={{ marginLeft: 8, fontSize: "0.7rem" }}>{flagLabel}</span>
+              </h3>
+              <DL items={[
+                ["Renewal Profile", r.profileLabel],
+                ["Debt Reliance on Renewal", r.debtRelianceOnRenewalPct != null ? `${r.debtRelianceOnRenewalPct}%` : "\u2014"],
+                ["Tail Classification", r.tailClassification ? r.tailClassification.replace(/_/g, " ") : "\u2014"],
+              ]} />
+              {r.flagReasons && r.flagReasons.length > 0 && (
+                <ul style={{ fontSize: "0.78rem", color: "var(--ink-soft)", marginTop: 8, paddingLeft: 18, lineHeight: 1.45 }}>
+                  {r.flagReasons.map((reason: string, i: number) => (
+                    <li key={i} style={{ marginBottom: 4 }}>{reason}</li>
+                  ))}
+                </ul>
+              )}
+              {r.notes && (
+                <p style={{ fontSize: "0.78rem", color: "var(--ink-soft)", marginTop: 6, lineHeight: 1.45 }}>
+                  {r.notes}
+                </p>
+              )}
+            </>
+          );
+        })()}
         <h3 style={{ fontSize: "0.80rem", fontWeight: 700, marginTop: 16, marginBottom: 8, color: "var(--accent)" }}>Ratings & Classification</h3>
         <DL items={[
           ["Moody's", d.moodys_rating],
@@ -161,6 +240,100 @@ export default async function TopSheetPage({ params }: { params: Promise<{ slug:
           ["Duration Coverage", d.duration_coverage_pct ? `${d.duration_coverage_pct}%` : "\u2014"],
         ]} />
       </Section>
+
+      {/* ═══ SECTION 1B: Onboarding Snapshot ═══════════════════════ */}
+      {ts.onboardingSnapshot && (() => {
+        const s = ts.onboardingSnapshot;
+        const fmtPct = (v: any) => v != null ? `${Number(v).toFixed(2)}%` : "\u2014";
+        const fmtRatio = (v: any) => v != null ? `${Number(v).toFixed(2)}x` : "\u2014";
+        const fmtYears = (v: any) => v != null ? `${Number(v).toFixed(2)} years` : "\u2014";
+        const fmtBps = (v: any) => v != null ? `${v} bps` : "\u2014";
+        return (
+          <Section eyebrow="F.1B" title="Onboarding Snapshot (Frozen at Investment)">
+            <div style={{ fontSize: "0.78rem", color: "var(--ink-soft)", marginBottom: 10, padding: "8px 12px", background: "var(--accent-soft)", borderRadius: 6 }}>
+              <strong style={{ color: "var(--accent)" }}>Write-once snapshot</strong> captured on {fmtDate(s.snapshot_date)} (reason: {s.snapshot_reason}, snapshot #{s.snapshot_number}). These values are immutable — any change requires a new snapshot via restructuring event.
+              {ts.onboardingHistory && ts.onboardingHistory.length > 1 && (
+                <span> {" "}· {ts.onboardingHistory.length} historical snapshots on file.</span>
+              )}
+            </div>
+
+            <h3 style={{ fontSize: "0.80rem", fontWeight: 700, marginTop: 4, marginBottom: 8, color: "var(--accent)" }}>A. Structural Position at Onboarding</h3>
+            <DL items={[
+              ["Tail (years)", s.tail_years_at_onboarding != null ? `${s.tail_years_at_onboarding > 0 ? "+" : ""}${Number(s.tail_years_at_onboarding).toFixed(2)} years` : "\u2014"],
+              ["Tail Classification", s.tail_classification_at_onboarding ? String(s.tail_classification_at_onboarding).replace(/_/g, " ") : "\u2014"],
+              ["Renewal Profile", s.renewal_profile_at_onboarding ? String(s.renewal_profile_at_onboarding).replace(/_/g, " ") : "\u2014"],
+              ["Debt Reliance on Renewal", fmtPct(s.debt_repayment_from_renewal_pct_at_onboarding)],
+              ["Revenue Risk (P-V-D)", s.revenue_risk_code_at_onboarding],
+              ["Concession Remaining", fmtYears(s.concession_years_remaining_at_onboarding)],
+            ]} />
+
+            <h3 style={{ fontSize: "0.80rem", fontWeight: 700, marginTop: 16, marginBottom: 8, color: "var(--accent)" }}>B. Financial Metrics at Onboarding</h3>
+            <DL items={[
+              ["Entry Leverage", fmtRatio(s.entry_leverage)],
+              ["Entry Year-1 DSCR", fmtRatio(s.entry_dscr_year_1)],
+              ["Min DSCR (life)", fmtRatio(s.entry_dscr_min_life)],
+              ["Entry LLCR", fmtRatio(s.entry_llcr)],
+              ["Loan Life", fmtYears(s.entry_loan_life_years)],
+              ["Weighted Average Life", fmtYears(s.entry_wal_years)],
+            ]} />
+
+            <h3 style={{ fontSize: "0.80rem", fontWeight: 700, marginTop: 16, marginBottom: 8, color: "var(--accent)" }}>C. Lender Case / Stress at Onboarding</h3>
+            <DL items={[
+              ["Lender Case Min DSCR", fmtRatio(s.lender_case_dscr_min)],
+              ["Lender Case Peak Leverage", fmtRatio(s.lender_case_leverage_peak)],
+              ["Stress Break-Even", fmtPct(s.stress_break_even_pct)],
+            ]} />
+            {s.stress_cases_tested && (
+              <p style={{ fontSize: "0.78rem", color: "var(--ink-soft)", marginTop: 6, lineHeight: 1.45 }}>{s.stress_cases_tested}</p>
+            )}
+
+            <h3 style={{ fontSize: "0.80rem", fontWeight: 700, marginTop: 16, marginBottom: 8, color: "var(--accent)" }}>D. IC Governance</h3>
+            <DL items={[
+              ["IC Memo Date", fmtDate(s.ic_memo_date)],
+              ["IC Memo Reference", s.ic_memo_reference],
+              ["Approved By", s.ic_approved_by],
+              ["Vote Margin", s.ic_vote_margin],
+            ]} />
+            {s.ic_approval_conditions && (
+              <p style={{ fontSize: "0.78rem", color: "var(--ink-soft)", marginTop: 6, lineHeight: 1.45 }}>
+                <strong>Conditions:</strong> {s.ic_approval_conditions}
+              </p>
+            )}
+
+            <h3 style={{ fontSize: "0.80rem", fontWeight: 700, marginTop: 16, marginBottom: 8, color: "var(--accent)" }}>E. Origination Economics</h3>
+            <DL items={[
+              ["All-In Margin", fmtBps(s.entry_all_in_margin_bps)],
+              ["Upfront Fees", fmtBps(s.entry_upfront_fees_bps)],
+              ["Secondary Purchase Price", s.entry_secondary_purchase_price_pct != null ? `${Number(s.entry_secondary_purchase_price_pct).toFixed(2)}% of par` : "\u2014"],
+              ["Yield to Maturity", s.entry_yield_to_maturity != null ? `${(Number(s.entry_yield_to_maturity) * 100).toFixed(2)}%` : "\u2014"],
+              ["Expected Hold Period", fmtYears(s.expected_hold_period_years)],
+              ["Exit Strategy", s.exit_strategy],
+            ]} />
+
+            <h3 style={{ fontSize: "0.80rem", fontWeight: 700, marginTop: 16, marginBottom: 8, color: "var(--accent)" }}>F. Market Context at Onboarding</h3>
+            <DL items={[
+              ["Risk-Free Rate", fmtBps(s.entry_risk_free_rate_bps)],
+              ["Credit Spread", fmtBps(s.entry_credit_spread_bps)],
+            ]} />
+            {s.entry_relative_value_notes && (
+              <p style={{ fontSize: "0.78rem", color: "var(--ink-soft)", marginTop: 6, lineHeight: 1.45 }}>{s.entry_relative_value_notes}</p>
+            )}
+
+            <h3 style={{ fontSize: "0.80rem", fontWeight: 700, marginTop: 16, marginBottom: 8, color: "var(--accent)" }}>G. Initial Risk Assessment</h3>
+            <DL items={[
+              ["Initial Risk Score", s.initial_risk_score != null ? Number(s.initial_risk_score).toFixed(1) : "\u2014"],
+              ["Initial Grade", s.initial_grade],
+            ]} />
+            {s.critical_risks_at_onboarding && (
+              <p style={{ fontSize: "0.78rem", color: "var(--ink-soft)", marginTop: 6, lineHeight: 1.45 }}>{s.critical_risks_at_onboarding}</p>
+            )}
+
+            {s.notes && (
+              <p style={{ fontSize: "0.78rem", color: "var(--ink-soft)", marginTop: 12, fontStyle: "italic" }}>{s.notes}</p>
+            )}
+          </Section>
+        );
+      })()}
 
       {/* ═══ SECTION 2: Capital Structure ══════════════════════════ */}
       <Section eyebrow="F.2A" title="Capital Structure">
