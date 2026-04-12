@@ -10956,6 +10956,31 @@ def get_portfolio(
     except Exception:
         pass
 
+    # Enrich with latest Net Debt / EBITDA from actual_periods
+    try:
+        with get_connection() as nd_conn:
+            nd_rows = nd_conn.execute(
+                """SELECT DISTINCT ON (deal_id) deal_id,
+                          actual_metrics->'net_debt_ebitda' AS nd_ebitda
+                   FROM actual_periods
+                   WHERE actual_metrics ? 'net_debt_ebitda'
+                   ORDER BY deal_id, period_end DESC"""
+            ).fetchall()
+            nd_map = {}
+            for r in nd_rows:
+                v = r["nd_ebitda"]
+                if v is not None:
+                    try:
+                        nd_map[int(r["deal_id"])] = float(v)
+                    except (ValueError, TypeError):
+                        pass
+            for entry in deal_rows_by_slug.values():
+                nd = nd_map.get(int(entry["dealId"]))
+                if nd is not None:
+                    entry["ndEbitda"] = nd
+    except Exception:
+        pass
+
     # Enrich deal rows with weighted average spread from capital structure
     try:
         with get_connection() as spread_conn:
@@ -11778,6 +11803,31 @@ def get_dashboard(
                     ct = ct_map.get(int(entry["dealId"]))
                     if ct:
                         entry["performanceTrend"] = ct
+    except Exception:
+        pass
+
+    # Enrich with latest Net Debt / EBITDA from actual_periods
+    try:
+        with get_connection() as nd_conn:
+            nd_rows = nd_conn.execute(
+                """SELECT DISTINCT ON (deal_id) deal_id,
+                          actual_metrics->'net_debt_ebitda' AS nd_ebitda
+                   FROM actual_periods
+                   WHERE actual_metrics ? 'net_debt_ebitda'
+                   ORDER BY deal_id, period_end DESC"""
+            ).fetchall()
+            nd_map = {}
+            for r in nd_rows:
+                v = r["nd_ebitda"]
+                if v is not None:
+                    try:
+                        nd_map[int(r["deal_id"])] = float(v)
+                    except (ValueError, TypeError):
+                        pass
+            for entry in deal_rows_by_slug.values():
+                nd = nd_map.get(int(entry["dealId"]))
+                if nd is not None:
+                    entry["ndEbitda"] = nd
     except Exception:
         pass
 

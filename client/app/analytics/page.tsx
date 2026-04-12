@@ -39,207 +39,123 @@ const RULES: AnalyticsRule[] = [
 **Default thresholds:** DSCR = 10%, Collateral = 5%. These are configurable per deal.`,
   },
   {
-    id: "performance-trend",
-    name: "Performance Trend",
+    id: "plan-variance-trend",
+    name: "Plan Variance Trend Engine",
     category: "Performance & Grading",
-    summary: "Direction of travel based on 3 consecutive periods of headroom erosion change.",
-    detail: `Trend is computed from 3 consecutive reporting periods of headroom erosion percentages (E1, E2, E3 = T-2, T-1, T-0).
+    summary: "Measures how each deal is performing against its management case by tracking headroom erosion and improvement on two key credit ratios (one cash cover + one collateral) over time.",
+    detail: `The Plan Variance Trend Engine is the platform's primary trend indicator. It answers the question: "Is the deal drifting away from its management case, or coming back to plan?" It tracks two credit ratios per deal — not underlying line items like revenue or opex.
 
-**Delta calculation:**
-- Delta 1 = E2 − E1 (period-on-period change)
-- Delta 2 = E3 − E2 (latest period-on-period change)
+**What it monitors per deal:**
+- **Cash cover ratio:** Senior DSCR (universal). Falls back to PMICR or ICR if DSCR is unavailable.
+- **Primary collateral ratio:** Selected per deal at ingestion — LLCR, Net Debt:EBITDA, LTV, RAR, or similar depending on deal type. Changeable by admin only.
 
-**Delta classification** (each delta independently):
-- "large_positive": delta > large_threshold (5pp for DSCR, 2.5pp for collateral)
-- "moderate_positive": small_threshold < delta ≤ large_threshold
-- "negative": delta < −small_threshold (improvement)
-- "small": within ±small_threshold (2.5pp)
-
-**Persistent drift flag:** TRUE if E1 > 0 AND E2 > E1 AND E3 > E2 (three consecutive periods of worsening).
-
-**Classification matrix (based on Delta 2 primarily):**
-- Delta 2 = "negative" → **Improving** (unless recovery from large positive)
-- Delta 2 = "small" → **Flat** (or Improving if Delta 1 was negative; Deteriorating if persistent drift)
-- Delta 2 = "moderate_positive" → **Deteriorating** (or Flat if recovering from negative)
-- Delta 2 = "large_positive" → **Deteriorating Rapidly** (or Deteriorating if recovering from negative)
-
-**Combined trend:** Takes worst of DSCR trend and collateral trend.
-Ranking: deteriorating_rapidly > deteriorating > flat > improving.`,
-  },
-  {
-    id: "trend-detection-engine",
-    name: "Plan Variance Trend Engine (v5)",
-    category: "Performance & Grading",
-    summary: "Computes headroom erosion / improvement vs the management case for two credit ratios per deal (one cash cover + one collateral), then classifies direction using 7-band symmetric deltas with persistent drift detection.",
-    detail: `The Plan Variance Trend Engine replaces the earlier time-series trend engine. It no longer tracks absolute metric movements; instead it computes the gap between actual and expected headroom for each monitored credit ratio, period by period, and classifies the direction and speed of change.
-
-The engine runs on every deal via \`POST /api/deals/{slug}/analytics/detect-trends\` and can be invoked with custom parameters in the request body.
+**Terminology:**
+- **Headroom Improvement** = actual headroom exceeds expected headroom. Deal is performing above plan. Favourable.
+- **Headroom Erosion** = actual headroom is less than expected headroom. Deal is performing below plan. Adverse.
+- **Flat** = actual headroom matches expected headroom within a \\u00B11% tolerance. Deal is on plan.
 
 ---
 
-**Data source**
-Reads from the legacy \`actual_periods.actual_metrics\` JSONB column. Deals ingested through the new normalised line-item pipeline (\`period_financial_items\`) are backfilled into \`actual_periods\` using a standard aggregation: the line keys \`total_revenue\`, \`total_operating_costs\`, \`ebitda\`, \`cfads\`, \`capital_expenditure\`, \`senior_debt_service\`, \`senior_dscr\`, \`llcr\`, \`net_debt_ebitda\` map to the metric keys \`revenue\`, \`opex\`, \`ebitda\`, \`cfads\`, \`capex\`, \`debt_service\`, \`dscr\`, \`llcr\`, \`net_debt_ebitda\`.
+**Step 1 — Compute headroom change for each period**
+
+For higher-is-better ratios (DSCR, LLCR, ICR, FFO/Net Debt, etc.):
+- Headroom = Actual ratio value \\u2212 Default threshold
+
+For lower-is-better ratios (Net Debt:EBITDA, LTV, RAR, etc.):
+- Headroom = Default threshold \\u2212 Actual ratio value
+
+Then: Headroom change % = (Actual headroom \\u2212 Expected headroom) / |Expected headroom| \\u00D7 100
+
+Positive = Headroom Improvement. Negative = Headroom Erosion. Zero = Flat.
+
+Where no DSCR default threshold is specified in the covenant documentation (common in US deals), the engine assumes 1.0x.
 
 ---
 
-**Tracked metrics**
-By default: \`dscr\`, \`llcr\`, \`plcr\`, \`revenue\`, \`ebitda\`, \`cfads\`, \`opex\`, \`capex\`, \`debt_service\`, \`net_income\`, \`net_debt_ebitda\`. Additional metrics can be requested via the \`metrics\` body parameter.
+**Step 2 — Build a headroom change series**
+
+One series per monitored ratio: H\\u2081, H\\u2082, \\u2026 H\\u2099 across N historical periods.
+
+**Step 3 — Compute period-on-period deltas**
+
+With 2 periods: \\u0394\\u2081 = H\\u2082 \\u2212 H\\u2081 (single delta, drift detection only).
+With 3+ periods: \\u0394\\u2081 = H\\u2099\\u208B\\u2081 \\u2212 H\\u2099\\u208B\\u2082 and \\u0394\\u2082 = H\\u2099 \\u2212 H\\u2099\\u208B\\u2081 (two deltas, full classification including persistent drift).
 
 ---
 
-**Direction preference map (new)**
-Each metric is tagged as either **higher-is-better** or **lower-is-better**. This is critical: a 48% increase in EBITDA is good news, but a 48% increase in opex is bad news. The engine uses the preference map to classify the direction correctly.
+**Step 4 — Classify each delta into 7 symmetric bands**
 
-- **higher-is-better:** dscr, llcr, plcr, icr, revenue, ebitda, cfads, net_income, ebitda_margin
-- **lower-is-better:** opex, capex, debt_service, net_debt_ebitda, leverage, ltv
+| Band | Range | Meaning |
+|---|---|---|
+| Large improvement | \\u0394 > +large_threshold | Rapid headroom improvement vs plan |
+| Moderate improvement | +small < \\u0394 \\u2264 +large | Meaningful headroom improvement |
+| Small improvement | +1% < \\u0394 \\u2264 +small | Minor headroom improvement |
+| Flat | \\u22121% \\u2264 \\u0394 \\u2264 +1% | On plan; no material change |
+| Small erosion | \\u2212small \\u2264 \\u0394 < \\u22121% | Minor headroom erosion |
+| Moderate erosion | \\u2212large \\u2264 \\u0394 < \\u2212small | Meaningful headroom erosion |
+| Large erosion | \\u0394 < \\u2212large_threshold | Rapid headroom erosion vs plan |
 
-**Classification logic:**
-1. Split the value series into first half and second half
-2. Compute the mean of each half
-3. Determine the **raw move**: up (second_half > first_half × 1.03), down (second_half < first_half × 0.97), or flat
-4. Map the raw move to a **direction** using the preference:
-   - preference = higher, move up → improving; move down → deteriorating
-   - preference = lower, move up → deteriorating; move down → improving
-   - move flat → stable
-
-**Severity bands** (only applied when direction = deteriorating):
-- total_change > 20% → critical
-- 10–20% → high
-- 5–10% → moderate
-- < 5% → low
+Default thresholds: small = 2.5pp, large = 5.0pp, flat tolerance = \\u00B11.0pp. Separate configs for cash cover vs collateral ratios.
 
 ---
 
-**Covenant-aware breach and recovery detection (new)**
-For metrics that carry contractual default/lockup thresholds, the engine layers a second signal on top of the directional classification. This handles the case where a metric breached a covenant and then recovered (e.g. DSCR dropped below 1.0x during Covid then climbed back above 2.0x). The directional trend alone would mark this "improving" and lose the signal that the deal went through a breach.
+**Step 5 — Detect persistent erosion drift**
 
-**Thresholds registered (configurable per deal in future):**
+Persistent drift = TRUE if three consecutive periods show worsening headroom erosion (each period\\u2019s headroom change more negative than the last). This catches compounding small movements that individually classify as "small erosion" but collectively represent a real trend away from plan.
 
-| Metric | Default | Lockup | Preference |
+---
+
+**Step 6 — Direction classification matrix (12 rows)**
+
+| \\u0394\\u2082 Band | \\u0394\\u2081 Band | Persistent Drift | Direction |
 |---|---|---|---|
-| dscr | 1.00 | 1.20 | higher |
-| llcr | 1.10 | 1.20 | higher |
-| icr | 1.50 | 2.00 | higher |
-| net_debt_ebitda | 8.00 | 6.00 | lower |
+| Large improvement | Any | Any | **Improving rapidly** |
+| Moderate improvement | Any | Any | **Improving** |
+| Small improvement | Any | Any | **Improving** |
+| Flat | Any | FALSE | **Flat** |
+| Flat | Any | TRUE | **Deteriorating** |
+| Small erosion | Improvement | Any | **Flat** |
+| Small erosion | Flat/Erosion | FALSE | **Flat** |
+| Small erosion | Flat/Erosion | TRUE | **Deteriorating** |
+| Moderate erosion | Improvement | Any | **Flat** |
+| Moderate erosion | Flat/Erosion | Any | **Deteriorating** |
+| Large erosion | Improvement | Any | **Deteriorating** |
+| Large erosion | Flat/Erosion | Any | **Deteriorating rapidly** |
 
-**State classification (newest to oldest priority):**
-- **currently_breached** — latest value is below default (or above for lower-is-better). Severity promoted to **critical** regardless of directional move.
-- **currently_lockup** — latest value is between lockup and default.
-- **breached_and_recovered** — at least one historical value was below default, but the latest value is above default. Severity promoted to **moderate** if the directional severity was "none".
-- **lockup_and_recovered** — same but for lockup threshold.
-- **always_compliant** — no period ever touched a threshold.
-
-**Breach info object returned per metric:**
-\`\`\`json
-{
-  "state": "breached_and_recovered",
-  "defaultLevel": 1.00,
-  "lockupLevel": 1.20,
-  "everBreachedDefault": true,
-  "everBreachedLockup": true,
-  "periodsInBreach": 1,
-  "worstValue": 0.96,
-  "worstPeriod": "FY 2021",
-  "currentValue": 3.29,
-  "distanceToDefault": 2.29
-}
-\`\`\`
+5 distinct directions: Improving rapidly > Improving > Flat > Deteriorating > Deteriorating rapidly.
 
 ---
 
-**Trend type**
-Separately from direction, each series is classified as:
-- **monotonic** — the series never reverses direction period-on-period (strictly rising or strictly falling)
-- **volatile** — the series has at least one reversal
+**Step 7 — Overall deal trend**
 
-A monotonic deteriorating trend is a stronger signal than a volatile one because there is no evidence of any improvement step. A breach-and-recovered metric will always be classified volatile (by definition), which the breach info object discloses independently.
-
----
-
-**Worked example: Getlink FY2019-FY2024 DSCR series**
-
-Raw values: 2.18, 1.37, **0.96**, 1.99, 3.06, 3.29
-
-Before the fix:
-- Directional: second half avg (2.78) > first half avg (1.50) × 1.03 → **improving**, severity none
-- No breach signal
-
-After the fix:
-- Directional: still improving (+50.9% total change)
-- Breach detection: \`currentValue = 3.29\` > default 1.00 so not currently breached; \`worstValue = 0.96\` < 1.00, so \`everBreachedDefault = true\`
-- **State: breached_and_recovered**
-- **Severity promoted from none → moderate**
-- The full Covid-era breach is now visible in the response, and a reviewer can see both "the deal is improving" and "the deal briefly failed its DSCR covenant" at the same time.
-
-**Worked example: Getlink FY2019-FY2024 opex series**
-
-Raw values: €525m, €488m, €481m, €720m, €850m, €781m
-
-Before the fix:
-- Directional: second half avg (€784m) > first half avg (€498m) × 1.03 → **improving**
-- Incorrect: opex growing by 48% is bad news.
-
-After the fix:
-- Direction preference: opex = lower-is-better
-- Raw move: up (+48% total change)
-- Preference + move: lower-is-better + up → **deteriorating**
-- Severity: critical (total change > 20%)
-
----
-
-**Persistence**
-Deteriorating trends are written to the \`trend_records\` table with the latest financial period ID, so the grading engine and score computations can consume them. Improving and stable trends are returned in the API response but not persisted.
-
----
-
-**Known limitations**
-- Thresholds are currently hardcoded in \`_BREACH_THRESHOLDS\`. A future enhancement should load per-deal thresholds from the \`covenants\` table.
-**Two ratios per deal:**
-- **Cash cover ratio:** Always Senior DSCR. If DSCR is unavailable, falls back to PMICR or ICR.
-- **Primary collateral ratio:** Selected per deal at ingestion (LLCR, Net Debt:EBITDA, LTV, RAR, etc.). Changeable by admin only.
-
-**Headroom change calculation:**
-For higher-is-better ratios: headroom = value - default threshold.
-For lower-is-better ratios: headroom = default threshold - value.
-Headroom change % = (actual headroom - expected headroom) / |expected headroom| x 100.
-Positive = Headroom Improvement (deal above plan). Negative = Headroom Erosion (deal below plan). Zero = Flat.
-
-Where no DSCR default is specified (common in US deals), the engine assumes 1.0x.
-
-**7-band symmetric delta classification:**
-- Large improvement (delta > +large_threshold)
-- Moderate improvement (+small < delta <= +large)
-- Small improvement (+1% < delta <= +small)
-- Flat (-1% <= delta <= +1%)
-- Small erosion (-small <= delta < -1%)
-- Moderate erosion (-large <= delta < -small)
-- Large erosion (delta < -large)
-
-Default thresholds: small = 2.5pp, large = 5.0pp, flat tolerance = 1.0pp (separate configs for cash cover vs collateral).
-
-**Period requirements:**
-- 2 periods: single delta, drift detection only
-- 3+ periods: two deltas (delta1 + delta2), persistent drift detection
-
-**Persistent erosion drift:**
-TRUE if three consecutive periods show worsening headroom erosion (each period more negative than the last). Catches compounding small movements.
-
-**Direction classification matrix (12 rows):**
-Based on delta2 band, delta1 band, and persistent drift flag. Produces 5 distinct directions:
-- **Improving rapidly** (large improvement in delta2)
-- **Improving** (moderate or small improvement in delta2)
-- **Flat** (delta2 flat without persistent drift; or small/moderate erosion reversed by improvement in delta1)
-- **Deteriorating** (flat with persistent drift; moderate erosion; large erosion after improvement)
-- **Deteriorating rapidly** (large erosion without prior improvement)
-
-**Overall deal trend** = worst of the two ratio directions.
+The deal-level trend = worst of the two ratio directions. This becomes the official trend signal on the JPS dashboard.
 
 **Severity mapping:**
 - Deteriorating rapidly = high severity
 - Deteriorating = moderate severity
 - All others = none
 
-Persistent drift flags for analyst attention but does NOT auto-trigger watchlist.`,
+Persistent drift flags for analyst attention but does NOT auto-trigger watchlist.
+
+---
+
+**Data flow:**
+- Reads actuals from \\\`actual_periods.actual_metrics\\\` JSONB and management case forecasts from \\\`forecast_period_items\\\`
+- Persists the computed overall direction to \\\`deals.computed_trend\\\`
+- The portfolio API reads \\\`computed_trend\\\` to populate the Trend column on the JPS dashboard
+- Endpoint: \\\`POST /api/deals/{slug}/analytics/detect-trends\\\`
+
+---
+
+**Worked examples (from live portfolio data):**
+
+**Gatwick Airport (DSCR):** Headroom series shows massive improvement vs the conservative 2019 IC plan. Direction: **Improving rapidly**. The deal\\u2019s actual DSCR of 3.94x far exceeds the plan\\u2019s 2.20x.
+
+**North Sea OWF (DSCR):** FY2024 exactly on plan (0.0%), FY2025 stepped above plan (+23%). \\u0394\\u2082 = 0.0 (flat, holding the improvement). Direction: **Flat** — the deal improved and is now holding steady.
+
+**Getlink (Net Debt:EBITDA):** Covid caused massive erosion, then partial recovery, then FY2024 leverage worsened again due to ElecLink suspension. \\u0394\\u2082 = \\u221236.5pp (large erosion). Direction: **Deteriorating**.
+
+**Delta PRS (DSCR):** Actuals improving 2.5% p.a. vs plan. Headroom series: 0.0% \\u2192 +11.2% \\u2192 +22.2%. Direction: **Improving rapidly**.`,
   },
   {
     id: "score",

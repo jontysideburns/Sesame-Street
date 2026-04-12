@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sesame Street — System Architecture</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f0f2f5; color: #1a2a3a; padding: 32px; }
+  h1 { text-align: center; font-size: 1.8rem; color: #1e4a6e; margin-bottom: 6px; }
+  .subtitle { text-align: center; font-size: 0.9rem; color: #6b7b8d; margin-bottom: 32px; }
+  .architecture { max-width: 1400px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+
+  /* Layer containers */
+  .layer { border-radius: 16px; padding: 20px 24px; position: relative; }
+  .layer-title { font-size: 0.7rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
+  .layer-title .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+
+  .layer-external { background: #f5f5f5; border: 2px dashed #bbb; }
+  .layer-external .layer-title { color: #777; }
+  .layer-external .dot { background: #999; }
+
+  .layer-ingestion { background: #fff3e0; border: 2px solid #ffb74d; }
+  .layer-ingestion .layer-title { color: #e65100; }
+  .layer-ingestion .dot { background: #ff9800; }
+
+  .layer-database { background: #e8f5e9; border: 2px solid #66bb6a; }
+  .layer-database .layer-title { color: #2e7d32; }
+  .layer-database .dot { background: #4caf50; }
+
+  .layer-analytics { background: #e3f2fd; border: 2px solid #42a5f5; }
+  .layer-analytics .layer-title { color: #1565c0; }
+  .layer-analytics .dot { background: #2196f3; }
+
+  .layer-api { background: #f3e5f5; border: 2px solid #ab47bc; }
+  .layer-api .layer-title { color: #7b1fa2; }
+  .layer-api .dot { background: #9c27b0; }
+
+  .layer-client { background: #e0f2f1; border: 2px solid #26a69a; }
+  .layer-client .layer-title { color: #00695c; }
+  .layer-client .dot { background: #009688; }
+
+  .layer-crosscut { background: #fce4ec; border: 2px solid #ef5350; }
+  .layer-crosscut .layer-title { color: #c62828; }
+  .layer-crosscut .dot { background: #f44336; }
+
+  /* Cards within layers */
+  .cards { display: flex; flex-wrap: wrap; gap: 10px; }
+  .card { background: white; border-radius: 10px; padding: 12px 16px; border: 1px solid rgba(0,0,0,0.08); box-shadow: 0 1px 4px rgba(0,0,0,0.04); min-width: 160px; flex: 1; }
+  .card-title { font-size: 0.78rem; font-weight: 700; margin-bottom: 6px; color: #1e4a6e; }
+  .card-items { font-size: 0.68rem; color: #5a6a7a; line-height: 1.6; }
+  .card-items code { background: #f0f4f8; padding: 1px 5px; border-radius: 4px; font-size: 0.65rem; font-family: 'SF Mono', Consolas, monospace; }
+
+  /* Flow arrows between layers */
+  .flow { display: flex; justify-content: center; align-items: center; padding: 4px 0; }
+  .flow svg { width: 40px; height: 28px; }
+  .flow-label { font-size: 0.65rem; color: #888; margin: 0 12px; font-style: italic; }
+
+  /* Table groups in database */
+  .table-group { background: #c8e6c9; border-radius: 8px; padding: 10px 14px; flex: 1; min-width: 140px; }
+  .table-group-title { font-size: 0.7rem; font-weight: 700; color: #1b5e20; margin-bottom: 4px; }
+  .table-group-items { font-size: 0.62rem; color: #33691e; line-height: 1.7; }
+
+  /* Engine cards */
+  .engine { background: #bbdefb; border-radius: 8px; padding: 10px 14px; flex: 1; min-width: 150px; }
+  .engine-title { font-size: 0.72rem; font-weight: 700; color: #0d47a1; margin-bottom: 4px; }
+  .engine-desc { font-size: 0.62rem; color: #1565c0; line-height: 1.5; }
+
+  /* Page cards */
+  .page { background: #b2dfdb; border-radius: 8px; padding: 10px 14px; flex: 1; min-width: 140px; }
+  .page-title { font-size: 0.72rem; font-weight: 700; color: #004d40; margin-bottom: 4px; }
+  .page-desc { font-size: 0.62rem; color: #00695c; line-height: 1.5; }
+
+  /* Framework cards */
+  .framework { background: #ffcdd2; border-radius: 8px; padding: 10px 14px; flex: 1; min-width: 160px; }
+  .framework-title { font-size: 0.72rem; font-weight: 700; color: #b71c1c; margin-bottom: 4px; }
+  .framework-desc { font-size: 0.62rem; color: #c62828; line-height: 1.5; }
+
+  /* Two-column layout for wider sections */
+  .split { display: flex; gap: 20px; }
+  .split > * { flex: 1; }
+
+  @media (max-width: 900px) {
+    .split { flex-direction: column; }
+    .cards { flex-direction: column; }
+  }
+</style>
+</head>
+<body>
+
+<h1>Sesame Street &mdash; System Architecture</h1>
+<p class="subtitle">Private Credit Monitoring Platform &bull; Next.js 15 + Python Starlette + PostgreSQL 16</p>
+
+<div class="architecture">
+
+  <!-- LAYER 1: External Inputs -->
+  <div class="layer layer-external">
+    <div class="layer-title"><span class="dot"></span> External Data Sources</div>
+    <div class="cards">
+      <div class="card">
+        <div class="card-title">TopSheet Excel Templates</div>
+        <div class="card-items">23-tab controlled workbook (v5)<br>Deal identity, capital structure, covenants, forecasts, risks<br><code>topsheet-data-template-v5.xlsx</code></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Companies House Filings</div>
+        <div class="card-items">Annual reports &amp; financial statements<br>PDF extraction via <code>pypdf</code><br>Income statement, balance sheet, strategic report</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Universal Registration Documents</div>
+        <div class="card-items">Listed company annual filings (URDs)<br>Segment revenue, debt structure, covenants<br>Multi-hundred page PDFs</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Compliance Certificates</div>
+        <div class="card-items">Borrower-reported covenant ratios<br>Periodic financial data submissions<br>Triggers <code>actual_periods</code> population</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Credit Rating Reports</div>
+        <div class="card-items">Fitch, Moody's, S&amp;P<br>Rating actions, outlooks, sensitivities<br>Updates <code>deals</code> rating columns</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Arrow -->
+  <div class="flow">
+    <svg viewBox="0 0 40 28"><path d="M20 2 L20 22 M12 16 L20 24 L28 16" fill="none" stroke="#999" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <span class="flow-label">Ingestion (SQL scripts, Python parsers, manual upload)</span>
+    <svg viewBox="0 0 40 28"><path d="M20 2 L20 22 M12 16 L20 24 L28 16" fill="none" stroke="#999" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  </div>
+
+  <!-- LAYER 2: Ingestion -->
+  <div class="layer layer-ingestion">
+    <div class="layer-title"><span class="dot"></span> Ingestion Layer</div>
+    <div class="cards">
+      <div class="card">
+        <div class="card-title">SQL Ingestion Scripts</div>
+        <div class="card-items">Per-deal scripts in <code>scripts/</code><br><code>ingest-gatwick.sql</code>, <code>ingest-m6-toll.sql</code>, <code>ingest-red.sql</code><br>Idempotent (ON CONFLICT DO NOTHING)</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Excel Template Generator</div>
+        <div class="card-items"><code>scripts/create-topsheet-template.py</code><br>Generates controlled workbook with validation dropdowns<br>23 tabs, 80-period forecast grids</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Document Intake Pipeline</div>
+        <div class="card-items"><code>POST /api/intake/submit</code><br>Base64 upload &rarr; file storage &rarr; proposal/commit workflow<br>Tracks source documents per period</div>
+      </div>
+      <div class="card">
+        <div class="card-title">PDF Extraction</div>
+        <div class="card-items"><code>pypdf</code> for text-based PDFs<br>Page-by-page scanning for financial tables<br>Manual review for scanned/image PDFs</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Arrow -->
+  <div class="flow">
+    <svg viewBox="0 0 40 28"><path d="M20 2 L20 22 M12 16 L20 24 L28 16" fill="none" stroke="#4caf50" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <span class="flow-label">INSERT / UPDATE &rarr; PostgreSQL 16</span>
+    <svg viewBox="0 0 40 28"><path d="M20 2 L20 22 M12 16 L20 24 L28 16" fill="none" stroke="#4caf50" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  </div>
+
+  <!-- LAYER 3: Database -->
+  <div class="layer layer-database">
+    <div class="layer-title"><span class="dot"></span> PostgreSQL 16 &mdash; Database Layer</div>
+    <div class="cards">
+      <div class="table-group">
+        <div class="table-group-title">Deal Master</div>
+        <div class="table-group-items"><code>deals</code> (12 deals, ~80 columns)<br><code>corporate_entities</code><br><code>deal_counterparties</code><br><code>deal_jurisdiction_splits</code><br><code>holdings</code> &rarr; <code>accounts</code> &rarr; <code>portfolio_owners</code></div>
+      </div>
+      <div class="table-group">
+        <div class="table-group-title">Capital Structure</div>
+        <div class="table-group-items"><code>capital_structure_instruments</code><br><code>enforcement_classes</code><br><code>hedge_portfolio</code><br><code>deal_reserve_accounts</code><br><code>intercreditor_terms</code></div>
+      </div>
+      <div class="table-group">
+        <div class="table-group-title">Financial Data</div>
+        <div class="table-group-items"><code>line_item_definitions</code> (200+ items)<br><code>period_financial_items</code> (actuals)<br><code>deal_reporting_periods</code><br><code>deal_reporting_schedule</code><br><code>deal_financial_template</code><br><code>deal_line_item_labels</code></div>
+      </div>
+      <div class="table-group">
+        <div class="table-group-title">Forecasts</div>
+        <div class="table-group-items"><code>forecast_cases</code> (mgmt/credit/downside)<br><code>forecast_case_versions</code><br><code>forecast_period_items</code><br><code>forecast_model_metadata</code><br><code>actual_periods</code> (legacy JSONB)</div>
+      </div>
+      <div class="table-group">
+        <div class="table-group-title">Covenants &amp; Risk</div>
+        <div class="table-group-items"><code>covenants</code> (monitored ratios)<br><code>covenant_thresholds</code> (3-tier)<br><code>covenant_tests</code> (results)<br><code>risk_taxonomy</code> (242 items)<br><code>risk_register_entries</code><br><code>deal_kpi_targets</code></div>
+      </div>
+      <div class="table-group">
+        <div class="table-group-title">Snapshots &amp; Governance</div>
+        <div class="table-group-items"><code>deal_onboarding_snapshots</code><br>(write-once, immutable trigger)<br><code>performance_assessments</code><br><code>trend_records</code><br><code>deal_consent_mechanics</code><br><code>deal_obligation_register</code></div>
+      </div>
+    </div>
+    <div style="margin-top: 10px; font-size: 0.62rem; color: #2e7d32;">
+      Schema: <code>postgres/init.sql</code> (seed) + <code>postgres/migrations.sql</code> (idempotent updates) &bull; Docker: <code>docker/postgres.Dockerfile</code>
+    </div>
+  </div>
+
+  <!-- Arrow -->
+  <div class="flow">
+    <svg viewBox="0 0 40 28"><path d="M20 2 L20 22 M12 16 L20 24 L28 16" fill="none" stroke="#2196f3" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <span class="flow-label">SQL queries &rarr; Python Starlette server (port 4000)</span>
+    <svg viewBox="0 0 40 28"><path d="M20 2 L20 22 M12 16 L20 24 L28 16" fill="none" stroke="#2196f3" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  </div>
+
+  <!-- LAYER 4: Analytics Engines -->
+  <div class="layer layer-analytics">
+    <div class="layer-title"><span class="dot"></span> Analytics Engines &mdash; <code>server/main.py</code></div>
+    <div class="cards">
+      <div class="engine">
+        <div class="engine-title">Plan Variance Trend</div>
+        <div class="engine-desc">Headroom erosion/improvement vs management case<br>7-band symmetric deltas, persistent drift<br>5 directions: improving rapidly &rarr; deteriorating rapidly<br><code>POST /analytics/detect-trends</code></div>
+      </div>
+      <div class="engine">
+        <div class="engine-title">Performance Grade</div>
+        <div class="engine-desc">4-grade scale (1=Outperforming to 4=Watchlist)<br>Headroom-based: DSCR + collateral<br>Auto-watchlist on Grade 4<br><code>POST /performance/compute</code></div>
+      </div>
+      <div class="engine">
+        <div class="engine-title">Covenant Testing</div>
+        <div class="engine-desc">3-tier thresholds: lockup / trigger / default<br>Tests all configured ratios per period<br>Updates deal-level covenant status<br><code>POST /analytics/run-covenant-tests</code></div>
+      </div>
+      <div class="engine">
+        <div class="engine-title">Variance Engine</div>
+        <div class="engine-desc">Actuals vs management case per metric<br>Materiality: immaterial / notable / material<br>Direction: favourable / adverse<br><code>POST /analytics/run-variance</code></div>
+      </div>
+      <div class="engine">
+        <div class="engine-title">Three-Case Comparison</div>
+        <div class="engine-desc">Actuals vs mgmt / credit / downside simultaneously<br>Signal tiers: clear / monitor / warning / alarm<br>Downside breach = escalation<br><code>POST /analytics/three-case-comparison</code></div>
+      </div>
+      <div class="engine">
+        <div class="engine-title">Distribution Assessment</div>
+        <div class="engine-desc">4 blocker conditions checked<br>Covenant status, consecutive lockup, reserves, obligations<br>Result: permitted / blocked<br><code>POST /analytics/assess-distribution</code></div>
+      </div>
+      <div class="engine">
+        <div class="engine-title">Risk Score &amp; Narrative</div>
+        <div class="engine-desc">Normalised 0-100 score from risk register<br>Template-driven narrative generator<br>6-sentence deterministic synthesis<br><code>GET /analytics/risk-score</code></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Arrow -->
+  <div class="flow">
+    <svg viewBox="0 0 40 28"><path d="M20 2 L20 22 M12 16 L20 24 L28 16" fill="none" stroke="#9c27b0" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <span class="flow-label">JSON API responses &rarr; Next.js client (port 3000)</span>
+    <svg viewBox="0 0 40 28"><path d="M20 2 L20 22 M12 16 L20 24 L28 16" fill="none" stroke="#9c27b0" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  </div>
+
+  <!-- LAYER 5: API -->
+  <div class="layer layer-api">
+    <div class="layer-title"><span class="dot"></span> API Layer &mdash; Python Starlette (~19k lines, single file)</div>
+    <div class="cards">
+      <div class="card">
+        <div class="card-title">Portfolio API</div>
+        <div class="card-items"><code>GET /api/portfolio</code><br>Scoped through holdings hierarchy<br>Enriched with trends, spreads, ratings<br>Org &rarr; Owner &rarr; Account &rarr; Holdings &rarr; Deals</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Deal API</div>
+        <div class="card-items"><code>GET /api/deals/{slug}</code><br>Full deal page data: covenant, risk, borrower requests<br>Risk narrative generator runs inline</div>
+      </div>
+      <div class="card">
+        <div class="card-title">TopSheet API</div>
+        <div class="card-items"><code>GET /api/deals/{slug}/topsheet</code><br>All child tables + line items + forecasts + actuals<br>Computes tail, renewal analysis, onboarding snapshot</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Financial Template API</div>
+        <div class="card-items"><code>GET/PUT /api/deals/{slug}/financial-template</code><br>Sector template config &amp; line item labels<br>Growth/maintenance capex split</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Governance APIs</div>
+        <div class="card-items">Borrower requests, consent votes<br>Memo packs, report exports<br>Obligation tracking, notifications</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Arrow -->
+  <div class="flow">
+    <svg viewBox="0 0 40 28"><path d="M20 2 L20 22 M12 16 L20 24 L28 16" fill="none" stroke="#009688" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <span class="flow-label">Server Components (RSC) + Client Components (Recharts, interactive)</span>
+    <svg viewBox="0 0 40 28"><path d="M20 2 L20 22 M12 16 L20 24 L28 16" fill="none" stroke="#009688" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  </div>
+
+  <!-- LAYER 6: Client -->
+  <div class="layer layer-client">
+    <div class="layer-title"><span class="dot"></span> Frontend &mdash; Next.js 15 (App Router) + React 19 + TypeScript</div>
+    <div class="cards">
+      <div class="page">
+        <div class="page-title">JPS Dashboard</div>
+        <div class="page-desc">Portfolio summary with 6 KPI cards<br>8 Recharts charts (grade, sector, trend, covenant, country, rating, format, security)<br>Sortable deal table (16 columns incl. ND:EBITDA)<br>Attention lists: watchlist, deteriorating, breaches</div>
+      </div>
+      <div class="page">
+        <div class="page-title">Deal Summary Page</div>
+        <div class="page-desc">Deal snapshot, compliance, distribution assessment<br>Risk register with generated narratives<br>Financial performance charts (5/10/max horizon)<br>DSCR + leverage dual-axis with red breach dots</div>
+      </div>
+      <div class="page">
+        <div class="page-title">TopSheet Page</div>
+        <div class="page-desc">10-section single-scroll view<br>Tail analysis &amp; renewal analysis blocks<br>Onboarding snapshot (write-once, 7 groups)<br>Forecast grid with case selector &amp; periodicity toggle</div>
+      </div>
+      <div class="page">
+        <div class="page-title">Templates Page</div>
+        <div class="page-desc">71-row generic cashflow model (F.5.2)<br>8 sector sub-templates with click-through<br>Growth/maintenance capex split<br>Revenue 1-8, Cost 1-12 generic labels</div>
+      </div>
+      <div class="page">
+        <div class="page-title">Analytics Page</div>
+        <div class="page-desc">25 documented analytical rules<br>Click-to-expand methodology cards<br>Covers every engine + framework<br>Revenue risk (P-V-D), tail, renewal, onboarding</div>
+      </div>
+      <div class="page">
+        <div class="page-title">Cross-Platform</div>
+        <div class="page-desc">Ctrl+F find-in-page overlay<br>Sidebar navigation (14 tabs)<br>Viewer context &amp; entitlements<br>CSS design system with badge tones</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Arrow -->
+  <div class="flow">
+    <svg viewBox="0 0 40 28"><path d="M20 2 L20 22 M12 16 L20 24 L28 16" fill="none" stroke="#f44336" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <span class="flow-label">Cross-cutting analytical frameworks (stored on deals table, computed by API)</span>
+    <svg viewBox="0 0 40 28"><path d="M20 2 L20 22 M12 16 L20 24 L28 16" fill="none" stroke="#f44336" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  </div>
+
+  <!-- LAYER 7: Cross-Cutting Frameworks -->
+  <div class="layer layer-crosscut">
+    <div class="layer-title"><span class="dot"></span> Cross-Cutting Analytical Frameworks</div>
+    <div class="cards">
+      <div class="framework">
+        <div class="framework-title">Revenue Risk (P-V-D)</div>
+        <div class="framework-desc">3-axis taxonomy: Pricing (P1-P6), Volume (V1-V6), Duration (D1-D5)<br>Lower = lower risk<br>Drives contracted/merchant split and portfolio charts</div>
+      </div>
+      <div class="framework">
+        <div class="framework-title">Tail Construct</div>
+        <div class="framework-desc">Gap between debt maturity and revenue anchor<br>3 anchor types: concession, primary_contract, asset_life<br>Positive tail / matched / negative tail (merchant)</div>
+      </div>
+      <div class="framework">
+        <div class="framework-title">Renewal Framework</div>
+        <div class="framework-desc">6 profiles: deep_market &rarr; hand_back_zero_value<br>2-D matrix with tail classification<br>HARD FAIL on clean-sheet + debt reliance &gt; 0%<br>Incumbent legacy debt disadvantage (RISK-REN-007)</div>
+      </div>
+      <div class="framework">
+        <div class="framework-title">Onboarding Snapshot</div>
+        <div class="framework-desc">Write-once frozen position at investment<br>7 groups: structural, financial, stress, IC governance, economics, market, risk<br>Immutability trigger; supersession for restructurings</div>
+      </div>
+      <div class="framework">
+        <div class="framework-title">Cover Ratio Classification</div>
+        <div class="framework-desc">33 ratios: 12 cash cover + 21 collateral<br>Direction preference per ratio (higher/lower is better)<br>ACR split: utility (=RAR) vs real estate (=1/LTV)<br>Moody's FFO-based ratios included</div>
+      </div>
+      <div class="framework">
+        <div class="framework-title">Risk Taxonomy</div>
+        <div class="framework-desc">242+ risk items across 28 categories<br>7 REN codes for contract/concession renewal<br>Template-driven narrative generator<br>Likelihood &times; Severity scoring (1-30)</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer: Docker / Tech Stack -->
+  <div style="margin-top: 16px; padding: 16px 20px; background: #263238; color: #b0bec5; border-radius: 12px; font-size: 0.7rem; line-height: 1.8;">
+    <strong style="color: #eceff1;">Infrastructure:</strong>
+    Docker Compose (<code style="color:#80cbc4;">docker/docker-compose.yml</code>) &bull;
+    Server: Python 3.12 + Starlette + Uvicorn (<code style="color:#80cbc4;">docker/server.Dockerfile</code>) &bull;
+    Database: PostgreSQL 16 Alpine (<code style="color:#80cbc4;">docker/postgres.Dockerfile</code>) &bull;
+    Client: Next.js 15 dev server (port 3000) &bull;
+    <br>
+    <strong style="color: #eceff1;">Current Portfolio:</strong>
+    12 deals &bull; 6 sectors (Airport, Toll Road, Wind Farm, Solar, Port, Real Estate) &bull; 5 countries (GB, FR, ES, US) &bull;
+    ~GBP 800M AUM
+  </div>
+
+</div>
+</body>
+</html>

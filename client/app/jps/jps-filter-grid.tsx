@@ -42,6 +42,7 @@ export type Deal = {
   reservesFullyFunded: boolean | null;
   reservesUnderfundedPeriods: number | null;
   topsheetCompletePct: number | null;
+  ndEbitda: number | null;
 };
 
 type HierarchyOrg = { id: number; name: string; dealCount: number };
@@ -58,7 +59,7 @@ type Filters = {
 
 const EMPTY: Filters = { organisation: "", owner: "", sector: "", grade: "", watchlist: "", search: "" };
 
-type SortKey = "dealName" | "topsheetCompletePct" | "sector" | "rating" | "exposure" | "performanceScore" | "grade" | "performanceTrend" | "covenantStatus" | "ratioStatus" | "latestPeriodEnd" | "reportedDscr" | "headroomPct" | "todos" | "watchlist" | "reservesFullyFunded";
+type SortKey = "dealName" | "topsheetCompletePct" | "sector" | "rating" | "exposure" | "performanceScore" | "grade" | "performanceTrend" | "covenantStatus" | "ratioStatus" | "latestPeriodEnd" | "reportedDscr" | "ndEbitda" | "headroomPct" | "todos" | "watchlist" | "reservesFullyFunded";
 type SortDir = "asc" | "desc";
 type SortState = { key: SortKey; dir: SortDir } | null;
 
@@ -101,37 +102,39 @@ function scoreTone(score: number | null) {
   return "critical";
 }
 
-// S&P-equivalent rating scale for sorting: lower index = better
-const RATING_SCALE = [
-  "AAA", "AA+", "AA", "AA-",
-  "A+", "A", "A-",
-  "BBB+", "BBB", "BBB-",
-  "BB+", "BB", "BB-",
-  "B+", "B", "B-",
-  "CCC+", "CCC", "CCC-", "CC", "C", "D",
+// Moody's rating scale for sorting and display: lower index = better
+const MOODYS_SCALE = [
+  "Aaa", "Aa1", "Aa2", "Aa3",
+  "A1", "A2", "A3",
+  "Baa1", "Baa2", "Baa3",
+  "Ba1", "Ba2", "Ba3",
+  "B1", "B2", "B3",
+  "Caa1", "Caa2", "Caa3", "Ca", "C", "D",
 ];
 
-// Moody's → S&P equivalent
-const MOODYS_MAP: Record<string, string> = {
-  Aaa: "AAA", Aa1: "AA+", Aa2: "AA", Aa3: "AA-",
-  A1: "A+", A2: "A", A3: "A-",
-  Baa1: "BBB+", Baa2: "BBB", Baa3: "BBB-",
-  Ba1: "BB+", Ba2: "BB", Ba3: "BB-",
-  B1: "B+", B2: "B", B3: "B-",
-  Caa1: "CCC+", Caa2: "CCC", Caa3: "CCC-", Ca: "CC", C: "C",
+// S&P / Fitch → Moody's equivalent
+const TO_MOODYS: Record<string, string> = {
+  "AAA": "Aaa", "AA+": "Aa1", "AA": "Aa2", "AA-": "Aa3",
+  "A+": "A1", "A": "A2", "A-": "A3",
+  "BBB+": "Baa1", "BBB": "Baa2", "BBB-": "Baa3",
+  "BB+": "Ba1", "BB": "Ba2", "BB-": "Ba3",
+  "B+": "B1", "B": "B2", "B-": "B3",
+  "CCC+": "Caa1", "CCC": "Caa2", "CCC-": "Caa3", "CC": "Ca", "C": "C", "D": "D",
 };
 
-function toSpEquiv(rating: string): string {
-  return MOODYS_MAP[rating] ?? rating;
+function toMoodys(rating: string): string {
+  // If already on Moody's scale, return as-is
+  if (MOODYS_SCALE.includes(rating)) return rating;
+  return TO_MOODYS[rating] ?? rating;
 }
 
 function displayRating(deal: Deal): string | null {
-  // Internal credit score takes priority
-  if (deal.internalCreditScore) return deal.internalCreditScore;
+  // Internal credit score — convert to Moody's if needed
+  if (deal.internalCreditScore) return toMoodys(deal.internalCreditScore);
 
   const externals = [deal.moodysRating, deal.spRating, deal.fitchRating]
     .filter((r): r is string => r != null)
-    .map((r) => { const sp = toSpEquiv(r); return { raw: sp, idx: RATING_SCALE.indexOf(sp) }; })
+    .map((r) => { const m = toMoodys(r); return { raw: m, idx: MOODYS_SCALE.indexOf(m) }; })
     .filter((r) => r.idx >= 0)
     .sort((a, b) => a.idx - b.idx); // best first
 
@@ -143,11 +146,11 @@ function displayRating(deal: Deal): string | null {
 
 function ratingTone(rating: string | null) {
   if (!rating) return "neutral";
-  const idx = RATING_SCALE.indexOf(rating);
+  const idx = MOODYS_SCALE.indexOf(toMoodys(rating));
   if (idx < 0) return "neutral";
-  if (idx <= 6) return "good";      // A- and above
-  if (idx <= 9) return "good";      // BBB range
-  if (idx <= 12) return "warning";  // BB range
+  if (idx <= 6) return "good";      // A3 and above
+  if (idx <= 9) return "good";      // Baa range
+  if (idx <= 12) return "warning";  // Ba range
   return "critical";                // B and below
 }
 
@@ -258,6 +261,7 @@ export default function JpsFilterGrid({
         case "ratioStatus": av = a.ratioStatus; bv = b.ratioStatus; break;
         case "latestPeriodEnd": av = a.latestPeriodEnd; bv = b.latestPeriodEnd; break;
         case "reportedDscr": av = a.reportedDscr; bv = b.reportedDscr; break;
+        case "ndEbitda": av = a.ndEbitda; bv = b.ndEbitda; break;
         case "headroomPct": av = a.headroomPct; bv = b.headroomPct; break;
         case "todos": av = (a.pendingReviews ?? 0) + (a.overdueObligations ?? 0) + (a.openRequests ?? 0); bv = (b.pendingReviews ?? 0) + (b.overdueObligations ?? 0) + (b.openRequests ?? 0); break;
         case "watchlist": av = a.watchlist ? 1 : 0; bv = b.watchlist ? 1 : 0; break;
@@ -361,6 +365,7 @@ export default function JpsFilterGrid({
                 <SortTh k="ratioStatus" label="Ratio Status" sort={sort} onSort={toggleSort} />
                 <SortTh k="latestPeriodEnd" label="Last Financials" sort={sort} onSort={toggleSort} />
                 <SortTh k="reportedDscr" label="DSCR" sort={sort} onSort={toggleSort} align="right" />
+                <SortTh k="ndEbitda" label="ND:EBITDA" sort={sort} onSort={toggleSort} align="right" />
                 <SortTh k="headroomPct" label="Headroom" sort={sort} onSort={toggleSort} align="right" />
                 <SortTh k="todos" label="To-do's" sort={sort} onSort={toggleSort} align="right" />
                 <SortTh k="reservesFullyFunded" label="Reserves" sort={sort} onSort={toggleSort} />
@@ -478,9 +483,14 @@ export default function JpsFilterGrid({
                       {deal.reportedDscr != null ? `${deal.reportedDscr.toFixed(2)}x` : "—"}
                     </td>
 
+                    {/* ND:EBITDA — number, right */}
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>
+                      {deal.ndEbitda != null ? `${deal.ndEbitda.toFixed(1)}x` : "\u2014"}
+                    </td>
+
                     {/* Headroom — number, right */}
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>
-                      {deal.headroomPct != null ? `${deal.headroomPct.toFixed(1)}%` : "—"}
+                      {deal.headroomPct != null ? `${deal.headroomPct.toFixed(1)}%` : "\u2014"}
                     </td>
 
                     {/* To-do's — number, right */}
