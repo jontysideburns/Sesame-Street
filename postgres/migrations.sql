@@ -886,5 +886,17 @@ CREATE TRIGGER trg_onboarding_snapshot_immutability
     EXECUTE FUNCTION enforce_onboarding_snapshot_immutability();
 
 -- ═══════════════════════════════════════════════════════════════════════════════
+-- Plan Variance Trend Engine — ratio selection and ACR split
+-- ═══════════════════════════════════════════════════════════════════════════════
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS primary_collateral_ratio TEXT;
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS cash_cover_ratio TEXT DEFAULT 'senior_dscr';
+
+-- Split ACR into utility (=RAR, lower better) and real estate (=1/LTV, higher better)
+INSERT INTO line_item_definitions (line_key, section, display_label, row_order, is_computed, unit) VALUES
+('acr_utility', 'covenant_sector', 'Asset Cover Ratio (Utility/RAR)', 200, FALSE, 'ratio'),
+('acr_re', 'covenant_sector', 'Asset Cover Ratio (Real Estate)', 201, FALSE, 'ratio')
+ON CONFLICT (line_key) DO NOTHING;
+
+-- ═══════════════════════════════════════════════════════════════════════════════
 -- End of migrations — all statements above are idempotent
 -- ═══════════════════════════════════════════════════════════════════════════════

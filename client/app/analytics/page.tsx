@@ -68,10 +68,10 @@ Ranking: deteriorating_rapidly > deteriorating > flat > improving.`,
   },
   {
     id: "trend-detection-engine",
-    name: "Trend Detection Engine",
+    name: "Plan Variance Trend Engine (v5)",
     category: "Performance & Grading",
-    summary: "Period-by-period trend detection on historical actuals with direction preference and covenant-aware breach/recovery signalling.",
-    detail: `The Trend Detection Engine analyses the last N periods of reported actuals for each deal and classifies each tracked metric as **improving**, **stable**, or **deteriorating**. It is distinct from the Performance Trend used by the grading engine: that rule works on headroom erosion deltas over 3 periods; this engine works on absolute metric values over N periods (default 6).
+    summary: "Computes headroom erosion / improvement vs the management case for two credit ratios per deal (one cash cover + one collateral), then classifies direction using 7-band symmetric deltas with persistent drift detection.",
+    detail: `The Plan Variance Trend Engine replaces the earlier time-series trend engine. It no longer tracks absolute metric movements; instead it computes the gap between actual and expected headroom for each monitored credit ratio, period by period, and classifies the direction and speed of change.
 
 The engine runs on every deal via \`POST /api/deals/{slug}/analytics/detect-trends\` and can be invoked with custom parameters in the request body.
 
@@ -194,8 +194,52 @@ Deteriorating trends are written to the \`trend_records\` table with the latest 
 
 **Known limitations**
 - Thresholds are currently hardcoded in \`_BREACH_THRESHOLDS\`. A future enhancement should load per-deal thresholds from the \`covenants\` table.
-- The first-half vs second-half comparator does not distinguish between "V-shaped recovery" and "slow drift" within the same direction. The \`monotonic\` vs \`volatile\` trend_type partly addresses this.
-- Backfilling \`actual_periods\` from \`period_financial_items\` requires manual SQL today. A dedicated endpoint for this migration should be added.`,
+**Two ratios per deal:**
+- **Cash cover ratio:** Always Senior DSCR. If DSCR is unavailable, falls back to PMICR or ICR.
+- **Primary collateral ratio:** Selected per deal at ingestion (LLCR, Net Debt:EBITDA, LTV, RAR, etc.). Changeable by admin only.
+
+**Headroom change calculation:**
+For higher-is-better ratios: headroom = value - default threshold.
+For lower-is-better ratios: headroom = default threshold - value.
+Headroom change % = (actual headroom - expected headroom) / |expected headroom| x 100.
+Positive = Headroom Improvement (deal above plan). Negative = Headroom Erosion (deal below plan). Zero = Flat.
+
+Where no DSCR default is specified (common in US deals), the engine assumes 1.0x.
+
+**7-band symmetric delta classification:**
+- Large improvement (delta > +large_threshold)
+- Moderate improvement (+small < delta <= +large)
+- Small improvement (+1% < delta <= +small)
+- Flat (-1% <= delta <= +1%)
+- Small erosion (-small <= delta < -1%)
+- Moderate erosion (-large <= delta < -small)
+- Large erosion (delta < -large)
+
+Default thresholds: small = 2.5pp, large = 5.0pp, flat tolerance = 1.0pp (separate configs for cash cover vs collateral).
+
+**Period requirements:**
+- 2 periods: single delta, drift detection only
+- 3+ periods: two deltas (delta1 + delta2), persistent drift detection
+
+**Persistent erosion drift:**
+TRUE if three consecutive periods show worsening headroom erosion (each period more negative than the last). Catches compounding small movements.
+
+**Direction classification matrix (12 rows):**
+Based on delta2 band, delta1 band, and persistent drift flag. Produces 5 distinct directions:
+- **Improving rapidly** (large improvement in delta2)
+- **Improving** (moderate or small improvement in delta2)
+- **Flat** (delta2 flat without persistent drift; or small/moderate erosion reversed by improvement in delta1)
+- **Deteriorating** (flat with persistent drift; moderate erosion; large erosion after improvement)
+- **Deteriorating rapidly** (large erosion without prior improvement)
+
+**Overall deal trend** = worst of the two ratio directions.
+
+**Severity mapping:**
+- Deteriorating rapidly = high severity
+- Deteriorating = moderate severity
+- All others = none
+
+Persistent drift flags for analyst attention but does NOT auto-trigger watchlist.`,
   },
   {
     id: "score",

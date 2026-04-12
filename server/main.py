@@ -19349,199 +19349,347 @@ def assess_distribution(slug: str):
     }
 
 
-# ── 4F. Trend Detection ───────────────────────────────────────────────────
-# Analyses metrics across periods to detect deteriorating/improving trends.
+# ── 4F. Plan Variance Trend Engine (v5) ──────────────────────────────────
+# Computes headroom erosion / improvement vs the management case for the
+# deal's monitored credit ratios (one cash cover + one collateral), then
+# classifies the direction of travel using a 7-band symmetric delta
+# classification with persistent drift detection.
 
-# Metric direction preferences — which direction is "good"
-_METRIC_DIRECTION = {
-    # higher is better
-    "dscr": "higher", "llcr": "higher", "plcr": "higher", "icr": "higher",
+# Direction preferences for all known ratios
+_RATIO_DIRECTION = {
+    # Cash cover — higher is better
+    "senior_dscr": "higher", "senior_annual_dscr": "higher", "icr": "higher",
+    "fccr": "higher", "annual_dscr_lockup": "higher", "pmicr": "higher",
+    "senior_icr_reg_dep": "higher", "senior_icr_2pct_rab": "higher",
+    "ffo_interest_coverage": "higher", "total_dscr": "higher", "aicr": "higher",
+    "cash_interest_coverage": "higher", "adscr_breakeven": "higher",
+    # Collateral — higher is better
+    "llcr": "higher", "plcr": "higher", "rental_coverage": "higher",
+    "debt_yield": "higher", "acr_re": "higher", "solvency_ratio": "higher",
+    "lifecycle_reserve_cover": "higher", "mra_cover": "higher",
+    "ffo_net_debt": "higher", "rcf_net_debt": "higher", "ffo_debt": "higher",
+    "rcf_debt": "higher", "adj_ffo_net_debt": "higher", "adj_rcf_net_debt": "higher",
+    # Collateral — lower is better
+    "net_debt_ebitda": "lower", "ltv": "lower", "net_debt_rab": "lower",
+    "acr_utility": "lower", "acr": "lower", "class_a_debt_rab": "lower",
+    "total_debt_rab": "lower", "adj_net_debt_ebitda": "lower",
+    # Legacy line-item keys (kept for backward compat with actual_periods JSONB)
+    "dscr": "higher",
     "revenue": "higher", "ebitda": "higher", "cfads": "higher", "net_income": "higher",
     "ebitda_margin": "higher",
-    # lower is better
     "opex": "lower", "capex": "lower", "debt_service": "lower",
     "net_debt_ebitda": "lower", "leverage": "lower", "ltv": "lower",
 }
 
-# Breach thresholds for covenant-aware signalling. Applied when the metric
-# dips below (for higher-is-better) or above (for lower-is-better) the level.
-_BREACH_THRESHOLDS = {
-    "dscr": {"default": 1.00, "lockup": 1.20, "preference": "higher"},
-    "llcr": {"default": 1.10, "lockup": 1.20, "preference": "higher"},
-    "icr": {"default": 1.50, "lockup": 2.00, "preference": "higher"},
-    "net_debt_ebitda": {"default": 8.00, "lockup": 6.00, "preference": "lower"},
+# Default thresholds for headroom computation.
+# If no covenant default is configured for a DSCR metric, assume 1.0x.
+_DEFAULT_THRESHOLD_ASSUMPTION = {
+    "dscr": 1.0, "senior_dscr": 1.0, "icr": 1.0, "pmicr": 1.0,
+    "llcr": 1.0, "plcr": 1.0,
+    "net_debt_ebitda": 8.0, "net_debt_rab": 0.85,
+    "ltv": 0.85, "acr_utility": 0.85,
 }
+
+# Band thresholds (pp of headroom change). Separate for cash cover vs collateral.
+_BAND_THRESHOLDS = {
+    "cash_cover":  {"flat_tolerance": 1.0, "small": 2.5, "large": 5.0},
+    "collateral":  {"flat_tolerance": 1.0, "small": 2.5, "large": 5.0},
+}
+
+_DIRECTION_RANK = {
+    "deteriorating_rapidly": 0, "deteriorating": 1, "flat": 2,
+    "improving": 3, "improving_rapidly": 4,
+}
+
+
+def _compute_headroom_change(actual_val, mgmt_val, default_threshold, preference):
+    """Compute headroom change % for one period.
+    Returns: positive = improvement, negative = erosion, 0 = flat.
+    """
+    if actual_val is None or mgmt_val is None or default_threshold is None:
+        return None
+    if preference == "higher":
+        actual_hr = actual_val - default_threshold
+        expected_hr = mgmt_val - default_threshold
+    else:  # lower is better
+        actual_hr = default_threshold - actual_val
+        expected_hr = default_threshold - mgmt_val
+    if expected_hr == 0:
+        return 0.0 if actual_hr == 0 else (100.0 if actual_hr > 0 else -100.0)
+    return round(((actual_hr - expected_hr) / abs(expected_hr)) * 100, 2)
+
+
+def _classify_band(delta, thresholds):
+    """Classify a delta into one of 7 symmetric bands."""
+    flat = thresholds["flat_tolerance"]
+    small = thresholds["small"]
+    large = thresholds["large"]
+    if abs(delta) <= flat:
+        return "flat"
+    if delta > large:
+        return "large_improvement"
+    if delta > small:
+        return "moderate_improvement"
+    if delta > flat:
+        return "small_improvement"
+    if delta < -large:
+        return "large_erosion"
+    if delta < -small:
+        return "moderate_erosion"
+    return "small_erosion"
+
+
+def _is_improvement_band(band):
+    return band in ("large_improvement", "moderate_improvement", "small_improvement")
+
+
+def _is_erosion_band(band):
+    return band in ("large_erosion", "moderate_erosion", "small_erosion")
+
+
+def _classify_direction(d2_band, d1_band, persistent_drift):
+    """12-row direction classification matrix from v5 spec."""
+    # Large / moderate / small improvement → Improving rapidly or Improving
+    if d2_band == "large_improvement":
+        return "improving_rapidly"
+    if d2_band in ("moderate_improvement", "small_improvement"):
+        return "improving"
+
+    # Flat
+    if d2_band == "flat":
+        return "deteriorating" if persistent_drift else "flat"
+
+    # Small erosion
+    if d2_band == "small_erosion":
+        if _is_improvement_band(d1_band):
+            return "flat"  # one-off reversal
+        return "deteriorating" if persistent_drift else "flat"
+
+    # Moderate erosion
+    if d2_band == "moderate_erosion":
+        if _is_improvement_band(d1_band):
+            return "flat"  # reversal of recent gain
+        return "deteriorating"
+
+    # Large erosion
+    if d2_band == "large_erosion":
+        if _is_improvement_band(d1_band):
+            return "deteriorating"  # one-off shock
+        return "deteriorating_rapidly"
+
+    return "flat"  # fallback
 
 
 @app.post("/api/deals/{slug}/analytics/detect-trends")
 def detect_trends(slug: str, body: dict | None = None):
-    """Detect trends across the last N periods for key metrics.
-    Body can include {"periodsBack": 6, "metrics": ["dscr","revenue","ebitda"]}."""
-    periods_back = (body or {}).get("periodsBack", 4)
-    target_metrics = (body or {}).get("metrics", [
-        "dscr", "llcr", "plcr", "revenue", "ebitda", "cfads",
-        "opex", "capex", "debt_service", "net_income", "net_debt_ebitda",
-    ])
+    """Plan Variance Trend Engine (v5).
+    Computes headroom erosion / improvement vs management case for the deal's
+    monitored credit ratios, then classifies direction using 7-band symmetric
+    deltas with persistent drift detection.
+    Body can include {"periodsBack": 6}."""
+    periods_back = (body or {}).get("periodsBack", 6)
 
     with get_connection() as conn:
         deal_id = _get_deal_id(conn, slug)
 
+        # Load deal's ratio selections
+        deal_row = conn.execute(
+            "SELECT cash_cover_ratio, primary_collateral_ratio FROM deals WHERE id = %s",
+            (deal_id,),
+        ).fetchone()
+        cash_ratio = (deal_row or {}).get("cash_cover_ratio") or "senior_dscr"
+        collateral_ratio = (deal_row or {}).get("primary_collateral_ratio")
+
+        # Map canonical ratio keys to actual_periods JSONB keys (which may differ)
+        actual_key_map = {"senior_dscr": "dscr"}
+        monitored = []
+        if cash_ratio:
+            monitored.append({"key": cash_ratio, "role": "cash_cover",
+                              "actualKey": actual_key_map.get(cash_ratio, cash_ratio)})
+        if collateral_ratio:
+            monitored.append({"key": collateral_ratio, "role": "collateral",
+                              "actualKey": actual_key_map.get(collateral_ratio, collateral_ratio)})
+
+        if not monitored:
+            return {"dealSlug": slug, "trends": [], "overallDirection": "unknown",
+                    "message": "No ratios configured for trend monitoring"}
+
+        # Load actuals
         actuals = conn.execute(
             """SELECT period_label, period_flag, actual_metrics
                FROM actual_periods WHERE deal_id = %s
                ORDER BY period_end DESC LIMIT %s""",
             (deal_id, periods_back),
         ).fetchall()
-
         if len(actuals) < 2:
-            return {"dealSlug": slug, "trends": [], "message": "Insufficient periods for trend detection"}
+            return {"dealSlug": slug, "trends": [], "overallDirection": "insufficient_history",
+                    "message": f"Need at least 2 periods; have {len(actuals)}"}
+        actuals = list(reversed(actuals))  # chronological
 
-        # Reverse to chronological order
-        actuals = list(reversed(actuals))
-        trends = []
-
-        latest_fp = conn.execute(
-            "SELECT id FROM financial_periods WHERE deal_id = %s ORDER BY period_end DESC LIMIT 1",
+        # Load management case forecast metrics for matching periods
+        mgmt_versions = conn.execute(
+            """SELECT fcv.id
+               FROM forecast_cases fc
+               JOIN forecast_case_versions fcv ON fcv.forecast_case_id = fc.id
+               WHERE fc.deal_id = %s AND fc.case_type = 'management_case' AND fcv.is_active = TRUE
+               LIMIT 1""",
             (deal_id,),
         ).fetchone()
 
-        for metric in target_metrics:
-            values = []
-            for a in actuals:
-                m = (a["actual_metrics"] or {}).get(metric)
-                if m is not None:
-                    try:
-                        values.append(float(m))
-                    except (ValueError, TypeError):
-                        pass
+        mgmt_by_period: dict[str, dict] = {}
+        if mgmt_versions:
+            mgmt_rows = conn.execute(
+                """SELECT drp.period_flag, fpi.line_key, fpi.value
+                   FROM forecast_period_items fpi
+                   JOIN deal_reporting_periods drp ON drp.id = fpi.reporting_period_id
+                   WHERE fpi.deal_id = %s AND fpi.forecast_case_version_id = %s""",
+                (deal_id, mgmt_versions["id"]),
+            ).fetchall()
+            for r in mgmt_rows:
+                pf = r["period_flag"]
+                if pf not in mgmt_by_period:
+                    mgmt_by_period[pf] = {}
+                mgmt_by_period[pf][r["line_key"]] = float(r["value"]) if r["value"] is not None else None
 
-            if len(values) < 2:
+        # Load default thresholds from covenants table
+        cov_rows = conn.execute(
+            """SELECT code, threshold_default FROM covenants WHERE deal_id = %s""",
+            (deal_id,),
+        ).fetchall()
+        configured_defaults = {}
+        for cr in cov_rows:
+            if cr["threshold_default"] is not None:
+                configured_defaults[cr["code"]] = float(cr["threshold_default"])
+
+        trends = []
+        for m in monitored:
+            ratio_key = m["key"]
+            actual_key = m["actualKey"]
+            role = m["role"]
+            preference = _RATIO_DIRECTION.get(ratio_key, _RATIO_DIRECTION.get(actual_key, "higher"))
+            thresholds = _BAND_THRESHOLDS.get(role, _BAND_THRESHOLDS["cash_cover"])
+
+            # Resolve default threshold
+            default_threshold = configured_defaults.get(ratio_key)
+            if default_threshold is None:
+                default_threshold = _DEFAULT_THRESHOLD_ASSUMPTION.get(ratio_key)
+            if default_threshold is None:
+                # Try the actual_key variant
+                default_threshold = configured_defaults.get(actual_key)
+            if default_threshold is None:
+                default_threshold = _DEFAULT_THRESHOLD_ASSUMPTION.get(actual_key)
+
+            if default_threshold is None:
+                trends.append({
+                    "ratioKey": ratio_key, "ratioRole": role,
+                    "direction": "no_threshold_configured",
+                    "message": f"No default threshold found for {ratio_key}",
+                })
                 continue
 
-            # Simple linear trend: compare first half avg vs second half avg
-            mid = len(values) // 2
-            first_half = sum(values[:mid]) / mid if mid > 0 else values[0]
-            second_half = sum(values[mid:]) / (len(values) - mid)
-            total_change = values[-1] - values[0]
-            total_change_pct = round((total_change / values[0]) * 100, 2) if values[0] != 0 else 0
+            # Build headroom change series
+            headroom_series = []
+            period_labels = []
+            for a in actuals:
+                metrics = a["actual_metrics"] or {}
+                actual_val = metrics.get(actual_key) or metrics.get(ratio_key)
+                if actual_val is not None:
+                    try:
+                        actual_val = float(actual_val)
+                    except (ValueError, TypeError):
+                        actual_val = None
 
-            # Direction preference: which way is "good" for this metric?
-            preference = _METRIC_DIRECTION.get(metric, "higher")
+                # Find mgmt case value for this period
+                mgmt_metrics = mgmt_by_period.get(a["period_flag"], {})
+                mgmt_val = mgmt_metrics.get(ratio_key) or mgmt_metrics.get(actual_key)
+                if mgmt_val is not None:
+                    try:
+                        mgmt_val = float(mgmt_val)
+                    except (ValueError, TypeError):
+                        mgmt_val = None
 
-            # Raw numerical move
-            if second_half > first_half * 1.03:
-                move = "up"
-            elif second_half < first_half * 0.97:
-                move = "down"
+                hc = _compute_headroom_change(actual_val, mgmt_val, default_threshold, preference)
+                if hc is not None:
+                    headroom_series.append(hc)
+                    period_labels.append(a["period_label"])
+
+            if len(headroom_series) < 2:
+                trends.append({
+                    "ratioKey": ratio_key, "ratioRole": role,
+                    "direction": "insufficient_history",
+                    "message": f"Need 2+ periods with both actual and forecast; have {len(headroom_series)}",
+                })
+                continue
+
+            n = len(headroom_series)
+
+            # Compute deltas
+            if n >= 3:
+                d1 = headroom_series[-2] - headroom_series[-3]
+                d2 = headroom_series[-1] - headroom_series[-2]
+                d1_band = _classify_band(d1, thresholds)
+                d2_band = _classify_band(d2, thresholds)
+                # Persistent erosion drift: 3 consecutive periods of worsening
+                persistent_drift = (
+                    n >= 3
+                    and headroom_series[-3] < 0
+                    and headroom_series[-2] < headroom_series[-3]
+                    and headroom_series[-1] < headroom_series[-2]
+                )
+                direction = _classify_direction(d2_band, d1_band, persistent_drift)
             else:
-                move = "flat"
+                # 2 periods: single delta, no persistent drift
+                d1 = None
+                d2 = headroom_series[-1] - headroom_series[-2]
+                d1_band = None
+                d2_band = _classify_band(d2, thresholds)
+                persistent_drift = False
+                # Simplified direction for 2 periods
+                if _is_improvement_band(d2_band):
+                    direction = "improving_rapidly" if d2_band == "large_improvement" else "improving"
+                elif _is_erosion_band(d2_band):
+                    direction = "deteriorating_rapidly" if d2_band == "large_erosion" else "deteriorating"
+                else:
+                    direction = "flat"
 
-            # Map move to direction using preference
-            if move == "flat":
-                direction = "stable"
-            elif (move == "up" and preference == "higher") or (move == "down" and preference == "lower"):
-                direction = "improving"
-            else:
-                direction = "deteriorating"
-
-            # Severity based on magnitude and direction
-            abs_change = abs(total_change_pct)
-            if direction == "deteriorating":
-                severity = "critical" if abs_change > 20 else "high" if abs_change > 10 else "moderate" if abs_change > 5 else "low"
+            # Severity
+            if direction == "deteriorating_rapidly":
+                severity = "high"
+            elif direction == "deteriorating":
+                severity = "moderate"
             else:
                 severity = "none"
 
-            trend_type = "monotonic" if all(values[i] >= values[i-1] for i in range(1, len(values))) or \
-                         all(values[i] <= values[i-1] for i in range(1, len(values))) else "volatile"
-
-            # ── Covenant-aware breach / recovery detection ────────────────
-            breach_info = None
-            th = _BREACH_THRESHOLDS.get(metric)
-            if th:
-                default_level = th["default"]
-                lockup_level = th["lockup"]
-                pref = th["preference"]
-
-                def is_breach(v, level):
-                    return (v < level) if pref == "higher" else (v > level)
-
-                breached_periods = [i for i, v in enumerate(values) if is_breach(v, default_level)]
-                lockup_periods = [i for i, v in enumerate(values) if is_breach(v, lockup_level)]
-                latest_breached = len(values) > 0 and is_breach(values[-1], default_level)
-                latest_lockup = len(values) > 0 and is_breach(values[-1], lockup_level)
-                ever_breached = len(breached_periods) > 0
-                ever_lockup = len(lockup_periods) > 0
-
-                if latest_breached:
-                    state = "currently_breached"
-                elif latest_lockup:
-                    state = "currently_lockup"
-                elif ever_breached:
-                    state = "breached_and_recovered"
-                elif ever_lockup:
-                    state = "lockup_and_recovered"
-                else:
-                    state = "always_compliant"
-
-                worst_value = min(values) if pref == "higher" else max(values)
-                worst_period_idx = values.index(worst_value)
-                worst_period = actuals[worst_period_idx]["period_label"] if worst_period_idx < len(actuals) else None
-                current_value = values[-1]
-                distance_to_default = (current_value - default_level) if pref == "higher" else (default_level - current_value)
-
-                breach_info = {
-                    "state": state,
-                    "defaultLevel": default_level,
-                    "lockupLevel": lockup_level,
-                    "everBreachedDefault": ever_breached,
-                    "everBreachedLockup": ever_lockup,
-                    "periodsInBreach": len(breached_periods),
-                    "worstValue": worst_value,
-                    "worstPeriod": worst_period,
-                    "currentValue": current_value,
-                    "distanceToDefault": round(distance_to_default, 4),
-                }
-
-                # Promote severity for covenant metrics that have been breached
-                if state == "currently_breached":
-                    severity = "critical"
-                    direction = "deteriorating" if direction != "deteriorating" else direction
-                elif state == "breached_and_recovered":
-                    if severity == "none":
-                        severity = "moderate"
-
-            trend = {
-                "metricKey": metric,
-                "direction": direction,
-                "trendType": trend_type,
-                "periodsObserved": len(values),
-                "totalChangePct": total_change_pct,
-                "severity": severity,
-                "values": values,
-                "periodLabels": [a["period_label"] for a in actuals[:len(values)]],
+            trends.append({
+                "ratioKey": ratio_key,
+                "ratioRole": role,
                 "directionPreference": preference,
-                "breach": breach_info,
-            }
-            trends.append(trend)
+                "defaultThreshold": default_threshold,
+                "currentHeadroomChangePct": headroom_series[-1],
+                "delta1": round(d1, 2) if d1 is not None else None,
+                "delta2": round(d2, 2),
+                "delta1Band": d1_band,
+                "delta2Band": d2_band,
+                "persistentDrift": persistent_drift,
+                "direction": direction,
+                "severity": severity,
+                "headroomSeries": headroom_series,
+                "periodLabels": period_labels,
+                "periodsObserved": len(headroom_series),
+            })
 
-            # Persist deteriorating trends
-            if latest_fp and direction == "deteriorating":
-                conn.execute(
-                    """INSERT INTO trend_records
-                        (deal_id, financial_period_id, metric_key, metric_label,
-                         trend_type, direction, periods_observed, severity,
-                         total_change_pct, status, summary)
-                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-                    (deal_id, latest_fp["id"], metric, metric,
-                     trend_type, direction, len(values), severity,
-                     total_change_pct, "active",
-                     f"{metric} {direction} by {total_change_pct}% over {len(values)} periods"),
-                )
+        # Overall deal trend = worst direction
+        worst_direction = "improving_rapidly"
+        for t in trends:
+            d = t.get("direction", "flat")
+            if d in _DIRECTION_RANK and _DIRECTION_RANK.get(d, 4) < _DIRECTION_RANK.get(worst_direction, 4):
+                worst_direction = d
 
     return {
         "dealSlug": slug,
         "periodsAnalysed": len(actuals),
-        "trends": sorted(trends, key=lambda t: abs(t["totalChangePct"]), reverse=True),
+        "overallDirection": worst_direction,
+        "trends": trends,
     }
 
 
