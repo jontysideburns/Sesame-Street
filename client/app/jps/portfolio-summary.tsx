@@ -88,6 +88,7 @@ function gradeTone(grade: string) {
 }
 
 const TREND_COLORS: Record<string, string> = {
+  improving_rapidly: C.good,
   improving: C.good,
   flat: C.accent,
   new: C.neutral,

@@ -72,6 +72,7 @@ function gradeTone(grade: string) {
 }
 
 const TREND_ARROWS: Record<string, string> = {
+  improving_rapidly: "\u2191\u2191",
   improving: "\u2191",
   flat: "\u2192",
   deteriorating: "\u2193",
@@ -81,7 +82,7 @@ const TREND_ARROWS: Record<string, string> = {
 
 function trendTone(trend: string | null) {
   if (!trend) return "neutral";
-  if (trend === "improving") return "good";
+  if (trend === "improving_rapidly" || trend === "improving") return "good";
   if (trend === "flat" || trend === "new") return "neutral";
   if (trend === "deteriorating") return "warning";
   return "critical"; // deteriorating_rapidly

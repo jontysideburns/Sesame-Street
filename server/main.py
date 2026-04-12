@@ -10941,6 +10941,21 @@ def get_portfolio(
     except Exception:
         pass  # Table may not exist yet; degrade gracefully
 
+    # Fallback: use computed_trend from deals table (set by Plan Variance Trend Engine)
+    try:
+        with get_connection() as ct_conn:
+            ct_rows = ct_conn.execute(
+                "SELECT id, computed_trend FROM deals WHERE computed_trend IS NOT NULL"
+            ).fetchall()
+            ct_map = {int(r["id"]): r["computed_trend"] for r in ct_rows}
+            for entry in deal_rows_by_slug.values():
+                if not entry.get("performanceTrend"):
+                    ct = ct_map.get(int(entry["dealId"]))
+                    if ct:
+                        entry["performanceTrend"] = ct
+    except Exception:
+        pass
+
     # Enrich deal rows with weighted average spread from capital structure
     try:
         with get_connection() as spread_conn:
@@ -11750,6 +11765,21 @@ def get_dashboard(
                     entry["performanceGrade"] = int(pa["performance_grade"])
     except Exception:
         pass  # Table may not exist yet; degrade gracefully
+
+    # Fallback: use computed_trend from deals table (set by Plan Variance Trend Engine)
+    try:
+        with get_connection() as ct_conn:
+            ct_rows = ct_conn.execute(
+                "SELECT id, computed_trend FROM deals WHERE computed_trend IS NOT NULL"
+            ).fetchall()
+            ct_map = {int(r["id"]): r["computed_trend"] for r in ct_rows}
+            for entry in deal_rows_by_slug.values():
+                if not entry.get("performanceTrend"):
+                    ct = ct_map.get(int(entry["dealId"]))
+                    if ct:
+                        entry["performanceTrend"] = ct
+    except Exception:
+        pass
 
     # Enrich deal rows with weighted average spread from capital structure
     try:
@@ -19684,6 +19714,13 @@ def detect_trends(slug: str, body: dict | None = None):
             d = t.get("direction", "flat")
             if d in _DIRECTION_RANK and _DIRECTION_RANK.get(d, 4) < _DIRECTION_RANK.get(worst_direction, 4):
                 worst_direction = d
+
+        # Persist the computed trend to the deals table
+        if worst_direction and worst_direction not in ("insufficient_history", "unknown"):
+            conn.execute(
+                "UPDATE deals SET computed_trend = %s WHERE id = %s",
+                (worst_direction, deal_id),
+            )
 
     return {
         "dealSlug": slug,
