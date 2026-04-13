@@ -1061,8 +1061,130 @@ ws13.cell(row=next_row, column=3, value="Write-once snapshot frozen at investmen
 ws13.cell(row=next_row, column=3).border = border
 
 
+# ═══════════════════════════════════════════════════════════════════
+# TAB 21: Obligations & Deliverables
+# ═══════════════════════════════════════════════════════════════════
+ws_del = wb.create_sheet("21. Obligations")
+ws_del.merge_cells("A1:M1")
+ws_del["A1"] = "OBLIGATIONS & DELIVERABLES — Record each obligation from the finance documentation. One row per obligation. These drive the deliverables calendar."
+ws_del["A1"].font = version_font
+ws_del["A1"].alignment = Alignment(wrap_text=True)
+ws_del.row_dimensions[1].height = 40
+
+headers_del = [
+    "Obligation ID", "Obligation Name", "Applicable", "Responsible Party",
+    "Frequency", "Business Days After Period End", "Business Day Jurisdictions",
+    "Business Day Convention", "Grace Period (Business Days)",
+    "Severity if Missed", "Phase", "Source Clause", "Notes"
+]
+for i, h in enumerate(headers_del, 1):
+    cell = ws_del.cell(row=2, column=i, value=h)
+    cell.font = hdr_font
+    cell.fill = hdr_fill
+    cell.border = border
+    cell.alignment = Alignment(wrap_text=True, vertical="top")
+
+# Guidance row
+notes_del = [
+    "From taxonomy (e.g. INFO-001) or custom",
+    "Short title from finance docs",
+    "Yes/No",
+    "borrower, auditor, agent, adviser, insurer",
+    "annual, semi_annual, quarterly, monthly, event_driven",
+    "Integer (e.g. 90 = 90 business days after period end)",
+    "ISO codes e.g. GB or GB,US",
+    "modified_following, following, preceding, no_adjustment",
+    "Additional business days before overdue",
+    "informational, potential_default, event_of_default",
+    "all, construction, operational",
+    "Clause reference in finance documents",
+    "Free text"
+]
+for i, n in enumerate(notes_del, 1):
+    cell = ws_del.cell(row=3, column=i, value=n)
+    cell.font = note_font
+    cell.border = border
+    cell.alignment = Alignment(wrap_text=True, vertical="top")
+ws_del.row_dimensions[3].height = 50
+
+# Validations
+dv_yn = DataValidation(type="list", formula1='"Yes,No"')
+dv_resp = DataValidation(type="list", formula1='"borrower,auditor,agent,adviser,insurer"')
+dv_freq_del = DataValidation(type="list", formula1='"annual,semi_annual,quarterly,monthly,event_driven"')
+dv_bdc = DataValidation(type="list", formula1='"modified_following,following,preceding,no_adjustment"')
+dv_sev_del = DataValidation(type="list", formula1='"informational,potential_default,event_of_default"')
+dv_phase_del = DataValidation(type="list", formula1='"all,construction,operational"')
+
+# Pre-populate with common obligations
+common_obligations = [
+    ("INFO-001", "Annual Audited Financial Statements", "Yes", "borrower", "annual", 90, "", "modified_following", 10, "potential_default", "operational"),
+    ("INFO-002", "Semi-Annual Management Accounts", "Yes", "borrower", "semi_annual", 60, "", "modified_following", 5, "informational", "operational"),
+    ("INFO-003", "Annual Budget / Business Plan", "Yes", "borrower", "annual", 30, "", "modified_following", 10, "informational", "operational"),
+    ("INFO-004", "Compliance Certificate", "Yes", "borrower", "semi_annual", 60, "", "modified_following", 10, "potential_default", "operational"),
+    ("INFO-005", "Covenant Ratio Calculations", "Yes", "borrower", "semi_annual", 60, "", "modified_following", 10, "potential_default", "operational"),
+    ("INFO-006", "Insurance Certificate / Renewal", "Yes", "borrower", "annual", 30, "", "modified_following", 5, "potential_default", "operational"),
+    ("INFO-007", "Valuation Report", "Yes", "borrower", "annual", 90, "", "modified_following", 10, "informational", "operational"),
+    ("INFO-008", "Environmental Compliance Certificate", "No", "borrower", "annual", 90, "", "modified_following", 10, "informational", "operational"),
+    ("INFO-009", "Model Update / Reforecast", "Yes", "borrower", "annual", 120, "", "modified_following", 15, "informational", "operational"),
+    ("INFO-010", "Cash Sweep / Excess Cashflow Certificate", "Yes", "agent", "semi_annual", 60, "", "modified_following", 5, "potential_default", "operational"),
+    ("NOTIF-001", "Change of Control Notification", "Yes", "borrower", "event_driven", 0, "", "no_adjustment", 5, "event_of_default", "all"),
+    ("NOTIF-002", "Default / Potential Default Notification", "Yes", "borrower", "event_driven", 0, "", "no_adjustment", 2, "event_of_default", "all"),
+    ("NOTIF-003", "Material Adverse Change Notification", "Yes", "borrower", "event_driven", 0, "", "no_adjustment", 5, "potential_default", "all"),
+    ("NOTIF-004", "Litigation / Claims Notification", "Yes", "borrower", "event_driven", 0, "", "no_adjustment", 10, "informational", "all"),
+    ("NOTIF-005", "Environmental Incident Notification", "No", "borrower", "event_driven", 0, "", "no_adjustment", 5, "informational", "all"),
+    ("AFF-001", "Pari Passu Ranking Confirmation", "Yes", "borrower", "annual", 60, "", "modified_following", 10, "potential_default", "operational"),
+    ("AFF-002", "No Default Certificate", "Yes", "borrower", "semi_annual", 60, "", "modified_following", 5, "potential_default", "operational"),
+    ("AFF-003", "Authorisations in Full Force", "Yes", "borrower", "annual", 60, "", "modified_following", 10, "potential_default", "operational"),
+    ("EOD-001", "Payment Default", "Yes", "borrower", "event_driven", 0, "", "no_adjustment", 0, "event_of_default", "all"),
+    ("EOD-002", "Financial Covenant Breach", "Yes", "borrower", "event_driven", 0, "", "no_adjustment", 0, "event_of_default", "all"),
+]
+
+for row_idx, ob in enumerate(common_obligations, 4):
+    for col_idx, val in enumerate(ob, 1):
+        cell = ws_del.cell(row=row_idx, column=col_idx, value=val)
+        cell.font = Font(size=10, name="Arial")
+        cell.border = border
+        if col_idx in (1, 2, 11, 12):
+            cell.alignment = Alignment(wrap_text=True)
+
+# Add blank rows for user to fill (up to 60 total)
+for row_idx in range(4 + len(common_obligations), 64):
+    for col_idx in range(1, len(headers_del) + 1):
+        cell = ws_del.cell(row=row_idx, column=col_idx)
+        cell.border = border
+        cell.fill = input_fill
+
+# Apply validations
+add_table_rows(ws_del, 4, 60, len(headers_del), {
+    3: dv_yn,
+    4: dv_resp,
+    5: dv_freq_del,
+    8: dv_bdc,
+    10: dv_sev_del,
+    11: dv_phase_del,
+})
+
+# Column widths
+col_widths_del = [12, 30, 8, 15, 12, 14, 14, 18, 12, 16, 12, 18, 25]
+for i, w in enumerate(col_widths_del, 1):
+    ws_del.column_dimensions[get_column_letter(i)].width = w
+
+# Freeze header
+ws_del.freeze_panes = "A4"
+
+# Update Validation tab
+ws13 = wb["Validation"]
+next_row = 17
+ws13.cell(row=next_row, column=1, value="21. Obligations & Deliverables").font = label_font
+ws13.cell(row=next_row, column=1).border = border
+ws13.cell(row=next_row, column=2).border = border
+ws13.cell(row=next_row, column=2).fill = input_fill
+ws13.cell(row=next_row, column=3, value="Record each obligation from finance docs. Pre-populated with 20 common items. Drives the deliverables calendar.").font = note_font
+ws13.cell(row=next_row, column=3).border = border
+
+
 # Save
 import os
-out = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs", "topsheet-data-template-v5.xlsx")
+out = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs", "topsheet-data-template-v6.xlsx")
 wb.save(out)
 print(f"Saved to {out}")

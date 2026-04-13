@@ -20192,3 +20192,379 @@ def delete_todo(todo_id: int):
         conn.execute("DELETE FROM platform_todos WHERE id = %s", [todo_id])
         conn.connection.commit()
     return {"ok": True}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# DELIVERABLES CALENDAR ENGINE
+# ═══════════════════════════════════════════════════════════════════════════════
+# Business day computation using the public_holidays table, then calendar
+# projection for each deal's obligations.
+
+from datetime import timedelta as _td
+import functools as _functools
+
+
+@_functools.lru_cache(maxsize=32)
+def _load_holidays_cached(jurisdiction_key: str, _cache_buster: int = 0):
+    """Load holidays for a set of jurisdictions. jurisdiction_key is comma-separated ISO codes."""
+    jurisdictions = [j.strip() for j in jurisdiction_key.split(",") if j.strip()]
+    if not jurisdictions:
+        return set()
+    with get_connection() as conn:
+        placeholders = ",".join(["%s"] * len(jurisdictions))
+        rows = conn.execute(
+            f"SELECT holiday_date FROM public_holidays WHERE jurisdiction IN ({placeholders})",
+            tuple(jurisdictions),
+        ).fetchall()
+    return {r["holiday_date"] for r in rows}
+
+
+def _get_holidays(jurisdictions: str) -> set:
+    """Get holiday dates for comma-separated jurisdictions. Cached per session."""
+    return _load_holidays_cached(jurisdictions)
+
+
+def _is_business_day(d, holidays: set) -> bool:
+    """Check if a date is a business day (not weekend, not holiday)."""
+    return d.weekday() < 5 and d not in holidays
+
+
+def _add_business_days(start, n: int, holidays: set):
+    """Add n business days to start date, skipping weekends and holidays."""
+    if n == 0:
+        return start
+    direction = 1 if n > 0 else -1
+    remaining = abs(n)
+    current = start
+    while remaining > 0:
+        current += _td(days=direction)
+        if _is_business_day(current, holidays):
+            remaining -= 1
+    return current
+
+
+def _apply_convention(d, convention: str, holidays: set):
+    """Apply a business day convention to adjust a date."""
+    if convention == "no_adjustment":
+        return d
+    if _is_business_day(d, holidays):
+        return d
+
+    original_month = d.month
+    if convention == "following":
+        while not _is_business_day(d, holidays):
+            d += _td(days=1)
+        return d
+    elif convention == "preceding":
+        while not _is_business_day(d, holidays):
+            d -= _td(days=1)
+        return d
+    elif convention == "modified_following":
+        # Move forward, but if it crosses month boundary, move backward instead
+        fwd = d
+        while not _is_business_day(fwd, holidays):
+            fwd += _td(days=1)
+        if fwd.month == original_month:
+            return fwd
+        # Crossed month — go backward from original date
+        bwd = d
+        while not _is_business_day(bwd, holidays):
+            bwd -= _td(days=1)
+        return bwd
+    return d  # fallback
+
+
+def _compute_due_date(period_end, bdays_after: int, convention: str, jurisdictions: str):
+    """Compute the due date for an obligation given period end and business day rules."""
+    holidays = _get_holidays(jurisdictions)
+    raw = _add_business_days(period_end, bdays_after, holidays)
+    adjusted = _apply_convention(raw, convention, holidays)
+    return adjusted
+
+
+def _compute_grace_expiry(due_date, grace_bdays: int, jurisdictions: str):
+    """Compute grace period expiry from due date."""
+    if not grace_bdays:
+        return due_date
+    holidays = _get_holidays(jurisdictions)
+    return _add_business_days(due_date, grace_bdays, holidays)
+
+
+@app.get("/api/deals/{slug}/deliverables-calendar")
+def deal_deliverables_calendar(slug: str, months: int = 12):
+    """Compute the deliverables calendar for a deal over the next N months."""
+    from datetime import date as _date
+    today = _date.today()
+    horizon = today + _td(days=months * 31)
+
+    with get_connection() as conn:
+        deal = conn.execute("SELECT id, business_day_calendar FROM deals WHERE slug = %s", (slug,)).fetchone()
+        if not deal:
+            raise HTTPException(status_code=404, detail="Deal not found")
+        deal_id = int(deal["id"])
+        default_jurisdictions = deal["business_day_calendar"] or "GB"
+
+        # Load applicable obligations
+        obligations = conn.execute(
+            """SELECT item_id, title, responsible_party, frequency,
+                      business_days_after_period_end, business_day_jurisdictions,
+                      business_day_convention, grace_period_business_days,
+                      severity_if_missed, last_delivered_date
+               FROM deal_obligation_register
+               WHERE deal_id = %s AND applicable = TRUE
+               ORDER BY item_id""",
+            (deal_id,),
+        ).fetchall()
+
+        # Load reporting periods
+        periods = conn.execute(
+            """SELECT id, period_label, period_end, period_frequency
+               FROM deal_reporting_periods WHERE deal_id = %s
+               ORDER BY period_ordinal""",
+            (deal_id,),
+        ).fetchall()
+
+        # Load public holidays for the calendar display
+        holidays_rows = conn.execute(
+            """SELECT jurisdiction, holiday_date, holiday_name
+               FROM public_holidays
+               WHERE holiday_date BETWEEN %s AND %s
+               ORDER BY holiday_date""",
+            (today - _td(days=30), horizon),
+        ).fetchall()
+
+    deliverables = []
+    for ob in obligations:
+        bdays = ob["business_days_after_period_end"]
+        if bdays is None:
+            continue  # No deadline rule configured
+        jurisdictions = ob["business_day_jurisdictions"] or default_jurisdictions
+        convention = ob["business_day_convention"] or "modified_following"
+        grace_bdays = ob["grace_period_business_days"] or 0
+
+        for period in periods:
+            # Check frequency match
+            freq = ob["frequency"] or "annual"
+            pfreq = period["period_frequency"] or "annual"
+            # Simple match: annual obligations fire on annual periods, semi on semi, etc.
+            # For simplicity, generate for every period (the obligation applies at each test date)
+
+            due = _compute_due_date(period["period_end"], bdays, convention, jurisdictions)
+            grace_exp = _compute_grace_expiry(due, grace_bdays, jurisdictions)
+
+            # Only include if within our window
+            if due < today - _td(days=90) or due > horizon:
+                continue
+
+            # Determine status
+            delivered_date = ob["last_delivered_date"]
+            if delivered_date and delivered_date <= due:
+                status = "delivered"
+            elif today > grace_exp:
+                status = "overdue"
+            elif today > due:
+                status = "late_within_grace"
+            elif (due - today).days <= 30:
+                status = "approaching"
+            else:
+                status = "not_yet_due"
+
+            deliverables.append({
+                "obligationId": ob["item_id"],
+                "title": ob["title"],
+                "periodLabel": period["period_label"],
+                "dueDate": due.isoformat(),
+                "graceExpiry": grace_exp.isoformat(),
+                "severity": ob["severity_if_missed"] or "informational",
+                "responsibleParty": ob["responsible_party"] or "borrower",
+                "status": status,
+            })
+
+    deliverables.sort(key=lambda d: d["dueDate"])
+
+    # Format holidays for calendar display
+    holidays_list = [
+        {"date": r["holiday_date"].isoformat(), "name": r["holiday_name"], "jurisdiction": r["jurisdiction"]}
+        for r in holidays_rows
+    ]
+
+    return {
+        "dealSlug": slug,
+        "months": months,
+        "deliverableCount": len(deliverables),
+        "deliverables": deliverables,
+        "publicHolidays": holidays_list,
+    }
+
+
+@app.get("/api/portfolio/deliverables-calendar")
+def portfolio_deliverables_calendar(
+    months: int = 12,
+    sector: str | None = None,
+    region: str | None = None,
+    grade: str | None = None,
+):
+    """Aggregate deliverables calendar across all deals in the portfolio."""
+    from datetime import date as _date
+    today = _date.today()
+    horizon = today + _td(days=months * 31)
+
+    with get_connection() as conn:
+        # Get all deals with holdings (same scoping as portfolio API)
+        deal_rows = conn.execute(
+            """SELECT DISTINCT d.id, d.slug, d.name, d.sector, d.region, d.grade,
+                      d.business_day_calendar
+               FROM deals d
+               JOIN holdings h ON h.deal_id = d.id AND h.status = 'active'"""
+        ).fetchall()
+
+        # Apply filters
+        filtered_deals = []
+        for d in deal_rows:
+            if sector and d["sector"] != sector:
+                continue
+            if region and d["region"] != region:
+                continue
+            if grade and d["grade"] != grade:
+                continue
+            filtered_deals.append(d)
+
+        if not filtered_deals:
+            return {"months": months, "dealCount": 0, "deliverableCount": 0,
+                    "deliverables": [], "publicHolidays": []}
+
+        deal_ids = [int(d["id"]) for d in filtered_deals]
+        deal_map = {int(d["id"]): d for d in filtered_deals}
+        placeholders = ",".join(["%s"] * len(deal_ids))
+
+        # Load all applicable obligations for these deals
+        obligations = conn.execute(
+            f"""SELECT deal_id, item_id, title, responsible_party, frequency,
+                       business_days_after_period_end, business_day_jurisdictions,
+                       business_day_convention, grace_period_business_days,
+                       severity_if_missed, last_delivered_date
+                FROM deal_obligation_register
+                WHERE deal_id IN ({placeholders}) AND applicable = TRUE
+                ORDER BY deal_id, item_id""",
+            tuple(deal_ids),
+        ).fetchall()
+
+        # Load all reporting periods for these deals
+        periods = conn.execute(
+            f"""SELECT deal_id, id, period_label, period_end, period_frequency
+                FROM deal_reporting_periods
+                WHERE deal_id IN ({placeholders})
+                ORDER BY deal_id, period_ordinal""",
+            tuple(deal_ids),
+        ).fetchall()
+
+        # Group periods by deal
+        periods_by_deal = {}
+        for p in periods:
+            periods_by_deal.setdefault(int(p["deal_id"]), []).append(p)
+
+        # Load holidays for calendar display
+        # Collect all unique jurisdictions from the filtered deals
+        all_jurisdictions = set()
+        for d in filtered_deals:
+            cal = d["business_day_calendar"] or "GB"
+            all_jurisdictions.update(j.strip() for j in cal.split(","))
+
+        holidays_rows = []
+        if all_jurisdictions:
+            j_placeholders = ",".join(["%s"] * len(all_jurisdictions))
+            holidays_rows = conn.execute(
+                f"""SELECT jurisdiction, holiday_date, holiday_name
+                    FROM public_holidays
+                    WHERE jurisdiction IN ({j_placeholders})
+                      AND holiday_date BETWEEN %s AND %s
+                    ORDER BY holiday_date""",
+                tuple(all_jurisdictions) + (today - _td(days=30), horizon),
+            ).fetchall()
+
+    deliverables = []
+    for ob in obligations:
+        did = int(ob["deal_id"])
+        deal_info = deal_map.get(did)
+        if not deal_info:
+            continue
+        bdays = ob["business_days_after_period_end"]
+        if bdays is None:
+            continue
+        jurisdictions = ob["business_day_jurisdictions"] or deal_info["business_day_calendar"] or "GB"
+        convention = ob["business_day_convention"] or "modified_following"
+        grace_bdays = ob["grace_period_business_days"] or 0
+
+        for period in periods_by_deal.get(did, []):
+            due = _compute_due_date(period["period_end"], bdays, convention, jurisdictions)
+            grace_exp = _compute_grace_expiry(due, grace_bdays, jurisdictions)
+
+            if due < today - _td(days=90) or due > horizon:
+                continue
+
+            from datetime import date as _date2
+            delivered_date = ob["last_delivered_date"]
+            if delivered_date and delivered_date <= due:
+                status = "delivered"
+            elif _date2.today() > grace_exp:
+                status = "overdue"
+            elif _date2.today() > due:
+                status = "late_within_grace"
+            elif (due - _date2.today()).days <= 30:
+                status = "approaching"
+            else:
+                status = "not_yet_due"
+
+            deliverables.append({
+                "dealSlug": deal_info["slug"],
+                "dealName": deal_info["name"],
+                "sector": deal_info["sector"],
+                "obligationId": ob["item_id"],
+                "title": ob["title"],
+                "periodLabel": period["period_label"],
+                "dueDate": due.isoformat(),
+                "graceExpiry": grace_exp.isoformat(),
+                "severity": ob["severity_if_missed"] or "informational",
+                "responsibleParty": ob["responsible_party"] or "borrower",
+                "status": status,
+            })
+
+    deliverables.sort(key=lambda d: d["dueDate"])
+
+    holidays_list = [
+        {"date": r["holiday_date"].isoformat(), "name": r["holiday_name"], "jurisdiction": r["jurisdiction"]}
+        for r in holidays_rows
+    ]
+
+    return {
+        "months": months,
+        "dealCount": len(filtered_deals),
+        "deliverableCount": len(deliverables),
+        "deliverables": deliverables,
+        "publicHolidays": holidays_list,
+    }
+
+
+@app.get("/api/public-holidays")
+def get_public_holidays(jurisdiction: str | None = None, year: int | None = None):
+    """Return public holidays, optionally filtered by jurisdiction and/or year."""
+    with get_connection() as conn:
+        conditions = []
+        params = []
+        if jurisdiction:
+            conditions.append("jurisdiction = %s")
+            params.append(jurisdiction)
+        if year:
+            conditions.append("EXTRACT(YEAR FROM holiday_date) = %s")
+            params.append(year)
+        where = " WHERE " + " AND ".join(conditions) if conditions else ""
+        rows = conn.execute(
+            f"SELECT jurisdiction, holiday_date, holiday_name FROM public_holidays{where} ORDER BY holiday_date",
+            tuple(params),
+        ).fetchall()
+    return {
+        "holidays": [
+            {"jurisdiction": r["jurisdiction"], "date": r["holiday_date"].isoformat(), "name": r["holiday_name"]}
+            for r in rows
+        ]
+    }

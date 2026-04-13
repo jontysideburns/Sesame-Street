@@ -898,5 +898,29 @@ INSERT INTO line_item_definitions (line_key, section, display_label, row_order, 
 ON CONFLICT (line_key) DO NOTHING;
 
 -- ═══════════════════════════════════════════════════════════════════════════════
+-- Covenant Deliverables & Calendar System
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+-- Public holidays reference table (seeded from public-holidays-seed.sql)
+CREATE TABLE IF NOT EXISTS public_holidays (
+    id              SERIAL PRIMARY KEY,
+    jurisdiction    TEXT NOT NULL,
+    holiday_date    DATE NOT NULL,
+    holiday_name    TEXT NOT NULL,
+    UNIQUE(jurisdiction, holiday_date)
+);
+CREATE INDEX IF NOT EXISTS idx_ph_jurisdiction ON public_holidays(jurisdiction);
+CREATE INDEX IF NOT EXISTS idx_ph_date ON public_holidays(holiday_date);
+
+-- Business day support on deal_obligation_register
+ALTER TABLE deal_obligation_register ADD COLUMN IF NOT EXISTS business_days_after_period_end INTEGER;
+ALTER TABLE deal_obligation_register ADD COLUMN IF NOT EXISTS business_day_jurisdictions TEXT;
+ALTER TABLE deal_obligation_register ADD COLUMN IF NOT EXISTS business_day_convention TEXT DEFAULT 'modified_following';
+ALTER TABLE deal_obligation_register ADD COLUMN IF NOT EXISTS grace_period_business_days INTEGER;
+
+-- Primary business day calendar on deals
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS business_day_calendar TEXT DEFAULT 'GB';
+
+-- ═══════════════════════════════════════════════════════════════════════════════
 -- End of migrations — all statements above are idempotent
 -- ═══════════════════════════════════════════════════════════════════════════════
