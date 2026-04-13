@@ -922,5 +922,52 @@ ALTER TABLE deal_obligation_register ADD COLUMN IF NOT EXISTS grace_period_busin
 ALTER TABLE deals ADD COLUMN IF NOT EXISTS business_day_calendar TEXT DEFAULT 'GB';
 
 -- ═══════════════════════════════════════════════════════════════════════════════
+-- Distribution Conditions (Tab 22) — full lock-up regime
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS deal_distribution_conditions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    deal_id INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+    condition_id VARCHAR(10) NOT NULL,
+    condition_name TEXT NOT NULL,
+    condition_category VARCHAR(20) NOT NULL,
+    consequence_tier VARCHAR(25) NOT NULL,
+    ratio_name VARCHAR(50),
+    direction VARCHAR(3),
+    threshold_value DECIMAL(10,4),
+    threshold_variant TEXT,
+    lookback_period VARCHAR(20),
+    test_frequency VARCHAR(20),
+    remedy_available BOOLEAN DEFAULT FALSE,
+    remedy_mechanism TEXT,
+    sweep_percentage DECIMAL(5,2),
+    sweep_step_schedule JSONB,
+    source_clause TEXT,
+    notes TEXT,
+    sort_order INTEGER DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(deal_id, condition_id)
+);
+CREATE INDEX IF NOT EXISTS idx_dist_conditions_deal ON deal_distribution_conditions(deal_id);
+CREATE INDEX IF NOT EXISTS idx_dist_conditions_category ON deal_distribution_conditions(condition_category);
+
+-- Distribution mechanics columns on deals
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS distribution_frequency VARCHAR(20);
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS distribution_calculation_basis TEXT;
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS distribution_waterfall_position INTEGER;
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS sweep_before_distribution BOOLEAN;
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS sweep_in_dscr BOOLEAN;
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS trapped_cash_mechanism VARCHAR(40);
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS trapped_cash_release TEXT;
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS lockup_cure_window_days INTEGER;
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS lockup_escalation_periods INTEGER;
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS lockup_escalation_consequence TEXT;
+
+-- Onboarding snapshot additions
+ALTER TABLE deal_onboarding_snapshots ADD COLUMN IF NOT EXISTS distribution_gates_count INTEGER;
+ALTER TABLE deal_onboarding_snapshots ADD COLUMN IF NOT EXISTS distribution_gates_summary TEXT;
+
+-- ═══════════════════════════════════════════════════════════════════════════════
 -- End of migrations — all statements above are idempotent
 -- ═══════════════════════════════════════════════════════════════════════════════
