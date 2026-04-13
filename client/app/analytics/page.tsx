@@ -1045,21 +1045,53 @@ This guarantees the snapshot can never be tampered with at the database level, r
   // ── Distribution & Compliance ──
   {
     id: "distribution-assessment",
-    name: "Distribution Assessment",
+    name: "Distribution Assessment Engine",
     category: "Distribution & Compliance",
-    summary: "Determines whether equity distributions are currently permitted or blocked.",
-    detail: `The distribution assessment checks four blocker conditions:
+    summary: "Data-driven assessment of whether equity distributions are permitted, using the structured distribution conditions register (Tab 22) with fallback to legacy checks.",
+    detail: `The Distribution Assessment Engine determines whether a deal can pay cash to equity holders. It reads from the \\\`deal_distribution_conditions\\\` table (populated from TopSheet Tab 22) and tests each condition against the deal's current state.
 
-1. **Covenant status ≠ performing** — any covenant in lockup, trigger, or default blocks distributions
-2. **Consecutive lockup periods ≥ 2** — sustained lockup triggers a cash sweep
-3. **Reserve accounts underfunded** — any reserve not fully funded or in surplus blocks distributions
-4. **Overdue obligations** — any compliance obligation with days overdue > 0 blocks distributions
+**Data-driven mode** (deals with Tab 22 conditions):
 
-**Result:**
-- **Permitted:** No blockers → distributions can proceed
-- **Blocked:** One or more blockers → distributions are restricted
+The engine iterates over every row in \\\`deal_distribution_conditions\\\` for the deal, grouped by category:
 
-Each failed condition is recorded with its code, label, and detail for audit.`,
+- **ratio** conditions: the engine reads the ratio value from the latest \\\`actual_periods\\\` or covenant test results and compares against the threshold. Direction-aware: \\\`min\\\` means value must be ≥ threshold; \\\`max\\\` means value must be ≤ threshold.
+- **reserve** conditions: checks \\\`deal_reserve_accounts\\\` for any unfunded reserves.
+- **compliance** conditions: checks for defaults in progress and overdue obligations.
+- **revolving_facility** conditions: checks if RCF has amounts drawn.
+- **credit_support, structural, timing, behavioural** conditions: evaluated based on deal state.
+- **cash_sweep** and **sweep_mechanic** tiers: recorded but not treated as pass/fail gates.
+- **incurrence_test** tiers: skipped (these gate new debt issuance, not distributions).
+
+**Escalation check:**
+If the deal has \\\`lockup_escalation_periods\\\` configured and \\\`consecutive_lockup_periods\\\` meets or exceeds it, the engine flags escalation (e.g. mandatory cash sweep after 3 consecutive lock-up periods).
+
+**Legacy fallback** (deals without Tab 22):
+Falls back to the original 4-blocker check: covenant status, consecutive lockup, reserve funding, overdue obligations.
+
+**14 condition categories:**
+ratio, reserve, compliance, timing, structural, behavioural, cash_sweep, credit_support, rating, liquidity, regulatory, capex_funding, incurrence, revolving_facility
+
+**7 consequence tiers:**
+distribution_condition (gate), trigger_event (WBS intermediate), cash_trap (escalated sweep), remedial_plan (consultation), incurrence_test (new debt gate), event_of_default (hard default), sweep_mechanic (defines sweep %)
+
+**Output:**
+- distributionStatus: permitted / blocked
+- lockupState: performing / distribution_lockup / cash_trap
+- totalConditions, passedCount, failedCount
+- failedConditions[] with conditionId, name, category, tier, detail
+- passedConditions[] (same structure)
+- sweepConditions[] (sweep mechanics with percentages/schedules)
+- escalationTriggered (boolean)
+- distributionMechanics (frequency, calculation basis, trapped cash mechanism, cure window)
+
+**TopSheet display:**
+Section F.6.1 on the TopSheet page shows the Distribution Mechanics summary and the full Conditions Register table with colour-coded consequence tier badges (red for event_of_default/cash_trap, orange for trigger_event/remedial_plan, grey for distribution_condition).
+
+**Cross-validation (logged as warnings during ingestion):**
+- Tab 22 ratio conditions should match Tab 8 covenant thresholds
+- Tab 22 credit_support conditions should have matching Tab 3 reserve accounts
+- Tab 22 structural conditions checked against deal phase
+- At least 1 distribution_condition tier required for any deal with distributions`,
   },
   {
     id: "reserves-status",

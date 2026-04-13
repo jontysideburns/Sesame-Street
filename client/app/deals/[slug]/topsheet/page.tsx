@@ -722,6 +722,76 @@ export default async function TopSheetPage({ params }: { params: Promise<{ slug:
       </Section>
 
       {/* ═══ SECTION 9: Distribution & Compliance ══════════════════ */}
+      {/* ═══ SECTION: Distribution Conditions (Tab 22) ═══════════════ */}
+      {ts.distributionConditions?.length > 0 && (
+        <Section eyebrow="F.6.1" title="Distribution Conditions">
+          {d.distribution_frequency && (
+            <>
+              <h3 style={{ fontSize: "0.80rem", fontWeight: 700, marginTop: 4, marginBottom: 8, color: "var(--accent)" }}>Distribution Mechanics</h3>
+              <DL items={[
+                ["Frequency", d.distribution_frequency ? clean(d.distribution_frequency) : "\u2014"],
+                ["Calculation Basis", d.distribution_calculation_basis],
+                ["Sweep Before Distribution", d.sweep_before_distribution ? "Yes" : d.sweep_before_distribution === false ? "No" : "\u2014"],
+                ["Sweep in DSCR", d.sweep_in_dscr ? "Yes" : d.sweep_in_dscr === false ? "No" : "\u2014"],
+                ["Trapped Cash", d.trapped_cash_mechanism ? clean(d.trapped_cash_mechanism) : "\u2014"],
+                ["Trapped Cash Release", d.trapped_cash_release],
+                ["Cure Window", d.lockup_cure_window_days ? `${d.lockup_cure_window_days} business days` : "\u2014"],
+                ["Escalation After", d.lockup_escalation_periods ? `${d.lockup_escalation_periods} consecutive periods` : "\u2014"],
+                ["Escalation Consequence", d.lockup_escalation_consequence ? clean(d.lockup_escalation_consequence) : "\u2014"],
+              ]} />
+            </>
+          )}
+          <h3 style={{ fontSize: "0.80rem", fontWeight: 700, marginTop: 16, marginBottom: 8, color: "var(--accent)" }}>
+            Conditions Register ({ts.distributionConditions.length} conditions)
+          </h3>
+          <div className="jps-table-wrap">
+            <table className="jps-table" style={{ marginBottom: 0 }}>
+              <thead>
+                <tr>
+                  <th style={{ padding: "6px 8px", fontSize: "0.68rem" }}>ID</th>
+                  <th style={{ padding: "6px 8px", fontSize: "0.68rem" }}>Condition</th>
+                  <th style={{ padding: "6px 8px", fontSize: "0.68rem" }}>Category</th>
+                  <th style={{ padding: "6px 8px", fontSize: "0.68rem" }}>Tier</th>
+                  <th style={{ padding: "6px 8px", fontSize: "0.68rem" }}>Ratio</th>
+                  <th style={{ padding: "6px 8px", fontSize: "0.68rem" }}>Threshold</th>
+                  <th style={{ padding: "6px 8px", fontSize: "0.68rem" }}>Test</th>
+                  <th style={{ padding: "6px 8px", fontSize: "0.68rem" }}>Remedy</th>
+                  <th style={{ padding: "6px 8px", fontSize: "0.68rem" }}>Source</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ts.distributionConditions.map((dc: any, i: number) => {
+                  const tierTone = dc.consequence_tier === "event_of_default" ? "critical"
+                    : dc.consequence_tier === "cash_trap" ? "critical"
+                    : dc.consequence_tier === "trigger_event" ? "warning"
+                    : dc.consequence_tier === "remedial_plan" ? "warning"
+                    : "neutral";
+                  return (
+                    <tr key={i}>
+                      <td style={{ padding: "5px 8px", fontSize: "0.75rem", fontFamily: "monospace", fontWeight: 600 }}>{dc.condition_id}</td>
+                      <td style={{ padding: "5px 8px", fontSize: "0.75rem" }}>
+                        {dc.condition_name}
+                        {dc.notes && <div style={{ fontSize: "0.65rem", color: "var(--ink-soft)", marginTop: 2 }}>{dc.notes}</div>}
+                      </td>
+                      <td style={{ padding: "5px 8px", fontSize: "0.72rem" }}>{(dc.condition_category || "").replace(/_/g, " ")}</td>
+                      <td style={{ padding: "5px 8px" }}><span className={`badge ${tierTone} badge-sm`}>{(dc.consequence_tier || "").replace(/_/g, " ")}</span></td>
+                      <td style={{ padding: "5px 8px", fontSize: "0.72rem", fontFamily: "monospace" }}>{dc.ratio_name || "\u2014"}</td>
+                      <td style={{ padding: "5px 8px", fontSize: "0.72rem", fontFamily: "monospace" }}>
+                        {dc.threshold_value != null ? `${dc.direction === "min" ? "\u2265" : "\u2264"} ${Number(dc.threshold_value).toFixed(2)}` : dc.sweep_percentage != null ? `${dc.sweep_percentage}% sweep` : "\u2014"}
+                        {dc.threshold_variant && <div style={{ fontSize: "0.6rem", color: "var(--ink-soft)" }}>{dc.threshold_variant}</div>}
+                      </td>
+                      <td style={{ padding: "5px 8px", fontSize: "0.68rem" }}>{(dc.test_frequency || "").replace(/_/g, " ")}</td>
+                      <td style={{ padding: "5px 8px", fontSize: "0.68rem" }}>{dc.remedy_available ? "Yes" : "No"}</td>
+                      <td style={{ padding: "5px 8px", fontSize: "0.65rem", color: "var(--ink-soft)" }}>{dc.source_clause || "\u2014"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Section>
+      )}
+
       <Section eyebrow="F.12" title="Distribution & Compliance">
         {deal.distributionAssessment ? (
           <>

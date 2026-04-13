@@ -18417,6 +18417,10 @@ def get_deal_topsheet(slug: str):
         fin_template = conn.execute(
             "SELECT * FROM deal_financial_template WHERE deal_id = %s", (deal_id,)
         ).fetchone()
+        dist_conditions = conn.execute(
+            "SELECT * FROM deal_distribution_conditions WHERE deal_id = %s ORDER BY sort_order",
+            (deal_id,),
+        ).fetchall()
         onboarding_current = conn.execute(
             "SELECT * FROM deal_onboarding_snapshots WHERE deal_id = %s AND is_current = TRUE",
             (deal_id,),
@@ -18688,6 +18692,7 @@ def get_deal_topsheet(slug: str):
         "deal": deal,
         "tail": tail,
         "renewalAnalysis": renewal,
+        "distributionConditions": [_serialize_row(r) for r in dist_conditions],
         "onboardingSnapshot": _serialize_row(onboarding_current) if onboarding_current else None,
         "onboardingHistory": [_serialize_row(r) for r in onboarding_history],
         "capitalStructure": [_serialize_row(r) for r in cap_struct],
@@ -19335,12 +19340,34 @@ def compute_deal_grade(slug: str):
 
 @app.post("/api/deals/{slug}/analytics/assess-distribution")
 def assess_distribution(slug: str):
-    """Assess whether distributions are currently permitted for this deal."""
+    """Assess whether distributions are currently permitted for this deal.
+    Data-driven: checks all conditions from deal_distribution_conditions, then
+    falls back to legacy checks for deals without structured conditions."""
     with get_connection() as conn:
         deal_id = _get_deal_id(conn, slug)
         deal = conn.execute("SELECT * FROM deals WHERE id = %s", (deal_id,)).fetchone()
 
-        # Get latest covenant tests
+        blockers = []
+        failed_conditions = []
+        passed_conditions = []
+        sweep_conditions = []
+
+        # ── Data-driven checks from deal_distribution_conditions ────────
+        dist_conditions = conn.execute(
+            """SELECT * FROM deal_distribution_conditions
+               WHERE deal_id = %s ORDER BY sort_order""",
+            (deal_id,),
+        ).fetchall()
+
+        # Get latest actual metrics for ratio checks
+        latest_ap = conn.execute(
+            """SELECT actual_metrics FROM actual_periods
+               WHERE deal_id = %s ORDER BY period_end DESC LIMIT 1""",
+            (deal_id,),
+        ).fetchone()
+        actual_metrics = (latest_ap["actual_metrics"] if latest_ap else {}) or {}
+
+        # Get latest covenant test results
         latest_tests = conn.execute(
             """SELECT ct.covenant_name, ct.tier_status, ct.ratio_value,
                       ct.lockup_threshold, ct.headroom_to_lockup
@@ -19349,46 +19376,145 @@ def assess_distribution(slug: str):
                ORDER BY ct.created_at DESC LIMIT 20""",
             (deal_id,),
         ).fetchall()
+        test_by_name = {t["covenant_name"]: t for t in latest_tests}
 
-        blockers = []
-        failed_conditions = []
+        if dist_conditions:
+            # Data-driven assessment
+            for dc in dist_conditions:
+                cid = dc["condition_id"]
+                cat = dc["condition_category"]
+                tier = dc["consequence_tier"]
 
-        # Check covenant status
-        cov_status = deal["overall_covenant_status"] or "performing"
-        if cov_status != "performing":
-            blockers.append(f"Covenant status: {cov_status}")
-            for t in latest_tests:
-                if t["tier_status"] != "performing":
-                    failed_conditions.append({
-                        "covenant": t["covenant_name"],
-                        "status": t["tier_status"],
-                        "value": float(t["ratio_value"]) if t["ratio_value"] else None,
-                        "threshold": float(t["lockup_threshold"]) if t["lockup_threshold"] else None,
+                # Sweep mechanics are not pass/fail gates
+                if tier == "sweep_mechanic":
+                    sweep_conditions.append({
+                        "conditionId": cid,
+                        "name": dc["condition_name"],
+                        "sweepPct": float(dc["sweep_percentage"]) if dc["sweep_percentage"] else None,
+                        "schedule": dc["sweep_step_schedule"],
                     })
+                    continue
 
-        # Check consecutive lockup
-        consec = deal["consecutive_lockup_periods"] or 0
-        if consec >= 2:
-            blockers.append(f"Consecutive lockup periods: {consec}")
+                # Incurrence tests are not distribution gates
+                if tier == "incurrence_test":
+                    continue
 
-        # Check reserve accounts — any unfunded?
-        reserves = conn.execute(
-            "SELECT account_name, funded_status FROM deal_reserve_accounts WHERE deal_id = %s AND funded_status != 'fully_funded' AND funded_status != 'surplus'",
-            (deal_id,),
-        ).fetchall()
-        for r in reserves:
-            blockers.append(f"Reserve underfunded: {r['account_name']} ({r['funded_status']})")
+                result = "passed"
+                detail = None
 
-        # Check overdue obligations
-        overdue = conn.execute(
-            "SELECT title, days_overdue FROM obligations WHERE deal_id = %s AND days_overdue > 0 AND status != 'completed'",
-            (deal_id,),
-        ).fetchall()
-        for o in overdue:
-            blockers.append(f"Overdue obligation: {o['title']} ({o['days_overdue']}d)")
+                if cat == "ratio" and dc["ratio_name"] and dc["threshold_value"]:
+                    # Check the ratio value from actuals or covenant tests
+                    ratio_val = actual_metrics.get(dc["ratio_name"])
+                    if ratio_val is None:
+                        # Try snake_case variant
+                        snake = dc["ratio_name"].replace("senior", "senior_").replace("Dscr", "_dscr").replace("Ebitda", "_ebitda").replace("Icr", "_icr").replace("Rar", "_rar").lower().replace("__", "_").strip("_")
+                        ratio_val = actual_metrics.get(snake) or actual_metrics.get("dscr" if "dscr" in snake else snake)
+                    if ratio_val is not None:
+                        try:
+                            rv = float(ratio_val)
+                            tv = float(dc["threshold_value"])
+                            if dc["direction"] == "min" and rv < tv:
+                                result = "failed"
+                                detail = f"{dc['ratio_name']} = {rv:.2f} < {tv:.2f} threshold"
+                            elif dc["direction"] == "max" and rv > tv:
+                                result = "failed"
+                                detail = f"{dc['ratio_name']} = {rv:.2f} > {tv:.2f} threshold"
+                        except (ValueError, TypeError):
+                            pass
+
+                elif cat == "reserve":
+                    reserves = conn.execute(
+                        "SELECT account_name, funded_status FROM deal_reserve_accounts WHERE deal_id = %s AND funded_status NOT IN ('fully_funded', 'surplus')",
+                        (deal_id,),
+                    ).fetchall()
+                    if reserves:
+                        result = "failed"
+                        detail = f"Unfunded reserves: {', '.join(r['account_name'] for r in reserves)}"
+
+                elif cat == "compliance":
+                    cov_status = deal.get("overall_covenant_status") or "performing"
+                    if "default" in dc["condition_name"].lower() and cov_status in ("trigger_event", "event_of_default"):
+                        result = "failed"
+                        detail = f"Covenant status: {cov_status}"
+                    # Check overdue obligations
+                    overdue = conn.execute(
+                        "SELECT COUNT(*) AS cnt FROM obligations WHERE deal_id = %s AND days_overdue > 0 AND status != 'completed'",
+                        (deal_id,),
+                    ).fetchone()
+                    if overdue and int(overdue["cnt"]) > 0 and "payment" in dc["condition_name"].lower():
+                        result = "failed"
+                        detail = f"{overdue['cnt']} overdue obligation(s)"
+
+                elif cat == "revolving_facility":
+                    # Check if RCF has amounts drawn
+                    rcf = conn.execute(
+                        "SELECT instrument_name, drawn_amount FROM capital_structure_instruments WHERE deal_id = %s AND instrument_type IN ('senior_rcf') AND drawn_amount > 0",
+                        (deal_id,),
+                    ).fetchall()
+                    if rcf:
+                        result = "failed"
+                        detail = f"RCF drawn: {', '.join(r['instrument_name'] for r in rcf)}"
+
+                # Record the result
+                entry = {
+                    "conditionId": cid,
+                    "name": dc["condition_name"],
+                    "category": cat,
+                    "tier": tier,
+                    "result": result,
+                    "detail": detail,
+                    "sourceClause": dc["source_clause"],
+                }
+                if result == "failed":
+                    blockers.append(f"{dc['condition_name']}: {detail}")
+                    failed_conditions.append(entry)
+                else:
+                    passed_conditions.append(entry)
+
+        else:
+            # Legacy fallback for deals without structured conditions
+            cov_status = deal.get("overall_covenant_status") or "performing"
+            if cov_status != "performing":
+                blockers.append(f"Covenant status: {cov_status}")
+                for t in latest_tests:
+                    if t["tier_status"] != "performing":
+                        failed_conditions.append({
+                            "conditionId": "LEGACY",
+                            "name": t["covenant_name"],
+                            "category": "ratio",
+                            "tier": "distribution_condition",
+                            "result": "failed",
+                            "detail": f"{t['tier_status']}",
+                        })
+
+            consec = deal.get("consecutive_lockup_periods") or 0
+            if consec >= 2:
+                blockers.append(f"Consecutive lockup periods: {consec}")
+
+            reserves = conn.execute(
+                "SELECT account_name, funded_status FROM deal_reserve_accounts WHERE deal_id = %s AND funded_status NOT IN ('fully_funded', 'surplus')",
+                (deal_id,),
+            ).fetchall()
+            for r in reserves:
+                blockers.append(f"Reserve underfunded: {r['account_name']}")
+
+            overdue = conn.execute(
+                "SELECT title, days_overdue FROM obligations WHERE deal_id = %s AND days_overdue > 0 AND status != 'completed'",
+                (deal_id,),
+            ).fetchall()
+            for o in overdue:
+                blockers.append(f"Overdue obligation: {o['title']} ({o['days_overdue']}d)")
+
+        # ── Escalation check ────────────────────────────────────────────
+        consec = deal.get("consecutive_lockup_periods") or 0
+        escalation_periods = deal.get("lockup_escalation_periods")
+        escalation_triggered = False
+        if escalation_periods and consec >= escalation_periods:
+            escalation_triggered = True
+            blockers.append(f"Lock-up escalation: {consec} consecutive periods (threshold: {escalation_periods})")
 
         dist_status = "permitted" if len(blockers) == 0 else "blocked"
-        lockup_state = cov_status
+        lockup_state = "performing" if len(blockers) == 0 else ("cash_trap" if escalation_triggered else "distribution_lockup")
 
         # Persist
         latest_fp = conn.execute(
@@ -19408,12 +19534,11 @@ def assess_distribution(slug: str):
                      summary = EXCLUDED.summary, failed_conditions = EXCLUDED.failed_conditions""",
                 (deal_id, latest_fp["id"], dist_status, lockup_state,
                  len(blockers),
-                 f"Distribution {'permitted' if dist_status == 'permitted' else 'blocked'} — {len(blockers)} blockers",
+                 f"Distribution {'permitted' if dist_status == 'permitted' else 'blocked'} \u2014 {len(failed_conditions)} of {len(failed_conditions) + len(passed_conditions)} conditions failed",
                  "; ".join(blockers) if blockers else "All conditions met",
                  json.dumps(failed_conditions), json.dumps([])),
             )
 
-        # Update deal
         conn.execute(
             "UPDATE deals SET distribution_status = %s WHERE id = %s",
             (dist_status, deal_id),
@@ -19424,8 +19549,23 @@ def assess_distribution(slug: str):
         "distributionStatus": dist_status,
         "lockupState": lockup_state,
         "blockerCount": len(blockers),
+        "totalConditions": len(failed_conditions) + len(passed_conditions),
+        "passedCount": len(passed_conditions),
+        "failedCount": len(failed_conditions),
         "blockers": blockers,
         "failedConditions": failed_conditions,
+        "passedConditions": passed_conditions,
+        "sweepConditions": sweep_conditions,
+        "escalationTriggered": escalation_triggered,
+        "distributionMechanics": {
+            "frequency": deal.get("distribution_frequency"),
+            "calculationBasis": deal.get("distribution_calculation_basis"),
+            "sweepBeforeDistribution": deal.get("sweep_before_distribution"),
+            "trappedCashMechanism": deal.get("trapped_cash_mechanism"),
+            "trappedCashRelease": deal.get("trapped_cash_release"),
+            "escalationPeriods": deal.get("lockup_escalation_periods"),
+            "escalationConsequence": deal.get("lockup_escalation_consequence"),
+        },
     }
 
 

@@ -1183,8 +1183,96 @@ ws13.cell(row=next_row, column=3, value="Record each obligation from finance doc
 ws13.cell(row=next_row, column=3).border = border
 
 
+# ═══════════════════════════════════════════════════════════════════
+# TAB 22: Distribution Conditions (lock-up regime)
+# ═══════════════════════════════════════════════════════════════════
+ws_dc = wb.create_sheet("22. Distribution Conditions")
+ws_dc.merge_cells("A1:P1")
+ws_dc["A1"] = "DISTRIBUTION CONDITIONS \u2014 Record every condition that must be satisfied before cash can be distributed to equity. One row per condition. Use condition_category and consequence_tier enums."
+ws_dc["A1"].font = version_font
+ws_dc["A1"].alignment = Alignment(wrap_text=True)
+ws_dc.row_dimensions[1].height = 40
+
+headers_dc = [
+    "Condition ID", "Condition Name", "Category", "Consequence Tier",
+    "Ratio Name", "Direction", "Threshold Value", "Threshold Variant",
+    "Lookback Period", "Test Frequency", "Remedy Available",
+    "Remedy Mechanism", "Sweep %", "Sweep Step Schedule",
+    "Source Clause", "Notes"
+]
+for i, h in enumerate(headers_dc, 1):
+    cell = ws_dc.cell(row=2, column=i, value=h)
+    cell.font = hdr_font
+    cell.fill = hdr_fill
+    cell.border = border
+    cell.alignment = Alignment(wrap_text=True, vertical="top")
+
+notes_dc = [
+    "DC-001, DC-002, etc.",
+    "Short name from facility agreement",
+    "ratio, reserve, compliance, timing, structural, behavioural, cash_sweep, credit_support, rating, liquidity, regulatory, capex_funding, incurrence, revolving_facility",
+    "distribution_condition, trigger_event, cash_trap, remedial_plan, incurrence_test, event_of_default, sweep_mechanic",
+    "seniorDscr, llcr, ltv, icr, netDebtEbitda, debtYield, seniorRar, seniorIcr. Null for non-ratio",
+    "min or max. Null for non-ratio",
+    "Decimal threshold (e.g. 1.35, 0.70). Null for non-ratio",
+    "If threshold varies: pre_completion, post_completion, year_1, etc.",
+    "historic_12m, projected_12m, projected_24m, spot, average",
+    "semi_annual, quarterly, annual, each_distribution, event_driven",
+    "Yes/No",
+    "Cure mechanism: equity injection, reserve top-up, certificate, etc.",
+    "For cash_sweep only: 0-100",
+    "For stepped sweeps: Y1:25, Y2:50, Y3:75, Y4:100",
+    "e.g. CTA 18.5(a)(iv), SFA Cl. 9.4",
+    "Free text"
+]
+for i, n in enumerate(notes_dc, 1):
+    cell = ws_dc.cell(row=3, column=i, value=n)
+    cell.font = note_font
+    cell.border = border
+    cell.alignment = Alignment(wrap_text=True, vertical="top")
+ws_dc.row_dimensions[3].height = 55
+
+dv_dc_cat = DataValidation(type="list", formula1='"ratio,reserve,compliance,timing,structural,behavioural,cash_sweep,credit_support,rating,liquidity,regulatory,capex_funding,incurrence,revolving_facility"')
+dv_dc_tier = DataValidation(type="list", formula1='"distribution_condition,trigger_event,cash_trap,remedial_plan,incurrence_test,event_of_default,sweep_mechanic"')
+dv_dc_dir = DataValidation(type="list", formula1='"min,max"')
+dv_dc_look = DataValidation(type="list", formula1='"historic_12m,projected_12m,projected_24m,spot,average"')
+dv_dc_freq = DataValidation(type="list", formula1='"semi_annual,quarterly,annual,each_distribution,event_driven"')
+dv_dc_yn = DataValidation(type="list", formula1='"Yes,No"')
+
+# 30 blank rows with validations
+for row_idx in range(4, 34):
+    for col_idx in range(1, len(headers_dc) + 1):
+        cell = ws_dc.cell(row=row_idx, column=col_idx)
+        cell.border = border
+        cell.fill = input_fill
+
+add_table_rows(ws_dc, 4, 30, len(headers_dc), {
+    3: dv_dc_cat,
+    4: dv_dc_tier,
+    6: dv_dc_dir,
+    9: dv_dc_look,
+    10: dv_dc_freq,
+    11: dv_dc_yn,
+})
+
+col_widths_dc = [12, 35, 22, 25, 20, 8, 15, 25, 15, 18, 8, 30, 10, 35, 20, 50]
+for i, w in enumerate(col_widths_dc, 1):
+    ws_dc.column_dimensions[get_column_letter(i)].width = w
+ws_dc.freeze_panes = "A4"
+
+# Update Validation tab
+ws13 = wb["Validation"]
+next_row = 18
+ws13.cell(row=next_row, column=1, value="22. Distribution Conditions").font = label_font
+ws13.cell(row=next_row, column=1).border = border
+ws13.cell(row=next_row, column=2).border = border
+ws13.cell(row=next_row, column=2).fill = input_fill
+ws13.cell(row=next_row, column=3, value="At least 1 condition required. Ratio conditions must match Tab 8 thresholds.").font = note_font
+ws13.cell(row=next_row, column=3).border = border
+
+
 # Save
 import os
-out = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs", "topsheet-data-template-v6.xlsx")
+out = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs", "topsheet-data-template-v7.xlsx")
 wb.save(out)
 print(f"Saved to {out}")
