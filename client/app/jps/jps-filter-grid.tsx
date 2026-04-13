@@ -362,12 +362,11 @@ export default function JpsFilterGrid({
                 <SortTh k="performanceScore" label="Score" sort={sort} onSort={toggleSort} align="right" />
                 <SortTh k="grade" label="Grade" sort={sort} onSort={toggleSort} />
                 <SortTh k="performanceTrend" label="Trend" sort={sort} onSort={toggleSort} />
-                <SortTh k="covenantStatus" label="Covenant" sort={sort} onSort={toggleSort} />
-                <SortTh k="ratioStatus" label="Ratio Status" sort={sort} onSort={toggleSort} />
+                <SortTh k="ratioStatus" label="Covenant Status" sort={sort} onSort={toggleSort} />
                 <SortTh k="latestPeriodEnd" label="Last Financials" sort={sort} onSort={toggleSort} />
                 <SortTh k="reportedDscr" label="DSCR" sort={sort} onSort={toggleSort} align="right" />
-                <SortTh k="ndEbitda" label="ND:EBITDA" sort={sort} onSort={toggleSort} align="right" />
                 <SortTh k="headroomPct" label="Headroom" sort={sort} onSort={toggleSort} align="right" />
+                <SortTh k="ndEbitda" label="ND:EBITDA" sort={sort} onSort={toggleSort} align="right" />
                 <SortTh k="todos" label="To-do's" sort={sort} onSort={toggleSort} align="right" />
                 <SortTh k="reservesFullyFunded" label="Reserves" sort={sort} onSort={toggleSort} />
               </tr>
@@ -454,18 +453,11 @@ export default function JpsFilterGrid({
                       )}
                     </td>
 
-                    {/* Covenant performance — text, left */}
+                    {/* Covenant Status (from covenant testing engine) */}
                     <td style={td}>
-                      <span className={`badge ${tierTone(deal.covenantStatus)} badge-sm`}>
-                        {deal.covenantStatus.replace(/_/g, " ")}
-                      </span>
-                    </td>
-
-                    {/* Ratio Status */}
-                    <td style={td}>
-                      {deal.ratioStatus ? (
-                        <span className={`badge ${tierTone(deal.ratioStatus)} badge-sm`}>
-                          {deal.ratioStatus.replace(/_/g, " ")}
+                      {(deal.ratioStatus || deal.covenantStatus) ? (
+                        <span className={`badge ${tierTone(deal.ratioStatus || deal.covenantStatus)} badge-sm`}>
+                          {(deal.ratioStatus || deal.covenantStatus).replace(/_/g, " ")}
                         </span>
                       ) : (
                         <span style={{ color: "var(--ink-soft)" }}>{"\u2014"}</span>
@@ -484,14 +476,14 @@ export default function JpsFilterGrid({
                       {deal.reportedDscr != null ? `${deal.reportedDscr.toFixed(2)}x` : "—"}
                     </td>
 
-                    {/* ND:EBITDA — number, right */}
-                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>
-                      {deal.ndEbitda != null ? `${deal.ndEbitda.toFixed(1)}x` : "\u2014"}
-                    </td>
-
                     {/* Headroom — number, right */}
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>
                       {deal.headroomPct != null ? `${deal.headroomPct.toFixed(1)}%` : "\u2014"}
+                    </td>
+
+                    {/* ND:EBITDA — number, right */}
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>
+                      {deal.ndEbitda != null ? `${deal.ndEbitda.toFixed(1)}x` : "\u2014"}
                     </td>
 
                     {/* To-do's — number, right */}

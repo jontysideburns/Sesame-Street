@@ -203,7 +203,7 @@ function DotsIcon(className?: string) {
 const primaryNavItems: NavItem[] = [
   {
     href: "/jps",
-    label: "JPS",
+    label: "Dashboard",
     matches: (pathname) => pathname.startsWith("/jps"),
     icon: JpsIcon,
     requiredPermission: "canViewPortfolio"

@@ -52,6 +52,8 @@ const SEVERITY_TONE: Record<string, string> = {
 export default function CalendarClient({ deliverables, holidays }: Props) {
   const [view, setView] = useState<"list" | "calendar">("list");
   const [filter, setFilter] = useState("");
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const todayStr = new Date().toISOString().slice(0, 10);
 
   const holidaySet = useMemo(() => {
     const s = new Map<string, string[]>();
@@ -227,7 +229,7 @@ export default function CalendarClient({ deliverables, holidays }: Props) {
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 1, background: "var(--line)", padding: 1 }}>
                   {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => (
-                    <div key={d} style={{ background: "var(--accent-soft)", padding: "4px 6px", fontSize: "0.65rem", fontWeight: 700, textAlign: "center", color: "var(--ink-soft)" }}>{d}</div>
+                    <div key={d} style={{ background: (d === "Sat" || d === "Sun") ? "#d5d5d5" : "var(--accent-soft)", padding: "4px 6px", fontSize: "0.65rem", fontWeight: 700, textAlign: "center", color: (d === "Sat" || d === "Sun") ? "#888" : "var(--ink-soft)" }}>{d}</div>
                   ))}
                   {cells.map((cell, ci) => {
                     if (!cell.isMonth) return <div key={ci} style={{ background: "var(--panel)", minHeight: 48 }} />;
@@ -235,17 +237,29 @@ export default function CalendarClient({ deliverables, holidays }: Props) {
                     const dayItems = itemsByDay.get(cell.day) || [];
                     const hols = holidaySet.get(dateStr);
                     const isWeekend = new Date(y, m - 1, cell.day).getDay() === 0 || new Date(y, m - 1, cell.day).getDay() === 6;
+                    const isToday = dateStr === todayStr;
+                    const isSelected = selectedDate === dateStr;
+
+                    let bg = "var(--panel)";
+                    if (isSelected) bg = "var(--accent-soft)";
+                    else if (isToday) bg = "#e3f2fd";
+                    else if (hols) bg = "#fff9c4";
+                    else if (isWeekend) bg = "#e8e8e8";
 
                     return (
                       <div
                         key={ci}
+                        onClick={dayItems.length > 0 ? () => setSelectedDate(isSelected ? null : dateStr) : undefined}
                         style={{
-                          background: hols ? "#fff9c4" : isWeekend ? "#f5f5f5" : "var(--panel)",
+                          background: bg,
                           minHeight: 48, padding: "3px 5px", position: "relative",
+                          cursor: dayItems.length > 0 ? "pointer" : "default",
+                          outline: isSelected ? "2px solid var(--accent)" : isToday ? "2px solid #1976d2" : "none",
+                          borderRadius: (isSelected || isToday) ? 4 : 0,
                         }}
-                        title={hols ? hols.join(", ") : undefined}
+                        title={hols ? hols.join(", ") : isToday ? "Today" : undefined}
                       >
-                        <div style={{ fontSize: "0.65rem", fontWeight: 600, color: isWeekend ? "#999" : "var(--ink)" }}>{cell.day}</div>
+                        <div style={{ fontSize: "0.65rem", fontWeight: isToday ? 800 : 600, color: isToday ? "#1976d2" : isWeekend ? "#999" : "var(--ink)" }}>{cell.day}</div>
                         {hols && <div style={{ fontSize: "0.55rem", color: "#c97f1f", lineHeight: 1.2 }}>{hols[0].split(" (")[0]}</div>}
                         {dayItems.map((item, ii) => (
                           <div
@@ -261,6 +275,63 @@ export default function CalendarClient({ deliverables, holidays }: Props) {
                     );
                   })}
                 </div>
+
+                {/* Detail panel — inserted below this month if selected date is in this month */}
+                {selectedDate && selectedDate.startsWith(month) && (() => {
+                  const dayDeliverables = filtered.filter((d) => d.dueDate === selectedDate);
+                  if (dayDeliverables.length === 0) return null;
+                  const dateLabel = new Date(selectedDate + "T00:00:00").toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+                  const dayHols = holidaySet.get(selectedDate);
+                  return (
+                    <div style={{ borderTop: "2px solid var(--accent)", background: "var(--panel)" }}>
+                      <div style={{ padding: "10px 16px", background: "var(--accent-soft)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <div>
+                          <strong style={{ fontSize: "0.9rem", color: "var(--accent)" }}>{dateLabel}</strong>
+                          {dayHols && <span style={{ marginLeft: 10, fontSize: "0.72rem", color: "#c97f1f" }}>{dayHols.join(", ")}</span>}
+                          <span style={{ marginLeft: 10, fontSize: "0.75rem", color: "var(--ink-soft)" }}>{dayDeliverables.length} deliverable{dayDeliverables.length !== 1 ? "s" : ""}</span>
+                        </div>
+                        <button onClick={() => setSelectedDate(null)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "1.1rem", color: "var(--ink-soft)", padding: "2px 8px" }}>&times;</button>
+                      </div>
+                      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                        <thead>
+                          <tr>
+                            <th style={thStyle}>Deal</th>
+                            <th style={thStyle}>Obligation</th>
+                            <th style={thStyle}>Period</th>
+                            <th style={thStyle}>Responsible</th>
+                            <th style={thStyle}>Severity</th>
+                            <th style={thStyle}>Status</th>
+                            <th style={thStyle}>Grace Expiry</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {dayDeliverables.map((d, i) => (
+                            <tr key={i} style={{ background: d.status === "overdue" ? "rgba(214,84,84,0.06)" : undefined }}>
+                              <td style={td}>
+                                {d.dealName ? (
+                                  <a href={`/deals/${d.dealSlug}`} style={{ color: "var(--accent)", fontWeight: 600, textDecoration: "none" }}>{d.dealName}</a>
+                                ) : "\u2014"}
+                              </td>
+                              <td style={td}>
+                                <span style={{ fontWeight: 600 }}>{d.obligationId}</span>
+                                <span style={{ color: "var(--ink-soft)", marginLeft: 6 }}>{d.title}</span>
+                              </td>
+                              <td style={{ ...td, fontSize: "0.72rem" }}>{d.periodLabel}</td>
+                              <td style={{ ...td, fontSize: "0.72rem" }}>{d.responsibleParty}</td>
+                              <td style={td}>
+                                <span className={`badge ${SEVERITY_TONE[d.severity] ?? "neutral"} badge-sm`}>{d.severity.replace(/_/g, " ")}</span>
+                              </td>
+                              <td style={td}>
+                                <span className={`badge ${STATUS_TONE[d.status] ?? "neutral"} badge-sm`}>{STATUS_LABEL[d.status] ?? d.status}</span>
+                              </td>
+                              <td style={{ ...td, fontFamily: "monospace", fontSize: "0.72rem" }}>{d.graceExpiry}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })()}
               </div>
             );
           })}
