@@ -282,6 +282,7 @@ export default function JpsFilterGrid({
     <>
       {/* ── Filter bar ──────────────────────────────────────────────── */}
       <div
+        className="jps-filter-bar"
         style={{
           display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10,
           padding: "14px 18px", marginBottom: 16,
@@ -340,7 +341,7 @@ export default function JpsFilterGrid({
       <PortfolioSummary deals={filtered} />
 
       {/* ── Deal table ──────────────────────────────────────────────── */}
-      <h2 style={{ fontSize: "1.88rem", fontWeight: 700, letterSpacing: "-0.04em", color: "var(--ink)", margin: "20px 0 10px", whiteSpace: "nowrap" }}>
+      <h2 className="jps-assets-title" style={{ fontSize: "1.88rem", fontWeight: 700, letterSpacing: "-0.04em", color: "var(--ink)", margin: "20px 0 10px", whiteSpace: "nowrap" }}>
         Portfolio Assets
       </h2>
       {filtered.length === 0 ? (

@@ -3658,25 +3658,95 @@ blockquote {
 /* ── Print — A4 Landscape ───────────────────────────────────────── */
 
 @media print {
-  @page { size: A4 landscape; margin: 12mm; }
+  @page { size: A4 landscape; margin: 8mm; }
 
-  .sidebar, .hero, nav, header { display: none !important; }
+  /* Hide non-content elements */
+  .sidebar, .hero, nav, header,
+  .find-in-page-bar,
+  .jps-filter-bar { display: none !important; }
 
+  /* Hide print button */
+  [class*="print-button"], button:has(svg) { display: none !important; }
+
+  /* Force single-column block layout, no sidebar flex */
+  body, .app-layout, .app-main, .shell {
+    width: 100% !important;
+    max-width: 100% !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    display: block !important;
+  }
+
+  .panel, .section-panel {
+    width: 100% !important;
+    max-width: 100% !important;
+    padding: 4px !important;
+    margin: 0 !important;
+  }
+
+  /* ── Portfolio Summary: scale the entire grid to fit 1 landscape page ── */
+
+  /* Use transform:scale to shrink the whole summary to fit.
+     A4 landscape printable area ~277mm x ~190mm. The summary grid at
+     screen width (~1200px) is too tall, so scale it down. */
   .jps-summary-grid {
-    break-inside: avoid;
-    gap: 8px;
+    display: grid !important;
+    grid-template-columns: repeat(12, 1fr) !important;
+    gap: 6px !important;
+    transform: scale(0.62) !important;
+    transform-origin: top left !important;
+    width: 161% !important;  /* 1/0.62 = 1.61 — compensate for the scale */
+    margin-bottom: -300px !important; /* pull up the space left by scaling */
   }
 
-  .jps-chart-panel .recharts-responsive-container {
-    height: 160px !important;
+  /* Force 4 charts per row in print */
+  .jps-chart-panel     { grid-column: span 3 !important; }
+  .jps-attention-panel { grid-column: span 4 !important; }
+  .jps-summary-kpi     { grid-column: span 2 !important; }
+
+  /* Remove shadows */
+  .jps-chart-panel, .jps-attention-panel, .jps-summary-kpi {
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+    border: 1px solid #ddd !important;
   }
 
+  /* Remove all shadows and fancy borders */
   .panel, .metric-card, .jps-summary-kpi,
   .jps-chart-panel, .jps-attention-panel {
     box-shadow: none !important;
     backdrop-filter: none !important;
-    border: 1px solid #ccc !important;
+    border: 1px solid #ddd !important;
   }
+
+  /* ── Portfolio Assets table: page 2 ── */
+  .jps-assets-title {
+    break-before: page !important;
+    page-break-before: always !important;
+    font-size: 14pt !important;
+    margin-top: 0 !important;
+  }
+
+  /* Table: fit all columns on one landscape page */
+  table {
+    font-size: 6.5pt !important;
+    width: 100% !important;
+    table-layout: fixed !important;
+    word-wrap: break-word !important;
+  }
+  table th, table td {
+    padding: 2px 3px !important;
+    line-height: 1.2 !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
+  table th {
+    font-size: 5.5pt !important;
+  }
+
+  /* Badges: smaller in print */
+  .badge { font-size: 5.5pt !important; padding: 1px 4px !important; }
 }
 
 /* ── Find in Page (Ctrl+F) highlights ────────────────────────────── */

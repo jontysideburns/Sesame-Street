@@ -1,5 +1,6 @@
 import { getPortfolio } from "../../api/portfolio";
 import JpsFilterGrid from "./jps-filter-grid";
+import PrintButton from "./print-button";
 
 export default async function JpsPage() {
   let deals: any[] = [];
@@ -29,6 +30,7 @@ export default async function JpsPage() {
           <p className="hero-sub" style={{ whiteSpace: "nowrap" }}>
             TopSheet import, covenant testing, variance analysis and ratio reconciliation.
           </p>
+          <PrintButton />
         </div>
       </section>
 
