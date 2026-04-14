@@ -116,10 +116,21 @@ export default function CapitalStackBlock({ data }: { data: CapitalStackResponse
   );
   const ourCushion = our.total_cushion_below_us ?? 0;
 
-  // Visual stack bar — each layer sized proportional to its share of EV.
-  // Linear; no branching per decision #4. Stacks render BOTTOM (senior) first.
-  const barWidth = 620;
-  const barHeight = 24;
+  // Back out EBITDA from the consolidated leverage + consolidated debt
+  // so we can compute cumulative ND:EBITDA at each rank.
+  // For layer at rank N: leverage = Σ debt_total at ranks ≤ N / EBITDA.
+  const ebitda = data.metrics.consolidated_leverage_x != null && data.metrics.consolidated_leverage_x > 0
+    ? data.metrics.consolidated_debt_total / data.metrics.consolidated_leverage_x
+    : null;
+  const ndByRank: Record<number, number | null> = {};
+  if (ebitda && ebitda > 0) {
+    // data.layers is already ordered ascending by rank
+    let cumulative = 0;
+    for (const lyr of data.layers) {
+      cumulative += lyr.debt_total;
+      ndByRank[lyr.rank] = cumulative / ebitda;
+    }
+  }
 
   return (
     <article className="topsheet-card" style={{ marginBottom: 16 }}>
@@ -152,6 +163,7 @@ export default function CapitalStackBlock({ data }: { data: CapitalStackResponse
               <th style={thStyle}>Layer</th>
               <th style={thStyle}>Entity</th>
               <th style={thRight}>Total</th>
+              <th style={thRight}>ND:EBITDA</th>
               <th style={thRight}>Our holding</th>
               <th style={thRight}>% of EV</th>
               <th style={thRight}>Priority</th>
@@ -161,11 +173,15 @@ export default function CapitalStackBlock({ data }: { data: CapitalStackResponse
             {/* Render top-down (equity first, senior last) for visual stack convention */}
             {[...visualLayers].reverse().map((v, i) => {
               const isEquity = v.rank === "equity";
+              const nd = typeof v.rank === "number" ? ndByRank[v.rank] : null;
               return (
                 <tr key={i} style={{ borderBottom: `1px solid ${COLORS.line}` }}>
                   <td style={{ ...td, color: v.color, fontWeight: isEquity ? 600 : 700 }}>{v.label}</td>
                   <td style={{ ...td, color: COLORS.inkSoft }}>{v.entity}</td>
                   <td style={{ ...tdRight, fontWeight: 600 }}>{fmtMillions(v.total, ccy)}</td>
+                  <td style={{ ...tdRight, fontWeight: 600, color: COLORS.inkSoft }}>
+                    {nd != null ? fmtX(nd) : "\u2014"}
+                  </td>
                   <td style={{ ...tdRight, fontWeight: 600, color: v.our > 0 ? COLORS.accent : COLORS.inkSoft }}>
                     {v.our > 0 ? fmtMillions(v.our, ccy) : fmtMillions(0, ccy)}
                   </td>
@@ -177,15 +193,22 @@ export default function CapitalStackBlock({ data }: { data: CapitalStackResponse
               );
             })}
             {/* EV total */}
-            {hasEv && (
-              <tr style={{ background: "var(--panel-strong)", borderTop: `2px solid var(--line-strong)` }}>
-                <td style={{ ...td, fontWeight: 700 }} colSpan={2}>Enterprise Value</td>
-                <td style={{ ...tdRight, fontWeight: 700 }}>{fmtMillions(ev, ccy)}</td>
-                <td style={{ ...tdRight, fontWeight: 700, color: COLORS.accent }}>{fmtMillions(our.total_holding, ccy)}</td>
-                <td style={{ ...tdRight, fontWeight: 700 }}>100.0%</td>
-                <td style={tdRight}></td>
-              </tr>
-            )}
+            {hasEv && (() => {
+              // Total consolidated leverage at EV row = all in-perimeter debt / EBITDA
+              const totalNd = data.metrics.consolidated_leverage_x ?? null;
+              return (
+                <tr style={{ background: "var(--panel-strong)", borderTop: `2px solid var(--line-strong)` }}>
+                  <td style={{ ...td, fontWeight: 700 }} colSpan={2}>Enterprise Value</td>
+                  <td style={{ ...tdRight, fontWeight: 700 }}>{fmtMillions(ev, ccy)}</td>
+                  <td style={{ ...tdRight, fontWeight: 700, color: COLORS.inkSoft }}>
+                    {totalNd != null ? fmtX(totalNd) : "\u2014"}
+                  </td>
+                  <td style={{ ...tdRight, fontWeight: 700, color: COLORS.accent }}>{fmtMillions(our.total_holding, ccy)}</td>
+                  <td style={{ ...tdRight, fontWeight: 700 }}>100.0%</td>
+                  <td style={tdRight}></td>
+                </tr>
+              );
+            })()}
           </tbody>
         </table>
       </div>
@@ -196,31 +219,37 @@ export default function CapitalStackBlock({ data }: { data: CapitalStackResponse
           <div style={{ fontSize: "0.72rem", fontWeight: 700, color: COLORS.inkSoft, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>
             Stack — horizontal proportions
           </div>
-          <div style={{ display: "flex", width: "100%", height: barHeight, borderRadius: 4, overflow: "hidden", border: `1px solid ${COLORS.line}` }}>
+          <div style={{ display: "flex", width: "100%", height: 24, borderRadius: 4, overflow: "hidden", border: `1px solid ${COLORS.line}` }}>
             {/* Render bottom-up: senior first (left = senior = first claim) */}
-            {visualLayers.map((v, i) => (
-              <div
-                key={i}
-                title={`${v.label}: ${fmtMillions(v.total, ccy)} (${v.pct.toFixed(1)}% of EV)`}
-                style={{
-                  background: v.color,
-                  width: `${v.pct}%`,
-                  color: "#fff",
-                  fontSize: "0.65rem",
-                  fontWeight: 700,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  borderRight: i < visualLayers.length - 1 ? "1px solid rgba(255,255,255,0.35)" : "none",
-                  whiteSpace: "nowrap",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  padding: "0 4px",
-                }}
-              >
-                {v.pct >= 8 ? (typeof v.rank === "number" ? `R${v.rank}` : "Equity") : ""}
-              </div>
-            ))}
+            {visualLayers.map((v, i) => {
+              const label = typeof v.rank === "number" ? `R${v.rank}` : "Equity";
+              const pctLabel = `${v.pct.toFixed(1)}%`;
+              // Show full label if ≥8%, just % if 4-8%, blank below 4%
+              const shown = v.pct >= 8 ? `${label} ${pctLabel}` : v.pct >= 4 ? pctLabel : "";
+              return (
+                <div
+                  key={i}
+                  title={`${v.label}: ${fmtMillions(v.total, ccy)} (${pctLabel} of EV)`}
+                  style={{
+                    background: v.color,
+                    width: `${v.pct}%`,
+                    color: "#fff",
+                    fontSize: "0.65rem",
+                    fontWeight: 700,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    borderRight: i < visualLayers.length - 1 ? "1px solid rgba(255,255,255,0.35)" : "none",
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    padding: "0 4px",
+                  }}
+                >
+                  {shown}
+                </div>
+              );
+            })}
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.68rem", color: COLORS.inkSoft, marginTop: 2 }}>
             <span>First claim on cashflows (senior)</span>
@@ -229,33 +258,20 @@ export default function CapitalStackBlock({ data }: { data: CapitalStackResponse
         </div>
       )}
 
-      {/* ─── Metrics panel — two lenses ───────────────────────────── */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8, marginBottom: 16 }}>
-        <MetricCard
-          label="Senior LTV"
-          value={fmtPct(data.metrics.senior_ltv_pct)}
-          sub="Rank 1 debt / EV"
-        />
-        <MetricCard
-          label="CTA-consolidated leverage"
-          value={fmtX(data.metrics.consolidated_leverage_x)}
-          sub={`In-perimeter debt ${fmtMillions(data.metrics.consolidated_debt_total, ccy)}`}
-        />
-        {data.parallel_claims.length > 0 ? (
+      {/* Grossed-up equivalent leverage — shown only when parallel claims exist.
+          ND:EBITDA per rank is now in the table above, so the three legacy
+          metric cards (Senior LTV / CTA leverage / Consolidated LTV) have
+          been removed. */}
+      {data.parallel_claims.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
           <MetricCard
             label="Grossed-up equivalent leverage"
             value={fmtX(data.metrics.grossed_up_equivalent_leverage_x)}
             sub={`Incl. parallel claims grossed up: ${fmtMillions(data.metrics.grossed_up_equivalent_debt, ccy)}`}
             tone="warn"
           />
-        ) : (
-          <MetricCard
-            label="Consolidated LTV"
-            value={fmtPct(data.metrics.consolidated_ltv_pct)}
-            sub="In-perimeter debt / EV"
-          />
-        )}
-      </div>
+        </div>
+      )}
 
       {/* ─── Parallel claims (if any) ─────────────────────────────── */}
       {data.parallel_claims.length > 0 && (
