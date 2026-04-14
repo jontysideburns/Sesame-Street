@@ -2,7 +2,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { fetchJson } from "../../../../api/http";
 import { getDeal } from "../../../../api/deals";
+import { getCapitalStack, type CapitalStackResponse } from "../../../../api/capital-stack";
 import ForecastGrid from "./forecast-grid";
+import CapitalStackBlock from "./capital-stack";
 import RevenueRiskTooltip from "../../../../components/revenue-risk-tooltip";
 
 /* ── Helpers ─────────────────────────────────────────────────────── */
@@ -100,6 +102,14 @@ export default async function TopSheetPage({ params }: { params: Promise<{ slug:
       forecastSummary: { scenarioCount: 0, scenarios: [] },
       riskSnapshot: { entries: [], openCount: 0, highSeverityCount: 0 },
     };
+  }
+
+  // Capital Stack — fails gracefully if the deal has no EV / no instruments
+  let capitalStack: CapitalStackResponse | null = null;
+  try {
+    capitalStack = await getCapitalStack(slug);
+  } catch {
+    capitalStack = null;
   }
 
   const d = ts.deal;
@@ -424,6 +434,11 @@ export default async function TopSheetPage({ params }: { params: Promise<{ slug:
             </div>
           </>
         )}
+      </Section>
+
+      {/* ═══ SECTION 2B: Capital Stack (v9) ═══════════════════════════ */}
+      <Section eyebrow="F.2B" title="Capital Stack">
+        <CapitalStackBlock data={capitalStack} />
       </Section>
 
       {/* ═══ SECTION 3: Counterparties & Investors ═════════════════ */}

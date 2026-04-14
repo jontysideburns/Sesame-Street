@@ -167,6 +167,30 @@ docker exec docker-postgres-1 psql -U sesame -d sesamestreet -f //migrations//mi
   section below)
 - Accessed via "View Full TopSheet" button on deal page
 
+### Capital Stack (v9)
+- New Tab 1 VALUATION & EQUITY section collecting Enterprise Value, valuation
+  date, method, entity, and equity_invested. Migration adds 4 columns on
+  `deals` and 2 on `capital_structure_instruments` (`pledged_share_entity`,
+  `pledged_share_pct`) for shareholder-level NAV-style debt.
+- **`server/capital_structure_engine.py`** extended with 6 Capital Stack helpers:
+  - `build_capital_stack(deal, instruments, entities, ev, ebitda)` — top-level
+  - `compute_attributable_equity()` — rank-ordered walk-up from asset to equity
+  - `gross_up_facility()` — 1 / pledged_share_pct for NAV-style debt
+  - `build_metrics()` — two lenses: CTA-consolidated headline +
+    grossed-up consolidated-equivalent (per user decision #3)
+  - `change_of_control_coverage()` — LTV on pledged shares, amber > 30% /
+    red > 50% per user decision #5
+  - `validate_capital_stack()` — extends v8 validator with missing-EV,
+    stale-valuation, unpledged-NAV checks
+- Stack is LINEAR per user decision #4. Parallel claims via separate vehicles
+  = separate deal records.
+- **API:** `GET /api/deals/{slug}/capital-stack` (optional `reporting_currency`)
+- **UI:** New section F.2B on every Deal TopSheet page — two-column table
+  (Total / Our Holding) + horizontal stack bar + two-lens metrics panel +
+  our-position summary + parallel-claims + change-of-control coverage.
+- **Tests:** `tests/test_capital_stack.py` — 50 assertions across 7 cases
+  including the two Gatwick scenarios (acceptance criteria).
+
 ### Capital Structure Taxonomy (v8)
 - `capital_structure_instruments` columns (per instrument): `entity_level`,
   `entity_name`, `ownership_pct`, `structural_seniority`,

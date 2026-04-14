@@ -184,7 +184,13 @@
       "Bash(find . -name \"grade_engine.py\" -exec wc -l {} \\\\;)",
       "Bash(python -c \"from openpyxl import load_workbook; wb = load_workbook\\('docs/topsheet-data-template-v8.xlsx'\\); print\\('\\\\n'.join\\(wb.sheetnames\\)\\)\")",
       "Bash(grep -n \"ndEbitda\\\\|nd_ebitda\\\\|net_debt_ebitda\" client/app/jps/*.tsx client/api/portfolio.ts)",
-      "Bash(python \"C:/Users/jpste/AppData/Roaming/Claude/local-agent-mode-sessions/skills-plugin/c6e28b6a-4ab7-4303-beaf-63096751707a/ca88572a-031b-4a6c-a5d7-994b42731555/skills/docx/scripts/office/validate.py\" docs/gatwick-capital-stack-worked-example.docx)"
+      "Bash(python \"C:/Users/jpste/AppData/Roaming/Claude/local-agent-mode-sessions/skills-plugin/c6e28b6a-4ab7-4303-beaf-63096751707a/ca88572a-031b-4a6c-a5d7-994b42731555/skills/docx/scripts/office/validate.py\" docs/gatwick-capital-stack-worked-example.docx)",
+      "Bash(python -c \"import psycopg2; print\\('psycopg2', psycopg2.__version__\\)\")",
+      "Bash(python -c \"import sqlalchemy; print\\('sqlalchemy', sqlalchemy.__version__\\)\")",
+      "Bash(python tests/test_capital_stack.py)",
+      "Bash(curl -s \"http://localhost:4000/api/deals/gatwick-airport/capital-stack\")",
+      "Bash(curl -s \"http://localhost:4000/api/deals/wigmore-solar/capital-stack\")",
+      "Bash(curl -s \"http://localhost:4000/api/deals/gatwick-airport/capital-stack?reporting_currency=USD\")"
     ]
   }
 }

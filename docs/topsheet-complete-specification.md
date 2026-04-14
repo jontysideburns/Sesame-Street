@@ -1,9 +1,30 @@
 # TopSheet Complete Specification
 ## Data Template for Manual Population
 
-**Version:** v8 — April 2026
-**Template file:** `topsheet-data-template-v8.xlsx`
+**Version:** v9 — April 2026
+**Template file:** `topsheet-data-template-v9.xlsx`
 **Purpose:** This document defines every field, table, and line item in the TopSheet system. Use it to populate deal data outside of Claude Code.
+
+### What's new in v9
+
+- **Tab 1 — new VALUATION & EQUITY section** (5 fields on `deals`):
+  `enterprise_value` (already existed), `valuation_date`, `valuation_method`
+  (`transaction` | `dcf` | `multiples` | `appraisal` | `mark_to_model` |
+  `book`), `valuation_entity`, `equity_invested`.
+- **Tab 2 — 2 new optional columns** on `capital_structure_instruments`:
+  `pledged_share_entity`, `pledged_share_pct`. Populated only for NAV-style
+  debt secured on a specific shareholder stake.
+- **Capital Stack feature** — new section F.2B on every Deal TopSheet page.
+  Anchored by the Tab 1 EV. Shows layered table (Total / Our Holding),
+  horizontal stack bar, two leverage lenses (CTA-consolidated headline +
+  grossed-up consolidated-equivalent), our-position summary, parallel
+  claims, change-of-control coverage.
+- Engine support: `server/capital_structure_engine.py` extended with
+  `build_capital_stack()`, `compute_attributable_equity()`,
+  `gross_up_facility()`, `build_metrics()`,
+  `change_of_control_coverage()`, `validate_capital_stack()`.
+- API: `GET /api/deals/{slug}/capital-stack` (optional
+  `reporting_currency=GBP|USD|EUR`).
 
 ### What's new in v8
 

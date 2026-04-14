@@ -10,6 +10,8 @@ This document explains how to complete the TopSheet data template. These instruc
 - **Tab 1 — new VALUATION & EQUITY section** (5 fields): Enterprise Value, Valuation Date, Valuation Method, Valuation Entity, and Equity Invested at Origination. Anchors the Capital Stack feature — the single most important input is the Enterprise Value.
 - **Tab 2 — two optional columns (Z and AA)** for shareholder-level debt: `Pledged Share Entity` and `Pledged Share %`. Present only when a debt is secured on a specific shareholder's stake (e.g. NAV facility). When populated, the Capital Stack engine computes a grossed-up consolidated-equivalent leverage using `face_value / pledged_share_pct`.
 
+The v9 additions power the **Capital Stack** view on every Deal TopSheet page (section F.2B). That view shows — with Total and Our Holding columns side-by-side — every layer of the stack from senior-most debt at the bottom up through residual equity at the top, plus senior LTV, CTA-consolidated leverage, grossed-up consolidated-equivalent, our-position summary, parallel claims and change-of-control coverage on any pledged shareholdings. The entire view is derived from the v8 taxonomy on Tabs 2 and 7 plus the single EV input on Tab 1.
+
 ## What's new in v8
 
 - **Tab 1 — Distribution Mechanics section.** Ten new fields describing how distributions actually work on this deal: frequency, calculation basis, waterfall position, sweep behaviour, trapped-cash mechanism, lock-up cure window and escalation regime.

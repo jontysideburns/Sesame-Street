@@ -1247,6 +1247,41 @@ Consolidated DS     = Σ (ownership_pct_i × DS_i)
 - Jurisdiction public holidays shown as greyed cells
 - List view available as a toggle, grouped by month with overdue items pinned to the top`,
   },
+  {
+    id: "capital-stack",
+    name: "Capital Stack",
+    category: "Data & Models",
+    summary: "Multi-level view of how every debt layer, subordinated cushion and residual equity sit across a deal — with Total and Our Holding columns side-by-side.",
+    detail: `Introduced in TopSheet v9. Renders on every Deal TopSheet page as section F.2B. Anchored to the Enterprise Value on Tab 1 and the cashflow-priority-ranked debt from Tab 2, the Capital Stack shows a linear walk from the asset at the bottom (senior debt = rank 1 = first claim) up through any subordinated layers to the residual equity at the top.
+
+**Inputs:**
+- **Enterprise Value** on deals (Tab 1 VALUATION & EQUITY) — anchor of the stack.
+- **Valuation Date / Method / Entity** — context so the EV is not silently compared across incompatible methodologies.
+- **Capital structure instruments** (Tab 2) with v8 taxonomy: entity_level, ownership_pct, cashflow_priority_rank, and — for shareholder-level debt — pledged_share_entity and pledged_share_pct.
+- **Corporate entities** (Tab 7) — used for the ownership chain and security-perimeter flag.
+- **EBITDA** (latest from actual_periods, optional) — produces the leverage ratios when available.
+
+**What the engine returns (StackView):**
+- **Layers:** ordered bottom-up by cashflow priority rank. Each layer has its total debt, our holding at that rank, instrument count, and the residual equity after that rank's debt is subtracted.
+- **Residual equity:** what flows to shareholders after all priority-ranked debt is absorbed.
+- **Parallel claims:** any debt with pledged_share_pct populated — these are shareholder-NAV-style facilities secured on a specific stake and sit outside the consolidated group. Shown separately (not in the priority waterfall).
+- **Metrics** — per user decision #3, two published leverage lenses:
+  - **CTA-consolidated headline** (in-perimeter debt ÷ EV / EBITDA)
+  - **Grossed-up consolidated-equivalent** (CTA + Σ grossed-up face of parallel claims). Gross-up factor = 1 / (pledged_share_pct / 100). A £475m facility pledged on 49.99% grosses up to ~£950m of consolidated equivalent because the OpCo has to distribute £2 for every £1 of debt service.
+- **Our position:** total holding, dominant rank, debt senior to us, pari-passu with us, subordinated cushion, true equity cushion, total cushion. One-sentence summary.
+- **Change-of-control coverage** (per pledged-share facility): LTV on the pledged stake. Thresholds per user decision #5: green ≤ 30%, amber 30–50%, red > 50%.
+- **Warnings:** missing EV, stale valuation date (> 12 months), shareholder-level debt without pledged_share_pct, pari-passu rank mismatches, and all the v8 validate_capital_structure findings.
+
+**Linear only (per user decision #4):** the stack does not branch. Two separate claims via different legal vehicles are modelled as two separate deals in the platform, not as a branched stack on one deal.
+
+**Engine:** \`server/capital_structure_engine.py\` — \`build_capital_stack()\` composes \`compute_attributable_equity()\`, \`gross_up_facility()\`, \`build_metrics()\`, \`change_of_control_coverage()\`, and \`validate_capital_stack()\`.
+
+**API:** \`GET /api/deals/{slug}/capital-stack\` — optional \`?reporting_currency=GBP|USD|EUR\` converts monetary fields via the FX engine (ratios stay dimensionless).
+
+**UI:** \`client/app/deals/[slug]/topsheet/capital-stack.tsx\` — two-column layered table + horizontal stack bar + metrics panel + Our Position summary + parallel-claims section + CoC coverage + warnings.
+
+**Acceptance:** the Gatwick worked-example numbers (OpCo residual £3,135.4m, final residual £2,660.4m, senior LTV 51.8%, consolidated leverage 6.72×) are reproduced exactly. Tests in \`tests/test_capital_stack.py\` (50 assertions across 7 cases).`,
+  },
 ];
 
 /* ── Categories ──────────────────────────────────────────────────── */
