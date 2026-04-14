@@ -70,11 +70,11 @@ function fmtCell(value: number | null | undefined, unit: string): { text: string
   if (unit === "ratio") return { text: value.toFixed(2) + "x", isNegative: value < 0 };
   if (unit === "percentage") return { text: value.toFixed(1) + "%", isNegative: value < 0 };
   if (unit === "count") return { text: value.toFixed(1), isNegative: value < 0 };
-  // currency — expressed in thousands, negatives in brackets
-  const inThousands = value / 1000;
-  const abs = Math.abs(inThousands);
-  const formatted = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(abs);
-  if (inThousands < 0) return { text: `(${formatted})`, isNegative: true };
+  // currency — expressed in millions to 1dp, negatives in brackets
+  const inMillions = value / 1_000_000;
+  const abs = Math.abs(inMillions);
+  const formatted = abs.toFixed(1);
+  if (inMillions < -0.05) return { text: `(${formatted})`, isNegative: true };
   return { text: formatted, isNegative: false };
 }
 
@@ -349,7 +349,7 @@ export default function ForecastGrid({ periods, lineItems, dealLabels, forecastI
                   <td style={sectionHeaderStyle}>
                     {sec.label}
                     {!["covenant_core","covenant_project_finance","covenant_real_estate","covenant_regulated","covenant_social","moodys_metrics","moodys_ratios","sector_kpi"].includes(sec.key) && (
-                      <span style={{ fontWeight: 400, fontSize: "0.55rem", marginLeft: 6, opacity: 0.8 }}>{currSymbol}&apos;000s</span>
+                      <span style={{ fontWeight: 400, fontSize: "0.55rem", marginLeft: 6, opacity: 0.8 }}>{currSymbol}m</span>
                     )}
                   </td>
                   {displayPeriods.map((dp) => (

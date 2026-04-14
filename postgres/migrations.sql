@@ -1011,5 +1011,16 @@ INSERT INTO line_item_definitions (line_key, section, display_label, row_order, 
 ON CONFLICT (line_key) DO NOTHING;
 
 -- ═══════════════════════════════════════════════════════════════════════════════
+-- Currency magnitude — source vs storage vs display
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- source_magnitude: what the financial model / source documents use
+--   (singles, thousands, millions). Tells the ingestion engine what to expect.
+-- All values in period_financial_items and forecast_period_items are stored
+--   in SINGLES (full currency units) regardless of source magnitude.
+-- Display is always in millions to 1dp (handled by the frontend).
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS source_magnitude TEXT DEFAULT 'singles';
+  -- singles | thousands | millions
+
+-- ═══════════════════════════════════════════════════════════════════════════════
 -- End of migrations — all statements above are idempotent
 -- ═══════════════════════════════════════════════════════════════════════════════

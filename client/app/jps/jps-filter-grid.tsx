@@ -156,7 +156,7 @@ function ratingTone(rating: string | null) {
 
 function fmt(n: number) {
   return new Intl.NumberFormat("en-US", {
-    style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 0,
+    style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 1, minimumFractionDigits: 1,
   }).format(n);
 }
 

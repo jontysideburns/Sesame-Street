@@ -149,6 +149,7 @@ add_field(ws, r, "Region *", True, "Select from dropdown", dv_region); r += 1
 add_field(ws, r, "Country *", True, "ISO 2-letter (GB, US, DE)"); r += 1
 add_field(ws, r, "Currency *", True, "ISO 3-letter (GBP, USD, EUR)"); r += 1
 add_field(ws, r, "Reporting Currency", guidance="If different from deal currency"); r += 1
+add_field(ws, r, "Source Magnitude *", True, "singles, thousands, or millions — what units are the financial values in Tabs 15-18 entered in? The system stores everything in singles internally."); r += 1
 
 r += 1; make_section(ws, r, 3, "KEY DATES"); r += 1
 add_field(ws, r, "Origination Date *", True, "YYYY-MM-DD"); r += 1

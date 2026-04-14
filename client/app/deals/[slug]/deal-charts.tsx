@@ -53,8 +53,8 @@ const ACTUAL_COLORS = {
   leverage: "#c97f1f",
 };
 
-function fmtK(v: number) {
-  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(v / 1000);
+function fmtM(v: number) {
+  return (v / 1_000_000).toFixed(1) + "m";
 }
 
 function ChartTooltipContent({ active, payload, label }: any) {
@@ -69,7 +69,7 @@ function ChartTooltipContent({ active, payload, label }: any) {
       {payload.map((p: any, i: number) => (
         <div key={i} style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <span style={{ width: 8, height: 3, background: p.color, display: "inline-block", borderRadius: 1 }} />
-          <span>{p.name}: <strong>{typeof p.value === "number" ? (Math.abs(p.value) > 10 ? fmtK(p.value) + "K" : p.value.toFixed(2) + "x") : p.value}</strong></span>
+          <span>{p.name}: <strong>{typeof p.value === "number" ? (Math.abs(p.value) > 100 ? fmtM(p.value) : p.value.toFixed(2) + "x") : p.value}</strong></span>
         </div>
       ))}
     </div>
@@ -231,12 +231,12 @@ export default function DealCharts({ slug, currency, lockupLevel, defaultLevel }
       {/* Chart 1: Cashflows */}
       <div style={{ marginBottom: 20 }}>
         <div style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--accent)", marginBottom: 6 }}>
-          Cashflow Performance ({sym}&apos;000s, annual)
+          Cashflow Performance ({sym}m, annual)
         </div>
         <ResponsiveContainer width="100%" height={220}>
           <LineChart key={`cf-${horizon}`} data={filtered} margin={{ top: 5, right: 20, bottom: 5, left: 10 }}>
             <XAxis dataKey="label" tick={{ fontSize: 9 }} />
-            <YAxis tickFormatter={(v: number) => fmtK(v)} tick={{ fontSize: 9 }} width={50} />
+            <YAxis tickFormatter={(v: number) => fmtM(v)} tick={{ fontSize: 9 }} width={50} />
             <Tooltip content={<ChartTooltipContent />} />
             {/* Management case — dashed muted lines */}
             <Line type="monotone" dataKey="f_revenue" name="Revenue (Forecast)" stroke={MGMT_COLORS.revenue} strokeWidth={1.5} strokeDasharray="6 3" dot={false} connectNulls />
