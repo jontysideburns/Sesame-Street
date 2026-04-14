@@ -1022,5 +1022,45 @@ ALTER TABLE deals ADD COLUMN IF NOT EXISTS source_magnitude TEXT DEFAULT 'single
   -- singles | thousands | millions
 
 -- ═══════════════════════════════════════════════════════════════════════════════
+-- FX Rates — ECB-style reference rates (EUR base)
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- Convention: EUR is always the base currency. rate = quote per 1 EUR.
+--   Example: row (EUR, USD, 1.0850) means 1 EUR = 1.0850 USD.
+-- Cross-rate from CCY1 to CCY2 = (1 / rate(EUR,CCY1)) * rate(EUR,CCY2).
+-- ECB publishes daily reference rates around 16:00 CET.
+-- This table holds a time-series of snapshots; the engine uses the latest
+-- effective_date <= as_of date when converting.
+CREATE TABLE IF NOT EXISTS fx_rates (
+    id              SERIAL PRIMARY KEY,
+    base_currency   VARCHAR(3) NOT NULL DEFAULT 'EUR',
+    quote_currency  VARCHAR(3) NOT NULL,
+    rate            DECIMAL(18,6) NOT NULL,
+    effective_date  DATE NOT NULL,
+    source          TEXT NOT NULL DEFAULT 'ECB',
+    fetched_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(base_currency, quote_currency, effective_date)
+);
+CREATE INDEX IF NOT EXISTS idx_fx_rates_lookup
+    ON fx_rates(quote_currency, effective_date DESC);
+
+-- Seed snapshot — ECB-style reference rates as at 2026-04-14
+-- (Placeholder values pending live ECB feed wire-up; replace daily via ingest job)
+INSERT INTO fx_rates (base_currency, quote_currency, rate, effective_date, source) VALUES
+  ('EUR', 'EUR',  1.000000,  '2026-04-14', 'ECB-seed'),
+  ('EUR', 'USD',  1.085000,  '2026-04-14', 'ECB-seed'),
+  ('EUR', 'GBP',  0.855000,  '2026-04-14', 'ECB-seed'),
+  ('EUR', 'JPY',  162.300000,'2026-04-14', 'ECB-seed'),
+  ('EUR', 'CHF',  0.945000,  '2026-04-14', 'ECB-seed'),
+  ('EUR', 'AUD',  1.645000,  '2026-04-14', 'ECB-seed'),
+  ('EUR', 'CAD',  1.485000,  '2026-04-14', 'ECB-seed'),
+  ('EUR', 'NOK',  11.450000, '2026-04-14', 'ECB-seed'),
+  ('EUR', 'SEK',  11.350000, '2026-04-14', 'ECB-seed'),
+  ('EUR', 'DKK',  7.460000,  '2026-04-14', 'ECB-seed'),
+  ('EUR', 'NZD',  1.795000,  '2026-04-14', 'ECB-seed'),
+  ('EUR', 'SGD',  1.470000,  '2026-04-14', 'ECB-seed'),
+  ('EUR', 'HKD',  8.470000,  '2026-04-14', 'ECB-seed')
+ON CONFLICT (base_currency, quote_currency, effective_date) DO NOTHING;
+
+-- ═══════════════════════════════════════════════════════════════════════════════
 -- End of migrations — all statements above are idempotent
 -- ═══════════════════════════════════════════════════════════════════════════════

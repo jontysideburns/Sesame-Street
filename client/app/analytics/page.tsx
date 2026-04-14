@@ -1115,6 +1115,37 @@ The funding is broken down by source:
 
 **Portfolio column:** Shows "Yes" (green) if all reserves are fully funded, or "No (N)" (red) where N is the maximum periods any reserve has been underfunded.`,
   },
+  {
+    id: "fx-architecture",
+    name: "FX Architecture",
+    category: "Data & Display",
+    summary: "Deal-level data stays in native currency. Portfolio aggregation and the dashboard convert at spot using ECB-style EUR-base reference rates, with a GBP/USD/EUR toggle.",
+    detail: `The platform supports portfolios with deals in multiple currencies. The split is deliberate:
+
+**Deal level → native currency:**
+- The TopSheet, capital structure, financials, charts and forecasts on every deal page render exactly as the borrower reports them. Getlink stays in EUR; Gatwick stays in GBP. No conversion happens.
+- This preserves auditability — what you see is what was reported.
+
+**Portfolio level → reporting currency at spot:**
+- Every aggregate exposure on the Dashboard (deal table, KPI cards, organisation/owner/account hierarchy, sector/country/security ranking charts) is converted from the deal's native currency to the reporting currency at the latest available spot rate.
+- The portfolio API (\`/api/portfolio?reporting_currency=GBP|USD|EUR\`) drives this. Native amounts are still returned alongside (\`nativeExposure\`, \`nativeCurrency\`) for traceability.
+
+**FX rate source — ECB convention:**
+- All rates stored in \`fx_rates\` table as EUR-base (\`base_currency='EUR'\`, \`quote_currency=XXX\`, \`rate=quote per 1 EUR\`).
+- Cross-rate from CCY1 to CCY2 = \`(1 / rate(EUR,CCY1)) * rate(EUR,CCY2)\`.
+- The engine picks the most recent snapshot effective on or before the as-at date.
+- Currently seeded with 13 currencies (EUR, USD, GBP, JPY, CHF, AUD, CAD, NOK, SEK, DKK, NZD, SGD, HKD) as at 2026-04-14, source label \`ECB-seed\`. The architecture is ready for a daily feed (e.g. ECB reference rates via the Frankfurter API, fired at 16:05 CET each business day or on first login).
+
+**Dashboard toggle:**
+- £ GBP / $ USD / € EUR buttons in the page header. Selection persists in URL (\`?currency=USD\`) and localStorage. Triggers a re-fetch of the portfolio API with the new \`reporting_currency\` parameter — all charts, KPI cards and the deal table re-render together.
+
+**What is NOT converted:**
+- Per-deal pages (TopSheet, deal summary, forecasts, charts) — always native.
+- Ratios (DSCR, headroom %, ND:EBITDA) — they're dimensionless, no FX needed.
+- Spreads, ratings, performance grades, trends — non-monetary.
+
+**FX snapshot endpoint:** \`GET /api/fx/snapshot?reporting_currency=GBP\` returns the EUR-base rates plus the cross-rates to the chosen reporting currency, the effective date, and the source label.`,
+  },
 ];
 
 /* ── Categories ──────────────────────────────────────────────────── */

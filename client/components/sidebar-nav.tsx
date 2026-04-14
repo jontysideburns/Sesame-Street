@@ -190,6 +190,17 @@ function CalendarIcon(className?: string) {
   );
 }
 
+function FeedsIcon(className?: string) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M4 18c0-7.7 6.3-14 14-14" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M4 18c0-5 4-9 9-9" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M4 18c0-2.2 1.8-4 4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <circle cx="5" cy="18" r="1.6" fill="currentColor" />
+    </svg>
+  );
+}
+
 function DotsIcon(className?: string) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -213,6 +224,13 @@ const primaryNavItems: NavItem[] = [
     label: "Calendar",
     matches: (pathname) => pathname.startsWith("/calendar"),
     icon: CalendarIcon,
+    requiredPermission: "canViewPortfolio"
+  },
+  {
+    href: "/feeds",
+    label: "Feeds",
+    matches: (pathname) => pathname.startsWith("/feeds"),
+    icon: FeedsIcon,
     requiredPermission: "canViewPortfolio"
   },
   {

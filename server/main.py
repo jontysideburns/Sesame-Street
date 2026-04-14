@@ -74,6 +74,135 @@ def as_number(value):
     return value
 
 
+# ── FX rate helpers ──────────────────────────────────────────────────────────
+# ECB convention: EUR is always the base. rate = quote per 1 EUR.
+# Cross-rate from CCY1 to CCY2 = (1 / rate(EUR,CCY1)) * rate(EUR,CCY2).
+# Module-level cache keyed by (effective_date, quote_currency) → rate.
+
+_FX_CACHE: dict[tuple, float] = {}
+_FX_CACHE_LOADED_AT: dict[date, datetime] = {}
+
+
+def _load_fx_rates_for_date(conn, as_of: date) -> dict[str, float]:
+    """Load the latest fx_rates snapshot effective on or before as_of, EUR-base."""
+    cache_key = as_of
+    # Refresh cache after 60s for safety; otherwise reuse
+    last_loaded = _FX_CACHE_LOADED_AT.get(cache_key)
+    if last_loaded and (datetime.now(timezone.utc) - last_loaded).total_seconds() < 60:
+        return {
+            ccy: rate
+            for (key_date, ccy), rate in _FX_CACHE.items()
+            if key_date == cache_key
+        }
+    try:
+        rows = conn.execute(
+            """
+            SELECT DISTINCT ON (quote_currency) quote_currency, rate, effective_date
+            FROM fx_rates
+            WHERE base_currency = 'EUR' AND effective_date <= %s::date
+            ORDER BY quote_currency, effective_date DESC
+            """,
+            (as_of,),
+        ).fetchall()
+    except Exception:
+        return {}
+    rates: dict[str, float] = {}
+    for row in rows:
+        rates[row["quote_currency"]] = float(row["rate"])
+    # Update cache
+    for ccy, rate in rates.items():
+        _FX_CACHE[(cache_key, ccy)] = rate
+    _FX_CACHE_LOADED_AT[cache_key] = datetime.now(timezone.utc)
+    return rates
+
+
+def convert_amount(
+    amount: float | int | Decimal | None,
+    from_ccy: str | None,
+    to_ccy: str | None,
+    rates: dict[str, float] | None = None,
+    conn=None,
+    as_of: date | None = None,
+) -> float | None:
+    """Convert amount from from_ccy to to_ccy using EUR-base cross-rates.
+
+    Supply either `rates` (a pre-loaded EUR-base dict) OR `conn` + `as_of`.
+    Returns None if amount is None or rates are missing for either currency.
+    """
+    if amount is None:
+        return None
+    if isinstance(amount, Decimal):
+        amount = float(amount)
+    if not from_ccy or not to_ccy:
+        return float(amount)
+    if from_ccy == to_ccy:
+        return float(amount)
+    if rates is None:
+        if conn is None:
+            return float(amount)
+        rates = _load_fx_rates_for_date(conn, as_of or date.today())
+    rate_from = rates.get(from_ccy)
+    rate_to = rates.get(to_ccy)
+    if rate_from is None or rate_to is None:
+        return float(amount)
+    # Convert via EUR: amount_in_eur = amount / rate_from; result = amount_in_eur * rate_to
+    return float(amount) * (rate_to / rate_from)
+
+
+def get_fx_snapshot(
+    conn,
+    reporting_currency: str,
+    as_of: date | None = None,
+) -> dict:
+    """Return an FX snapshot bundle for client-side display.
+
+    Includes the EUR-base rates and the cross-rate from each major currency
+    to the chosen reporting currency.
+    """
+    as_of = as_of or date.today()
+    rates = _load_fx_rates_for_date(conn, as_of)
+    if not rates:
+        return {
+            "reportingCurrency": reporting_currency,
+            "asOf": as_of.isoformat(),
+            "baseCurrency": "EUR",
+            "rates": {},
+            "crossRates": {},
+            "source": None,
+        }
+    rate_to = rates.get(reporting_currency)
+    cross: dict[str, float] = {}
+    if rate_to is not None:
+        for ccy, rate_from in rates.items():
+            if rate_from > 0:
+                cross[ccy] = round(rate_to / rate_from, 6)
+    # Source label from latest row
+    try:
+        src_row = conn.execute(
+            """
+            SELECT source, effective_date
+            FROM fx_rates
+            WHERE base_currency = 'EUR' AND effective_date <= %s::date
+            ORDER BY effective_date DESC
+            LIMIT 1
+            """,
+            (as_of,),
+        ).fetchone()
+        source = src_row["source"] if src_row else None
+        effective = src_row["effective_date"].isoformat() if src_row else as_of.isoformat()
+    except Exception:
+        source = None
+        effective = as_of.isoformat()
+    return {
+        "reportingCurrency": reporting_currency,
+        "asOf": effective,
+        "baseCurrency": "EUR",
+        "rates": {ccy: round(r, 6) for ccy, r in rates.items()},
+        "crossRates": cross,
+        "source": source,
+    }
+
+
 def dashboard_forecast_snapshot(summary):
     if not summary:
         return None, 0, None
@@ -9537,6 +9666,18 @@ def invoke_intake_exception_assist(document_id: int, payload: ExceptionAssistReq
     return {"ok": True}
 
 
+@app.get("/api/fx/snapshot")
+def get_fx_snapshot_endpoint(reporting_currency: str | None = None, as_at: str | None = None):
+    """Return the latest FX snapshot for the given reporting currency.
+
+    Convention: ECB-style EUR-base reference rates. Cross-rates calculated via EUR.
+    """
+    requested_ccy = (reporting_currency or "GBP").upper()
+    as_of = parse_optional_date(as_at, field_name="as_at") or date.today()
+    with get_connection() as conn:
+        return get_fx_snapshot(conn, requested_ccy, as_of)
+
+
 @app.get("/api/portfolio")
 def get_portfolio(
     organisation: int | None = None,
@@ -9551,6 +9692,7 @@ def get_portfolio(
     watchlist: str | None = None,
     revenue_risk: str | None = None,
     viewer: str | None = None,
+    reporting_currency: str | None = None,
 ):
     with get_connection() as conn:
         demo_clock = load_demo_clock(conn)
@@ -9851,6 +9993,7 @@ def get_portfolio(
               d.watchlist,
               d.phase,
               d.region,
+              d.currency AS deal_currency,
               d.moodys_rating,
               d.sp_rating,
               d.fitch_rating,
@@ -10332,6 +10475,27 @@ def get_portfolio(
         else:
             deal_slug_rows = []
 
+    # ── FX conversion layer ──────────────────────────────────────────────
+    # Deal-level data stays in native currency; portfolio aggregation converts
+    # at spot to the chosen reporting currency (default GBP).
+    requested_reporting_ccy = (reporting_currency or "GBP").upper()
+    if requested_reporting_ccy not in ("GBP", "USD", "EUR"):
+        requested_reporting_ccy = "GBP"
+    with get_connection() as fx_conn:
+        fx_snapshot = get_fx_snapshot(fx_conn, requested_reporting_ccy, effective_as_at)
+    fx_rates_for_conversion = fx_snapshot.get("rates", {})
+
+    def to_reporting(amount, native_ccy):
+        """Convert a native-currency amount to the reporting currency."""
+        if amount is None:
+            return None
+        return convert_amount(
+            amount,
+            native_ccy or requested_reporting_ccy,
+            requested_reporting_ccy,
+            rates=fx_rates_for_conversion,
+        )
+
     allowed_deal_slugs = {row["slug"] for row in deal_slug_rows}
     scoped_holdings = [
         row for row in holdings if row["deal_slug"] in allowed_deal_slugs
@@ -10566,7 +10730,9 @@ def get_portfolio(
                 "name": row["deal_name"],
                 "grade": row["effective_grade"],
                 "watchlist": row["watchlist"],
-                "exposure": 0,
+                "exposure": 0.0,
+                "nativeExposure": 0,
+                "nativeCurrency": row.get("deal_currency"),
                 "currentValue": as_number(row["current_value"])
                 if "current_value" in row.keys()
                 else 0,
@@ -10581,12 +10747,18 @@ def get_portfolio(
                 "distributionStatus": row["distribution_status"],
             },
         )
-        item["exposure"] += int(row["current_amount"])
+        native_amount = int(row["current_amount"])
+        item["nativeExposure"] += native_amount
+        converted = to_reporting(native_amount, row.get("deal_currency"))
+        item["exposure"] += float(converted) if converted is not None else native_amount
 
     organisation_summary = {}
     owner_summary = {}
     account_summary = {}
     for row in visible_holdings:
+        native_amount = int(row["current_amount"])
+        converted_amount = to_reporting(native_amount, row.get("deal_currency"))
+        contribution = float(converted_amount) if converted_amount is not None else native_amount
         organisation_entry = organisation_summary.setdefault(
             int(row["organisation_id"]),
             {
@@ -10600,12 +10772,12 @@ def get_portfolio(
                     ),
                     "organisation",
                 ),
-                "exposure": 0,
+                "exposure": 0.0,
                 "dealSlugs": set(),
                 "watchlistDealSlugs": set(),
             },
         )
-        organisation_entry["exposure"] += int(row["current_amount"])
+        organisation_entry["exposure"] += contribution
         organisation_entry["dealSlugs"].add(row["deal_slug"])
         if row["watchlist"]:
             organisation_entry["watchlistDealSlugs"].add(row["deal_slug"])
@@ -10625,12 +10797,12 @@ def get_portfolio(
                 ),
                 "organisationId": int(row["organisation_id"]),
                 "organisationName": row["organisation_name"],
-                "exposure": 0,
+                "exposure": 0.0,
                 "dealSlugs": set(),
                 "watchlistDealSlugs": set(),
             },
         )
-        owner_entry["exposure"] += int(row["current_amount"])
+        owner_entry["exposure"] += contribution
         owner_entry["dealSlugs"].add(row["deal_slug"])
         if row["watchlist"]:
             owner_entry["watchlistDealSlugs"].add(row["deal_slug"])
@@ -10653,20 +10825,23 @@ def get_portfolio(
                 "organisationId": int(row["organisation_id"]),
                 "organisationName": row["organisation_name"],
                 "benchmark": row["benchmark"],
-                "exposure": 0,
+                "exposure": 0.0,
                 "dealSlugs": set(),
                 "watchlistDealSlugs": set(),
             },
         )
-        account_entry["exposure"] += int(row["current_amount"])
+        account_entry["exposure"] += contribution
         account_entry["dealSlugs"].add(row["deal_slug"])
         if row["watchlist"]:
             account_entry["watchlistDealSlugs"].add(row["deal_slug"])
 
-    total_aum = sum(item["exposure"] for item in visible_deal_metrics.values())
+    total_aum = int(round(sum(item["exposure"] for item in visible_deal_metrics.values())))
     weighted_avg_dscr = (
         round(
-            sum(item["currentValue"] * item["exposure"] for item in visible_deal_metrics.values())
+            sum(
+                item["currentValue"] * item["exposure"]
+                for item in visible_deal_metrics.values()
+            )
             / total_aum,
             2,
         )
@@ -10675,7 +10850,10 @@ def get_portfolio(
     )
     weighted_avg_headroom = (
         round(
-            sum(item["headroomPct"] * item["exposure"] for item in visible_deal_metrics.values())
+            sum(
+                item["headroomPct"] * item["exposure"]
+                for item in visible_deal_metrics.values()
+            )
             / total_aum,
             2,
         )
@@ -10814,6 +10992,10 @@ def get_portfolio(
         if not governance_parts:
             governance_parts.append("no open governance items")
 
+        native_amount = int(row["current_amount"])
+        native_ccy = row.get("deal_currency")
+        converted_amount = to_reporting(native_amount, native_ccy)
+        converted_int = int(round(converted_amount)) if converted_amount is not None else native_amount
         holding_row = {
             "id": int(row["id"]),
             "organisationId": int(row["organisation_id"]),
@@ -10823,7 +11005,9 @@ def get_portfolio(
             "accountId": int(row["account_id"]),
             "accountName": row["account_name"],
             "benchmark": row["benchmark"],
-            "currentAmount": int(row["current_amount"]),
+            "currentAmount": converted_int,
+            "nativeCurrentAmount": native_amount,
+            "nativeCurrency": native_ccy,
             "acquisitionDate": row["acquisition_date"],
             "status": row["status"],
             "dealId": deal_id,
@@ -10837,7 +11021,8 @@ def get_portfolio(
             "watchlist": bool(row["watchlist"]),
             "phase": row["phase"],
             "region": row["region"],
-            "exposure": int(row["current_amount"]),
+            "exposure": converted_int,
+            "nativeExposure": native_amount,
             "reportedDscr": as_number(row["current_value"]),
             "covenantStatus": row["covenant_status"],
             "headroomPct": as_number(row["headroom_pct"]),
@@ -10876,6 +11061,8 @@ def get_portfolio(
                 "grade": row["effective_grade"],
                 "watchlist": bool(row["watchlist"]),
                 "exposure": 0,
+                "nativeExposure": 0,
+                "nativeCurrency": native_ccy,
                 "reportedDscr": as_number(row["current_value"]),
                 "covenantStatus": row["covenant_status"],
                 "headroomPct": as_number(row["headroom_pct"]),
@@ -10920,7 +11107,8 @@ def get_portfolio(
                 "accounts": set(),
             },
         )
-        deal_entry["exposure"] += int(row["current_amount"])
+        deal_entry["exposure"] += converted_int
+        deal_entry["nativeExposure"] += native_amount
         deal_entry["organisations"].add(row["organisation_name"])
         deal_entry["owners"].add(row["owner_name"])
         deal_entry["accounts"].add(row["account_name"])
@@ -11157,6 +11345,8 @@ def get_portfolio(
             "clockLabel": demo_clock["clockLabel"],
             "isHistorical": requested_as_at is not None,
         },
+        "reportingCurrency": requested_reporting_ccy,
+        "fxSnapshot": fx_snapshot,
         "currentScope": {
             "level": scope["level"],
             "title": scope["title"],
@@ -11204,7 +11394,7 @@ def get_portfolio(
                     "type": item["type"],
                     "dealCount": len(item["dealSlugs"]),
                     "watchlistCount": len(item["watchlistDealSlugs"]),
-                    "exposure": item["exposure"],
+                    "exposure": int(round(item["exposure"])),
                     "active": scope["organisationId"] == item["id"],
                     "href": portfolio_href(
                         organisation_id=item["id"],
@@ -11226,7 +11416,7 @@ def get_portfolio(
                     "organisationName": item["organisationName"],
                     "dealCount": len(item["dealSlugs"]),
                     "watchlistCount": len(item["watchlistDealSlugs"]),
-                    "exposure": item["exposure"],
+                    "exposure": int(round(item["exposure"])),
                     "active": scope["ownerId"] == item["id"],
                     "href": portfolio_href(
                         owner_id=item["id"],
@@ -11251,7 +11441,7 @@ def get_portfolio(
                     "benchmark": item["benchmark"],
                     "dealCount": len(item["dealSlugs"]),
                     "watchlistCount": len(item["watchlistDealSlugs"]),
-                    "exposure": item["exposure"],
+                    "exposure": int(round(item["exposure"])),
                     "active": scope["accountId"] == item["id"],
                     "href": portfolio_href(
                         account_id=item["id"],
@@ -11388,6 +11578,7 @@ def get_dashboard(
     watchlist: str | None = None,
     revenue_risk: str | None = None,
     viewer: str | None = None,
+    reporting_currency: str | None = None,
 ):
     return get_portfolio(
         organisation=organisation,
@@ -11402,6 +11593,7 @@ def get_dashboard(
         watchlist=watchlist,
         revenue_risk=revenue_risk,
         viewer=viewer,
+        reporting_currency=reporting_currency,
     )
 
     with get_connection() as conn:

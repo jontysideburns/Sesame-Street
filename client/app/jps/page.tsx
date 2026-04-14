@@ -1,22 +1,36 @@
 import { getPortfolio } from "../../api/portfolio";
 import JpsFilterGrid from "./jps-filter-grid";
 import PrintButton from "./print-button";
+import CurrencyToggle from "./currency-toggle";
 
-export default async function JpsPage() {
+type PageProps = {
+  searchParams?: Promise<{ currency?: string }>;
+};
+
+export default async function JpsPage({ searchParams }: PageProps) {
+  const params = (await searchParams) ?? {};
+  const currency = (params.currency ?? "GBP").toUpperCase();
+  const reportingCurrency: "GBP" | "USD" | "EUR" =
+    currency === "USD" || currency === "EUR" ? currency : "GBP";
+
   let deals: any[] = [];
   let organisations: any[] = [];
   let owners: any[] = [];
   let sectors: string[] = [];
   let grades: string[] = [];
+  let fxAsOf: string | null = null;
+  let fxSource: string | null = null;
   let loadError = false;
 
   try {
-    const portfolio = await getPortfolio();
+    const portfolio = await getPortfolio({ reportingCurrency });
     deals = portfolio.deals ?? [];
     organisations = portfolio.hierarchy?.organisations ?? [];
     owners = portfolio.hierarchy?.owners ?? [];
     sectors = portfolio.availableFilters?.sectors ?? [];
     grades = portfolio.availableFilters?.grades ?? [];
+    fxAsOf = portfolio.fxSnapshot?.asOf ?? null;
+    fxSource = portfolio.fxSnapshot?.source ?? null;
   } catch {
     loadError = true;
   }
@@ -30,7 +44,10 @@ export default async function JpsPage() {
           <p className="hero-sub" style={{ whiteSpace: "nowrap" }}>
             TopSheet import, covenant testing, variance analysis and ratio reconciliation.
           </p>
-          <PrintButton />
+          <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
+            <CurrencyToggle current={reportingCurrency} fxAsOf={fxAsOf} fxSource={fxSource} />
+            <PrintButton />
+          </div>
         </div>
       </section>
 
@@ -52,6 +69,7 @@ export default async function JpsPage() {
             owners={owners}
             sectors={sectors}
             grades={grades}
+            reportingCurrency={reportingCurrency}
           />
         )}
       </section>

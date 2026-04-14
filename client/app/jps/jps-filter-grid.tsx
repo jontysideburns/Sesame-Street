@@ -154,9 +154,9 @@ function ratingTone(rating: string | null) {
   return "critical";                // B and below
 }
 
-function fmt(n: number) {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 1, minimumFractionDigits: 1,
+function fmt(n: number, currency: string = "GBP") {
+  return new Intl.NumberFormat("en-GB", {
+    style: "currency", currency, notation: "compact", maximumFractionDigits: 1, minimumFractionDigits: 1,
   }).format(n);
 }
 
@@ -198,12 +198,14 @@ export default function JpsFilterGrid({
   owners,
   sectors,
   grades,
+  reportingCurrency = "GBP",
 }: {
   deals: Deal[];
   organisations: HierarchyOrg[];
   owners: HierarchyOwner[];
   sectors: string[];
   grades: string[];
+  reportingCurrency?: "GBP" | "USD" | "EUR";
 }) {
   const [filters, setFilters] = useState<Filters>(EMPTY);
   const set = (partial: Partial<Filters>) => setFilters((prev) => ({ ...prev, ...partial }));
@@ -338,7 +340,7 @@ export default function JpsFilterGrid({
       </div>
 
       {/* ── Portfolio Summary ──────────────────────────────────────── */}
-      <PortfolioSummary deals={filtered} />
+      <PortfolioSummary deals={filtered} reportingCurrency={reportingCurrency} />
 
       {/* ── Deal table ──────────────────────────────────────────────── */}
       <h2 className="jps-assets-title" style={{ fontSize: "1.88rem", fontWeight: 700, letterSpacing: "-0.04em", color: "var(--ink)", margin: "20px 0 10px", whiteSpace: "nowrap" }}>
@@ -418,9 +420,9 @@ export default function JpsFilterGrid({
                       })()}
                     </td>
 
-                    {/* Exposure — number, right */}
+                    {/* Exposure — number, right (in reporting currency) */}
                     <td style={{ ...td, textAlign: "right", fontWeight: 600 }}>
-                      {fmt(deal.exposure)}
+                      {fmt(deal.exposure, reportingCurrency)}
                     </td>
 
                     {/* Credit score — number, right */}

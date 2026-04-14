@@ -105,11 +105,16 @@ const COVENANT_COLORS: Record<string, string> = {
 
 /* ── Formatters ──────────────────────────────────────────────────── */
 
-function fmtCompact(n: number) {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 1,
-  }).format(n);
+function makeCompactFormatter(currency: string) {
+  return (n: number) =>
+    new Intl.NumberFormat("en-GB", {
+      style: "currency", currency, notation: "compact", maximumFractionDigits: 1,
+    }).format(n);
 }
+
+// Module-level current formatter — set on each PortfolioSummary render so
+// chart sub-components (Tooltip, Treemap label) pick up the active currency.
+let fmtCompact: (n: number) => string = makeCompactFormatter("GBP");
 
 function fmtPct(n: number | null) {
   if (n == null) return "\u2014";
@@ -190,7 +195,15 @@ function DonutCentreLabel({ viewBox, value }: { viewBox?: { cx: number; cy: numb
 
 /* ── Main Component ──────────────────────────────────────────────── */
 
-export default function PortfolioSummary({ deals }: { deals: Deal[] }) {
+export default function PortfolioSummary({
+  deals,
+  reportingCurrency = "GBP",
+}: {
+  deals: Deal[];
+  reportingCurrency?: "GBP" | "USD" | "EUR";
+}) {
+  // Refresh module-level formatter so chart sub-components pick up the active CCY
+  fmtCompact = makeCompactFormatter(reportingCurrency);
   const stats = useMemo(() => {
     const totalExposure = deals.reduce((s, d) => s + d.exposure, 0);
     const dealCount = deals.length;

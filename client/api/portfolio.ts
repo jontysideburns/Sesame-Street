@@ -10,6 +10,8 @@ type PortfolioHolding = {
   accountName: string;
   benchmark: string | null;
   currentAmount: number;
+  nativeCurrentAmount?: number;
+  nativeCurrency?: string | null;
   acquisitionDate: string;
   status: string;
   dealId: number;
@@ -57,6 +59,8 @@ type PortfolioDeal = {
   grade: string;
   watchlist: boolean;
   exposure: number;
+  nativeExposure?: number;
+  nativeCurrency?: string | null;
   reportedDscr: number | null;
   covenantStatus: string;
   distributionStatus: string | null;
@@ -112,6 +116,15 @@ export type PortfolioResponse = {
     default: string;
     clockLabel: string;
     isHistorical: boolean;
+  };
+  reportingCurrency: "GBP" | "USD" | "EUR";
+  fxSnapshot: {
+    reportingCurrency: string;
+    asOf: string;
+    baseCurrency: string;
+    rates: Record<string, number>;
+    crossRates: Record<string, number>;
+    source: string | null;
   };
   currentScope: {
     level: string;
@@ -305,6 +318,7 @@ export async function getPortfolio(scope?: {
   grade?: string;
   watchlist?: string;
   revenueRisk?: string;
+  reportingCurrency?: string;
 }) {
   const params = new URLSearchParams();
 
@@ -319,6 +333,7 @@ export async function getPortfolio(scope?: {
   if (scope?.grade) params.set("grade", scope.grade);
   if (scope?.watchlist) params.set("watchlist", scope.watchlist);
   if (scope?.revenueRisk) params.set("revenue_risk", scope.revenueRisk);
+  if (scope?.reportingCurrency) params.set("reporting_currency", scope.reportingCurrency);
 
   const suffix = params.size > 0 ? `?${params.toString()}` : "";
   return fetchJson<PortfolioResponse>(`/api/portfolio${suffix}`);

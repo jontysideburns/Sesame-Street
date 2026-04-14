@@ -111,6 +111,21 @@ docker exec docker-postgres-1 psql -U sesame -d sesamestreet -f //migrations//mi
 - 10 sections: Identity, Capital Structure, Counterparties, Reserves, KPIs, Performance, Risk, Development, Distribution, Forecasts
 - Accessed via "View Full TopSheet" button on deal page
 
+### FX Architecture
+- `fx_rates` table — ECB-style EUR-base reference rates (snapshot time-series)
+- Cross-rate maths: amount_in_target = amount * (rate(EUR, target) / rate(EUR, source))
+- Helper: `convert_amount(amount, from_ccy, to_ccy, ...)` in `server/main.py`
+- Endpoint: `GET /api/fx/snapshot?reporting_currency=GBP|USD|EUR`
+- Portfolio API: `?reporting_currency=` parameter (default GBP) converts every
+  exposure aggregate (deal, holding, organisation, owner, account, total_aum)
+  to the chosen currency at spot
+- Deal-level endpoints stay in native currency — only the dashboard/portfolio
+  layer aggregates across currencies
+- Dashboard: `/jps?currency=GBP|USD|EUR` toggle, persists to localStorage
+- Seed: 13 currencies (EUR, USD, GBP, JPY, CHF, AUD, CAD, NOK, SEK, DKK,
+  NZD, SGD, HKD) as at 2026-04-14, source 'ECB-seed'. Replace daily when
+  live ECB feed (e.g. Frankfurter API) is wired up.
+
 ### Documentation
 - `docs/topsheet-spec-project-finance.md` — complete PF TopSheet field inventory
 - `docs/moodys-ratio-definitions.md` — Moody's ratios mapped to our line items
