@@ -20,8 +20,10 @@ persist the results.
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
-from typing import Iterable
+from datetime import date as _date
+from typing import Iterable, Optional
 
 
 # Structural hierarchy. Index 0 is closest to the cashflows, higher indices
@@ -305,3 +307,449 @@ def validate_capital_structure(
                 })
 
     return findings
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# Capital Stack feature (Phase 3) — walked stack, metrics, change-of-control
+# ════════════════════════════════════════════════════════════════════════════
+#
+# The Capital Stack takes the v8 taxonomy on instruments and entities, an
+# Enterprise Value anchor from Tab 1 Valuation & Equity, and produces:
+#
+#   1. A tiered "layer" walk from the senior-most debt up to the residual
+#      equity, with totals and our-holding columns on each layer.
+#   2. Parallel claims — pledged-share debts that sit outside the consolidated
+#      chain (e.g. NAV facilities secured only on one shareholder's stake).
+#   3. Leverage metrics in two lenses (per user decision #3):
+#        (a) CTA-consolidated headline — in-perimeter debt / EV (and / EBITDA
+#            when EBITDA is known)
+#        (b) Grossed-up consolidated-equivalent — adds parallel claims at
+#            gross-up factor 1 / pledged_share_pct to reflect the economic
+#            distribution-coverage burden.
+#   4. Our-position summary: where we sit in the waterfall and what sits
+#      below us.
+#   5. Change-of-control coverage on any pledged-share debt (amber > 30%,
+#      red > 50%, per user decision #5).
+#   6. Validation warnings (missing EV, stale valuation date, etc.).
+#
+# Per user decision #4, the stack is LINEAR. Two separate claims via different
+# legal vehicles would be recorded as two separate deals in the platform.
+
+
+def gross_up_facility(
+    instrument: dict,
+    debtor_ownership_pct: Optional[float] = None,
+) -> dict:
+    """Compute the grossed-up consolidated-equivalent of a pledged-share debt.
+
+    When a debt is secured on a partial shareholding (e.g. an NAV facility on a
+    49.99% stake), it has to be serviced out of that shareholder's slice of
+    distributions only. Economically, the operating company has to distribute
+    1/pledged_share_pct × more to service £1 of this debt than it would for a
+    common MidCo debt of the same size.
+
+    Formula:  gross_up_factor = 1 / (pledged_share_pct / 100)  =  100 / pct
+              equivalent_debt = face_value × gross_up_factor
+
+    Returns ``{"gross_up_factor": float, "equivalent_debt": float}``. For
+    normal (non-pledged) debt, gross_up_factor = 1.0.
+    """
+    face = float(instrument.get("drawn_amount") or 0)
+    pledged_pct = instrument.get("pledged_share_pct")
+    if pledged_pct is None:
+        pledged_pct = debtor_ownership_pct
+    if pledged_pct is None or pledged_pct <= 0 or pledged_pct >= 100:
+        return {"gross_up_factor": 1.0, "equivalent_debt": face}
+    gross_up = 100.0 / float(pledged_pct)
+    return {"gross_up_factor": round(gross_up, 4), "equivalent_debt": face * gross_up}
+
+
+def compute_attributable_equity(
+    instruments: list[dict],
+    ev: float,
+) -> list[dict]:
+    """Build the rank-ordered layer walk from the asset up to residual equity.
+
+    Groups in-perimeter debt by cashflow_priority_rank. Starting from EV,
+    subtracts each rank's debt total in ascending rank order (rank 1 first).
+    The residual after the final rank is the equity attributable to the top
+    of the chain.
+
+    Pledged-share debts (parallel claims) are excluded from this walk.
+    Shareholder / intercompany loans (rank=None) are ignored here — they sit
+    at the top of the chain with the residual equity.
+
+    Returns a list of layer dicts, each:
+      {rank, entity_level, entity_name, debt_total, debt_our,
+       instrument_count, instruments, inherited_value, residual_after_debt}
+    """
+    main = [
+        i for i in instruments
+        if not i.get("pledged_share_pct")
+        and i.get("cashflow_priority_rank") is not None
+    ]
+    ranks_map: dict[int, list[dict]] = {}
+    for i in main:
+        r = int(i["cashflow_priority_rank"])
+        ranks_map.setdefault(r, []).append(i)
+
+    layers: list[dict] = []
+    current_value = float(ev or 0)
+    for rank in sorted(ranks_map.keys()):
+        group = ranks_map[rank]
+        debt_total = sum(float(i.get("drawn_amount") or 0) for i in group)
+        debt_our = sum(float(i.get("our_holding") or 0) for i in group)
+        # Canonical entity for display: most common (entity_level, entity_name)
+        cnt = Counter(
+            ((i.get("entity_level") or "").lower(), i.get("entity_name") or "")
+            for i in group
+        )
+        canonical_level, canonical_name = cnt.most_common(1)[0][0]
+        inherited = current_value
+        residual = inherited - debt_total
+        layers.append({
+            "rank": rank,
+            "entity_level": canonical_level,
+            "entity_name": canonical_name,
+            "debt_total": debt_total,
+            "debt_our": debt_our,
+            "instrument_count": len(group),
+            "instruments": group,
+            "inherited_value": inherited,
+            "residual_after_debt": residual,
+        })
+        current_value = residual
+
+    return layers
+
+
+def build_metrics(
+    instruments: list[dict],
+    ev: float,
+    ebitda: Optional[float] = None,
+) -> dict:
+    """Compute the two leverage lenses (per user decision #3).
+
+    - CTA-consolidated headline: sum of in-perimeter debt (ignoring
+      pledged-share parallel claims).
+    - Grossed-up consolidated-equivalent: CTA headline + Σ grossed-up face
+      of each parallel claim.
+
+    Ratios (LTV and leverage) are produced for both lenses where inputs are
+    available. EBITDA is optional — when null, leverage ratios are omitted.
+    """
+    senior_debt = 0.0
+    consolidated_debt = 0.0
+    parallel_gu_total = 0.0
+
+    for inst in instruments:
+        face = float(inst.get("drawn_amount") or 0)
+        rank = inst.get("cashflow_priority_rank")
+        pledged = inst.get("pledged_share_pct")
+
+        if pledged:
+            gu = gross_up_facility(inst)
+            parallel_gu_total += gu["equivalent_debt"]
+            continue
+
+        if rank is not None:
+            consolidated_debt += face
+        if rank == 1:
+            senior_debt += face
+
+    grossed_up_total = consolidated_debt + parallel_gu_total
+
+    def pct(num, den):
+        if not den:
+            return None
+        return round((num / den) * 100, 1)
+
+    def ratio(num, den):
+        if not den:
+            return None
+        return round(num / den, 2)
+
+    return {
+        "senior_debt_total": round(senior_debt, 2),
+        "consolidated_debt_total": round(consolidated_debt, 2),
+        "parallel_claims_grossed_up": round(parallel_gu_total, 2),
+        "grossed_up_equivalent_debt": round(grossed_up_total, 2),
+        "senior_ltv_pct": pct(senior_debt, ev),
+        "consolidated_ltv_pct": pct(consolidated_debt, ev),
+        "grossed_up_equivalent_ltv_pct": pct(grossed_up_total, ev),
+        "consolidated_leverage_x": ratio(consolidated_debt, ebitda),
+        "grossed_up_equivalent_leverage_x": ratio(grossed_up_total, ebitda),
+    }
+
+
+def change_of_control_coverage(
+    instrument: dict,
+    equity_value_at_pledge_level: float,
+) -> Optional[dict]:
+    """Compute the LTV on a pledged shareholding for a shareholder-level debt.
+
+    Applies only when the instrument has ``pledged_share_pct`` populated.
+    The pledged value is the portion of equity attributable to the pledged
+    share at the entity level where the pledge bites (typically the OpCo
+    residual equity × pledged_share_pct).
+
+    Thresholds (per user decision #5):
+        green    LTV ≤ 30%
+        amber    30% < LTV ≤ 50%
+        red      LTV > 50%
+
+    Returns None if no pledge is set or the inputs are insufficient.
+    """
+    pledged_pct = instrument.get("pledged_share_pct")
+    if not pledged_pct or pledged_pct <= 0:
+        return None
+    face = float(instrument.get("drawn_amount") or 0)
+    if face <= 0 or equity_value_at_pledge_level <= 0:
+        return None
+    pledged_value = equity_value_at_pledge_level * (float(pledged_pct) / 100.0)
+    if pledged_value <= 0:
+        return None
+    ltv = (face / pledged_value) * 100
+    if ltv > 50:
+        status = "red"
+    elif ltv > 30:
+        status = "amber"
+    else:
+        status = "green"
+    gu = gross_up_facility(instrument)
+    return {
+        "instrument_name": instrument.get("instrument_name"),
+        "debtor_entity": instrument.get("entity_name"),
+        "pledged_share_entity": instrument.get("pledged_share_entity"),
+        "pledged_share_pct": float(pledged_pct),
+        "face_value": face,
+        "pledged_value": round(pledged_value, 2),
+        "ltv_on_pledge_pct": round(ltv, 1),
+        "status": status,
+        "gross_up_factor": gu["gross_up_factor"],
+        "grossed_up_equivalent": round(gu["equivalent_debt"], 2),
+    }
+
+
+def validate_capital_stack(
+    deal: dict,
+    instruments: list[dict],
+    entities: list[dict],
+    today: Optional[_date] = None,
+) -> list[dict]:
+    """Extend v8 validate_capital_structure with Capital Stack-specific checks.
+
+    - Missing Enterprise Value on the deal → warn.
+    - Valuation date > 12 months old → warn (stale).
+    - Shareholder-level debt with no pledged_share_pct → warn.
+    - Shareholder-level debt with no pledged_share_entity → warn.
+    """
+    findings = list(validate_capital_structure(instruments, entities))
+
+    ev = deal.get("enterprise_value")
+    try:
+        ev_num = float(ev) if ev is not None else 0
+    except (ValueError, TypeError):
+        ev_num = 0
+    if ev_num <= 0:
+        findings.append({
+            "severity": "warn",
+            "message": (
+                "Deal has no Enterprise Value — capital stack cannot compute "
+                "LTV or equity cushion. Populate Tab 1 VALUATION & EQUITY."
+            ),
+            "subject": deal.get("slug") or deal.get("name") or "deal",
+        })
+
+    val_date = deal.get("valuation_date")
+    if val_date:
+        try:
+            d = val_date if isinstance(val_date, _date) else _date.fromisoformat(str(val_date))
+            today = today or _date.today()
+            age_days = (today - d).days
+            if age_days > 365:
+                findings.append({
+                    "severity": "warn",
+                    "message": (
+                        f"Valuation date is {age_days} days old (> 12 months) — "
+                        "consider refreshing the Enterprise Value."
+                    ),
+                    "subject": deal.get("slug") or "deal",
+                })
+        except Exception:
+            pass
+
+    for inst in instruments:
+        if inst.get("pledged_share_entity") and not inst.get("pledged_share_pct"):
+            findings.append({
+                "severity": "warn",
+                "message": (
+                    f"Instrument '{inst.get('instrument_name')}' has a "
+                    "pledged_share_entity but no pledged_share_pct — "
+                    "grossed-up leverage cannot be computed."
+                ),
+                "subject": inst.get("instrument_name") or "(unnamed)",
+            })
+        if inst.get("pledged_share_pct") and not inst.get("pledged_share_entity"):
+            findings.append({
+                "severity": "warn",
+                "message": (
+                    f"Instrument '{inst.get('instrument_name')}' has a "
+                    "pledged_share_pct but no pledged_share_entity — cannot "
+                    "identify which stake secures the debt."
+                ),
+                "subject": inst.get("instrument_name") or "(unnamed)",
+            })
+
+    return findings
+
+
+def build_capital_stack(
+    deal: dict,
+    instruments: list[dict],
+    entities: list[dict],
+    ev: Optional[float] = None,
+    ebitda: Optional[float] = None,
+) -> dict:
+    """Build the full capital stack view for a deal.
+
+    Top-level helper combining rank assignment, layer walk, metrics, parallel
+    claims, change-of-control, our-position summary, and validation.
+
+    Parameters
+    ----------
+    deal : dict
+        Must contain at least slug, name, currency, enterprise_value,
+        valuation_date, valuation_method, valuation_entity.
+    instruments : list[dict]
+        Capital structure instruments from the deal (with v8/v9 taxonomy
+        fields populated).
+    entities : list[dict]
+        Corporate entities for the deal (Tab 7 with v8 fields).
+    ev : float, optional
+        Enterprise Value override. Defaults to deal.enterprise_value.
+    ebitda : float, optional
+        Current EBITDA for leverage ratios. Optional — leverage omitted if
+        not supplied.
+
+    Returns
+    -------
+    dict
+        StackView dict suitable for JSON serialisation by the API layer.
+    """
+    if ev is None:
+        ev = float(deal.get("enterprise_value") or 0)
+
+    # Ensure ranks are populated (manual overrides respected)
+    assign_cashflow_priority_ranks(instruments)
+
+    layers = compute_attributable_equity(instruments, ev)
+    residual_equity = layers[-1]["residual_after_debt"] if layers else ev
+
+    parallel_claims = []
+    coc_list = []
+    opco_equity = layers[0]["residual_after_debt"] if layers else ev
+    for inst in instruments:
+        if inst.get("pledged_share_pct"):
+            gu = gross_up_facility(inst)
+            parallel_claims.append({
+                "instrument_name": inst.get("instrument_name"),
+                "debtor_entity": inst.get("entity_name"),
+                "pledged_share_entity": inst.get("pledged_share_entity"),
+                "pledged_share_pct": float(inst.get("pledged_share_pct")),
+                "face_value": float(inst.get("drawn_amount") or 0),
+                "our_holding": float(inst.get("our_holding") or 0),
+                "gross_up_factor": gu["gross_up_factor"],
+                "grossed_up_equivalent": round(gu["equivalent_debt"], 2),
+            })
+            coc = change_of_control_coverage(inst, opco_equity)
+            if coc:
+                coc_list.append(coc)
+
+    metrics = build_metrics(instruments, ev, ebitda)
+
+    # Our position summary
+    our_inst = [i for i in instruments if float(i.get("our_holding") or 0) > 0]
+    our_total = sum(float(i.get("our_holding") or 0) for i in our_inst)
+    our_ranks = sorted({
+        i.get("cashflow_priority_rank") for i in our_inst
+        if i.get("cashflow_priority_rank") is not None
+    })
+    dominant_rank = our_ranks[0] if our_ranks else None
+    our_position = {
+        "total_holding": round(our_total, 2),
+        "dominant_rank": dominant_rank,
+        "all_ranks_held": our_ranks,
+        "instrument_count": len(our_inst),
+        "pledged_share_exposure": sum(
+            float(i.get("our_holding") or 0)
+            for i in our_inst
+            if i.get("pledged_share_pct")
+        ),
+    }
+    if dominant_rank is not None:
+        senior_to_us = sum(
+            float(i.get("drawn_amount") or 0)
+            for i in instruments
+            if not i.get("pledged_share_pct")
+            and i.get("cashflow_priority_rank") is not None
+            and i.get("cashflow_priority_rank") < dominant_rank
+        )
+        pari_at_rank_total = sum(
+            float(i.get("drawn_amount") or 0)
+            for i in instruments
+            if not i.get("pledged_share_pct")
+            and i.get("cashflow_priority_rank") == dominant_rank
+        )
+        our_at_rank = sum(
+            float(i.get("our_holding") or 0)
+            for i in instruments
+            if i.get("cashflow_priority_rank") == dominant_rank
+        )
+        subordinated = sum(
+            float(i.get("drawn_amount") or 0)
+            for i in instruments
+            if not i.get("pledged_share_pct")
+            and i.get("cashflow_priority_rank") is not None
+            and i.get("cashflow_priority_rank") > dominant_rank
+        )
+        our_position.update({
+            "debt_senior_to_us": round(senior_to_us, 2),
+            "pari_passu_with_us_ex_our": round(pari_at_rank_total - our_at_rank, 2),
+            "subordinated_cushion": round(subordinated, 2),
+            "true_equity_cushion": round(residual_equity, 2),
+            "total_cushion_below_us": round(subordinated + residual_equity, 2),
+        })
+
+    warnings = validate_capital_stack(deal, instruments, entities)
+
+    return {
+        "deal_slug": deal.get("slug"),
+        "deal_name": deal.get("name"),
+        "currency": deal.get("currency"),
+        "valuation": {
+            "enterprise_value": ev,
+            "date": deal.get("valuation_date"),
+            "method": deal.get("valuation_method"),
+            "entity": deal.get("valuation_entity"),
+        },
+        "layers": [
+            {
+                "rank": lyr["rank"],
+                "entity_level": lyr["entity_level"],
+                "entity_name": lyr["entity_name"],
+                "debt_total": round(lyr["debt_total"], 2),
+                "debt_our": round(lyr["debt_our"], 2),
+                "instrument_count": lyr["instrument_count"],
+                "inherited_value": round(lyr["inherited_value"], 2),
+                "residual_after_debt": round(lyr["residual_after_debt"], 2),
+            }
+            for lyr in layers
+        ],
+        "residual_equity": round(residual_equity, 2),
+        "parallel_claims": parallel_claims,
+        "metrics": metrics,
+        "our_position": our_position,
+        "change_of_control": coc_list,
+        "warnings": warnings,
+    }
