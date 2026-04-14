@@ -18385,6 +18385,160 @@ def upsert_intercreditor(slug: str, body: dict):
     return {"ok": True, "terms": _serialize_row(row)}
 
 
+@app.get("/api/deals/{slug}/capital-stack")
+def get_capital_stack(slug: str, reporting_currency: str | None = None):
+    """Return the rendered Capital Stack view for a deal.
+
+    Pulls the deal's v8 capital structure taxonomy + Tab 1 valuation inputs
+    and runs the Phase 3 engine (`build_capital_stack`). Optionally converts
+    all monetary fields to a reporting currency using the FX engine.
+    """
+    from server.capital_structure_engine import build_capital_stack
+
+    with get_connection() as conn:
+        deal_row = conn.execute(
+            """
+            SELECT id, slug, name, borrower, currency, enterprise_value,
+                   valuation_date, valuation_method, valuation_entity,
+                   equity_invested
+            FROM deals
+            WHERE slug = %s
+            """,
+            (slug,),
+        ).fetchone()
+        if not deal_row:
+            raise HTTPException(status_code=404, detail="Deal not found")
+
+        deal = dict(deal_row)
+        # Coerce DB types into plain Python for the pure engine
+        if deal.get("enterprise_value") is not None:
+            deal["enterprise_value"] = float(deal["enterprise_value"])
+        if deal.get("equity_invested") is not None:
+            deal["equity_invested"] = float(deal["equity_invested"])
+        if deal.get("valuation_date") is not None:
+            deal["valuation_date"] = deal["valuation_date"].isoformat()
+
+        instruments_raw = conn.execute(
+            """
+            SELECT id, instrument_name, instrument_type, instrument_format,
+                   enforcement_class, waterfall_priority,
+                   committed_amount, drawn_amount, currency,
+                   margin_bps, maturity_date, repayment_type,
+                   our_holding, our_holding_pct, dsra_months, status,
+                   pari_passu_group,
+                   entity_level, entity_name, ownership_pct,
+                   structural_seniority, ratio_consolidation_level,
+                   intercompany_lender, subordination_agreement,
+                   cashflow_priority_rank,
+                   pledged_share_entity, pledged_share_pct
+            FROM capital_structure_instruments
+            WHERE deal_id = %s
+            ORDER BY cashflow_priority_rank NULLS LAST, maturity_date
+            """,
+            (deal["id"],),
+        ).fetchall()
+
+        instruments = []
+        for row in instruments_raw:
+            inst = dict(row)
+            # Coerce numerics
+            for k in (
+                "drawn_amount", "committed_amount", "our_holding", "our_holding_pct",
+                "ownership_pct", "pledged_share_pct",
+            ):
+                if inst.get(k) is not None:
+                    inst[k] = float(inst[k])
+            if inst.get("maturity_date") is not None:
+                inst["maturity_date"] = inst["maturity_date"].isoformat()
+            if inst.get("id") is not None:
+                inst["id"] = str(inst["id"])
+            instruments.append(inst)
+
+        entities_raw = conn.execute(
+            """
+            SELECT id, entity_name, entity_type, parent_entity, jurisdiction,
+                   securitisation_boundary, ring_fenced,
+                   ownership_pct, ownership_type, control_type,
+                   consolidation_method, within_security_perimeter, ratio_level
+            FROM corporate_entities
+            WHERE deal_id = %s
+            """,
+            (deal["id"],),
+        ).fetchall()
+
+        entities = []
+        for row in entities_raw:
+            e = dict(row)
+            if e.get("ownership_pct") is not None:
+                e["ownership_pct"] = float(e["ownership_pct"])
+            if e.get("id") is not None:
+                e["id"] = str(e["id"])
+            entities.append(e)
+
+        # Latest EBITDA from actual_periods if available (optional — engine
+        # handles None gracefully)
+        ebitda = None
+        try:
+            row = conn.execute(
+                """
+                SELECT actual_metrics->'ebitda' AS ebitda
+                FROM actual_periods
+                WHERE deal_id = %s AND actual_metrics ? 'ebitda'
+                ORDER BY period_end DESC
+                LIMIT 1
+                """,
+                (deal["id"],),
+            ).fetchone()
+            if row and row.get("ebitda") is not None:
+                ebitda = float(row["ebitda"])
+        except Exception:
+            ebitda = None
+
+    stack = build_capital_stack(deal, instruments, entities, ebitda=ebitda)
+
+    # Optional FX conversion — convert all monetary fields to the reporting currency.
+    target_ccy = (reporting_currency or "").upper() if reporting_currency else None
+    native_ccy = (deal.get("currency") or "").upper()
+    if target_ccy and target_ccy in ("GBP", "USD", "EUR") and target_ccy != native_ccy:
+        with get_connection() as conn:
+            fx_rates = _load_fx_rates_for_date(conn, date.today())
+        if fx_rates:
+            def cvt(amount):
+                if amount is None:
+                    return None
+                return convert_amount(amount, native_ccy, target_ccy, rates=fx_rates)
+
+            monetary_keys = {
+                "enterprise_value", "equity_invested", "debt_total", "debt_our",
+                "inherited_value", "residual_after_debt", "face_value",
+                "grossed_up_equivalent", "our_holding", "pledged_value",
+                "senior_debt_total", "consolidated_debt_total",
+                "parallel_claims_grossed_up", "grossed_up_equivalent_debt",
+                "total_holding", "debt_senior_to_us", "pari_passu_with_us_ex_our",
+                "subordinated_cushion", "true_equity_cushion", "total_cushion_below_us",
+                "residual_equity", "pledged_share_exposure",
+            }
+
+            def walk(obj):
+                if isinstance(obj, dict):
+                    return {k: cvt(v) if k in monetary_keys and isinstance(v, (int, float))
+                            else walk(v) for k, v in obj.items()}
+                if isinstance(obj, list):
+                    return [walk(x) for x in obj]
+                return obj
+
+            stack = walk(stack)
+            stack["currency_conversion"] = {
+                "from": native_ccy,
+                "to": target_ccy,
+                "rate": cvt(1.0) if cvt(1.0) is not None else None,
+                "as_of": fx_rates.get("_as_of") if isinstance(fx_rates, dict) else None,
+            }
+
+    stack["reporting_currency"] = target_ccy or native_ccy
+    return stack
+
+
 _FINANCIAL_TEMPLATE_COLS = [
     "sector_template", "revenue_line_labels", "cost_line_labels",
     "capex_line_labels", "growth_capex_labels", "maintenance_capex_labels",
