@@ -969,5 +969,47 @@ ALTER TABLE deal_onboarding_snapshots ADD COLUMN IF NOT EXISTS distribution_gate
 ALTER TABLE deal_onboarding_snapshots ADD COLUMN IF NOT EXISTS distribution_gates_summary TEXT;
 
 -- ═══════════════════════════════════════════════════════════════════════════════
+-- Reserve Account History — time-series of balances per reporting period
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- One row per reserve account per reporting period. Records the actual balance,
+-- the required balance at that date, the management case expected balance,
+-- and the funded status. This enables trend analysis ("was the DSRA fully
+-- funded last quarter?") and variance analysis ("actual vs expected reserve").
+
+CREATE TABLE IF NOT EXISTS reserve_account_history (
+    id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    deal_id                 INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+    reserve_account_id      UUID NOT NULL REFERENCES deal_reserve_accounts(id) ON DELETE CASCADE,
+    reporting_period_id     INTEGER NOT NULL REFERENCES deal_reporting_periods(id) ON DELETE CASCADE,
+    period_label            TEXT NOT NULL,
+    period_end              DATE NOT NULL,
+    required_balance        NUMERIC,
+    actual_balance          NUMERIC,
+    expected_balance        NUMERIC,           -- from management case forecast
+    shortfall               NUMERIC,           -- required - actual (null if fully funded)
+    variance_to_expected    NUMERIC,           -- actual - expected
+    funded_status           TEXT NOT NULL DEFAULT 'fully_funded',
+    cash_amount             NUMERIC,
+    lc_amount               NUMERIC,
+    pcg_amount              NUMERIC,
+    source_document         TEXT,               -- e.g. compliance certificate reference
+    notes                   TEXT,
+    created_at              TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(reserve_account_id, reporting_period_id)
+);
+CREATE INDEX IF NOT EXISTS idx_rah_deal ON reserve_account_history(deal_id);
+CREATE INDEX IF NOT EXISTS idx_rah_reserve ON reserve_account_history(reserve_account_id);
+CREATE INDEX IF NOT EXISTS idx_rah_period ON reserve_account_history(reporting_period_id);
+
+-- New line item definitions for reserve expected balances in the forecast
+INSERT INTO line_item_definitions (line_key, section, display_label, row_order, is_computed, unit) VALUES
+('dsra_expected_balance',           'balance_sheet', 'DSRA Expected Balance',                50, FALSE, 'currency'),
+('mra_expected_balance',            'balance_sheet', 'MRA Expected Balance',                 51, FALSE, 'currency'),
+('capex_reserve_expected_balance',  'balance_sheet', 'Capex Reserve Expected Balance',       52, FALSE, 'currency'),
+('o_and_m_reserve_expected_balance','balance_sheet', 'O&M Reserve Expected Balance',         53, FALSE, 'currency'),
+('lockup_reserve_expected_balance', 'balance_sheet', 'Lock-Up Account Expected Balance',     54, FALSE, 'currency')
+ON CONFLICT (line_key) DO NOTHING;
+
+-- ═══════════════════════════════════════════════════════════════════════════════
 -- End of migrations — all statements above are idempotent
 -- ═══════════════════════════════════════════════════════════════════════════════

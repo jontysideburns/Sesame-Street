@@ -18402,6 +18402,13 @@ def get_deal_topsheet(slug: str):
         reserves = conn.execute(
             "SELECT * FROM deal_reserve_accounts WHERE deal_id = %s ORDER BY account_type", (deal_id,)
         ).fetchall()
+        reserve_history = conn.execute(
+            """SELECT reserve_account_id, period_label, period_end, required_balance,
+                      actual_balance, expected_balance, shortfall, variance_to_expected, funded_status
+               FROM reserve_account_history WHERE deal_id = %s
+               ORDER BY reserve_account_id, period_end""",
+            (deal_id,),
+        ).fetchall()
         hedges = conn.execute(
             "SELECT * FROM hedge_portfolio WHERE deal_id = %s ORDER BY maturity", (deal_id,)
         ).fetchall()
@@ -18700,6 +18707,7 @@ def get_deal_topsheet(slug: str):
         "corporateEntities": [_serialize_row(r) for r in entities],
         "counterparties": [_serialize_row(r) for r in counterparties],
         "reserveAccounts": [_serialize_row(r) for r in reserves],
+        "reserveHistory": [_serialize_row(r) for r in reserve_history],
         "hedgePortfolio": [_serialize_row(r) for r in hedges],
         "developmentPhases": [_serialize_row(r) for r in dev_phases],
         "investorAllocations": [_serialize_row(r) for r in investors],
@@ -20707,4 +20715,89 @@ def get_public_holidays(jurisdiction: str | None = None, year: int | None = None
             {"jurisdiction": r["jurisdiction"], "date": r["holiday_date"].isoformat(), "name": r["holiday_name"]}
             for r in rows
         ]
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# RESERVE ACCOUNT HISTORY
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/deals/{slug}/reserve-history")
+def get_reserve_history(slug: str):
+    """Return the time-series history of all reserve account balances for a deal."""
+    with get_connection() as conn:
+        deal_id = _get_deal_id(conn, slug)
+
+        accounts = conn.execute(
+            """SELECT id, account_name, account_type, required_balance, current_balance,
+                      funded_status, sizing_basis, top_up_deadline, currency
+               FROM deal_reserve_accounts WHERE deal_id = %s ORDER BY account_type""",
+            (deal_id,),
+        ).fetchall()
+
+        history = conn.execute(
+            """SELECT rah.reserve_account_id, rah.period_label, rah.period_end,
+                      rah.required_balance, rah.actual_balance, rah.expected_balance,
+                      rah.shortfall, rah.variance_to_expected, rah.funded_status,
+                      rah.cash_amount, rah.lc_amount, rah.pcg_amount, rah.notes
+               FROM reserve_account_history rah
+               WHERE rah.deal_id = %s
+               ORDER BY rah.reserve_account_id, rah.period_end""",
+            (deal_id,),
+        ).fetchall()
+
+    # Group history by account
+    history_by_account: dict[str, list] = {}
+    for h in history:
+        aid = str(h["reserve_account_id"])
+        if aid not in history_by_account:
+            history_by_account[aid] = []
+        history_by_account[aid].append({
+            "periodLabel": h["period_label"],
+            "periodEnd": h["period_end"].isoformat(),
+            "requiredBalance": float(h["required_balance"]) if h["required_balance"] is not None else None,
+            "actualBalance": float(h["actual_balance"]) if h["actual_balance"] is not None else None,
+            "expectedBalance": float(h["expected_balance"]) if h["expected_balance"] is not None else None,
+            "shortfall": float(h["shortfall"]) if h["shortfall"] is not None else None,
+            "varianceToExpected": float(h["variance_to_expected"]) if h["variance_to_expected"] is not None else None,
+            "fundedStatus": h["funded_status"],
+        })
+
+    # Build top-up alerts for underfunded accounts
+    from datetime import date as _date_type
+    today = _date_type.today()
+    top_up_alerts = []
+    for a in accounts:
+        if a["funded_status"] not in ("fully_funded", "surplus") and a["top_up_deadline"]:
+            deadline = a["top_up_deadline"]
+            days_remaining = (deadline - today).days
+            status = "overdue" if days_remaining < 0 else "approaching" if days_remaining <= 30 else "not_yet_due"
+            shortfall = float(a["required_balance"] or 0) - float(a["current_balance"] or 0)
+            top_up_alerts.append({
+                "accountName": a["account_name"],
+                "accountType": a["account_type"],
+                "shortfall": shortfall if shortfall > 0 else 0,
+                "deadline": deadline.isoformat(),
+                "daysRemaining": days_remaining,
+                "status": status,
+                "currency": a["currency"],
+            })
+
+    return {
+        "dealSlug": slug,
+        "accounts": [
+            {
+                "id": str(a["id"]),
+                "name": a["account_name"],
+                "type": a["account_type"],
+                "requiredBalance": float(a["required_balance"]) if a["required_balance"] is not None else None,
+                "currentBalance": float(a["current_balance"]) if a["current_balance"] is not None else None,
+                "fundedStatus": a["funded_status"],
+                "sizingBasis": a["sizing_basis"],
+                "currency": a["currency"],
+                "history": history_by_account.get(str(a["id"]), []),
+            }
+            for a in accounts
+        ],
+        "topUpAlerts": top_up_alerts,
     }
