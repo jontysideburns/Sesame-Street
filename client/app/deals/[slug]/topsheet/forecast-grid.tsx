@@ -70,10 +70,10 @@ function fmtCell(value: number | null | undefined, unit: string): { text: string
   if (unit === "ratio") return { text: value.toFixed(2) + "x", isNegative: value < 0 };
   if (unit === "percentage") return { text: value.toFixed(1) + "%", isNegative: value < 0 };
   if (unit === "count") return { text: value.toFixed(1), isNegative: value < 0 };
-  // currency — expressed in millions to 1dp, negatives in brackets
+  // currency — expressed in millions to 1dp, negatives in brackets, comma separators
   const inMillions = value / 1_000_000;
   const abs = Math.abs(inMillions);
-  const formatted = abs.toFixed(1);
+  const formatted = new Intl.NumberFormat("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(abs);
   if (inMillions < -0.05) return { text: `(${formatted})`, isNegative: true };
   return { text: formatted, isNegative: false };
 }

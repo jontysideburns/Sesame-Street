@@ -54,7 +54,11 @@ const ACTUAL_COLORS = {
 };
 
 function fmtM(v: number) {
-  return (v / 1_000_000).toFixed(1) + "m";
+  const m = v / 1_000_000;
+  const abs = Math.abs(m);
+  const formatted = new Intl.NumberFormat("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(abs);
+  if (m < -0.05) return `(${formatted})m`;
+  return `${formatted}m`;
 }
 
 function ChartTooltipContent({ active, payload, label }: any) {

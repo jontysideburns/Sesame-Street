@@ -478,12 +478,12 @@ export default function JpsFilterGrid({
 
                     {/* Headroom — number, right */}
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>
-                      {deal.headroomPct != null ? `${deal.headroomPct.toFixed(1)}%` : "\u2014"}
+                      {deal.headroomPct != null ? (deal.headroomPct < 0 ? `(${Math.abs(deal.headroomPct).toFixed(1)}%)` : `${new Intl.NumberFormat("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(deal.headroomPct)}%`) : "\u2014"}
                     </td>
 
                     {/* ND:EBITDA — number, right */}
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>
-                      {deal.ndEbitda != null ? `${deal.ndEbitda.toFixed(1)}x` : "\u2014"}
+                      {deal.ndEbitda != null ? `${new Intl.NumberFormat("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(deal.ndEbitda)}x` : "\u2014"}
                     </td>
 
                     {/* To-do's — number, right */}

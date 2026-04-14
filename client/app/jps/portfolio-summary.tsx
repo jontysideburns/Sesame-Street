@@ -113,6 +113,7 @@ function fmtCompact(n: number) {
 
 function fmtPct(n: number | null) {
   if (n == null) return "\u2014";
+  if (n < 0) return `(${Math.abs(n).toFixed(1)}%)`;
   return `${n.toFixed(1)}%`;
 }
 
