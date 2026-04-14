@@ -1144,6 +1144,16 @@ ALTER TABLE capital_structure_instruments
 ALTER TABLE capital_structure_instruments
     ADD COLUMN IF NOT EXISTS pledged_share_pct DECIMAL(5,2);
 
+-- security_ranking per instrument (Tab 2 col D — dropdown). Previously only
+-- captured at deal level on deals.security_ranking; per-instrument is needed
+-- for the Capital Stack engine to flag contractual subordination correctly.
+-- Standard values: Senior Secured, Senior Secured HoldCo, Senior Secured
+-- MajorityHoldCo, Senior Secured MinorityHoldCo, Senior Unsecured,
+-- Second Lien, Mezzanine, Subordinated, Subordinated HoldCo, Holdco,
+-- Majority Holdco, Minority Holdco, Shareholder Loan.
+ALTER TABLE capital_structure_instruments
+    ADD COLUMN IF NOT EXISTS security_ranking VARCHAR(40);
+
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- End of migrations — all statements above are idempotent
 -- ═══════════════════════════════════════════════════════════════════════════════

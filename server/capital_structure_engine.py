@@ -48,6 +48,26 @@ SUBORDINATED_RANKINGS = {
     "second lien",
 }
 
+# Standard security_ranking vocabulary accepted by the TopSheet v9 template
+# (Tab 1 guidance + Tab 2 dropdown). Comparison is case-insensitive.
+# Used by ``validate_capital_structure`` to warn on blank / non-standard
+# entries at ingestion time.
+STANDARD_SECURITY_RANKINGS = {
+    "senior secured",
+    "senior secured holdco",
+    "senior secured majorityholdco",
+    "senior secured minorityholdco",
+    "senior unsecured",
+    "second lien",
+    "mezzanine",
+    "subordinated",
+    "subordinated holdco",
+    "holdco",
+    "majority holdco",
+    "minority holdco",
+    "shareholder loan",
+}
+
 
 def _is_shareholder_loan(instrument: dict) -> bool:
     itype = (instrument.get("instrument_type") or instrument.get("type") or "").lower()
@@ -257,6 +277,35 @@ def validate_capital_structure(
                     ),
                     "subject": name,
                 })
+
+        # Security ranking — blank or non-standard triggers an ingestion-time
+        # prompt. Without a recognised ranking, the auto-ranker cannot tell
+        # whether the instrument is contractually subordinated within its
+        # level, so it will silently default to pari-passu with rank 1.
+        raw_ranking = inst.get("security_ranking")
+        ranking_str = (raw_ranking or "").strip()
+        if not ranking_str:
+            findings.append({
+                "severity": "warn",
+                "message": (
+                    f"Instrument '{name}' has no security_ranking. Pick one "
+                    f"of the standard values ({', '.join(sorted(STANDARD_SECURITY_RANKINGS))}) "
+                    "so the engine can rank it correctly. Populate Tab 2 col D "
+                    "before re-ingesting."
+                ),
+                "subject": name,
+            })
+        elif ranking_str.lower() not in STANDARD_SECURITY_RANKINGS:
+            findings.append({
+                "severity": "warn",
+                "message": (
+                    f"Instrument '{name}' has a non-standard security_ranking "
+                    f"'{raw_ranking}'. The auto-ranker may not recognise it as "
+                    "(sub)ordinated. Accepted values: "
+                    f"{', '.join(sorted(STANDARD_SECURITY_RANKINGS))}."
+                ),
+                "subject": name,
+            })
 
         ent_name = (inst.get("entity_name") or "").strip()
         if ent_name and ent_name not in entity_names:

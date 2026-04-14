@@ -63,6 +63,7 @@ def test_wigmore_solar():
         "drawn_amount": 100_000_000,
         "our_holding": 100_000_000,
         "pari_passu_group": "Senior",
+        "security_ranking": "Senior Secured",
     }]
     entities = [{
         "entity_name": "Wigmore Solar OpCo Limited",
@@ -321,6 +322,47 @@ def test_pari_passu_mismatch():
           any("group 'A'" in e["message"] for e in errors))
 
 
+# -- Test 7a: security_ranking validation (blank + non-standard) --
+def test_security_ranking_validation():
+    print("\n--- Test 7a: security_ranking blank / non-standard warnings ---")
+    deal = {"slug": "sr-test", "currency": "GBP", "enterprise_value": 500e6,
+            "valuation_date": "2026-04-14", "valuation_method": "dcf",
+            "valuation_entity": "Test OpCo"}
+    entities = [{"entity_name": "Test OpCo", "entity_type": "opco",
+                 "ownership_pct": 100, "within_security_perimeter": True}]
+    instruments = [
+        # (a) blank security_ranking — should warn
+        {"instrument_name": "Senior Note A", "entity_level": "opco",
+         "entity_name": "Test OpCo", "ownership_pct": 100, "drawn_amount": 200e6},
+        # (b) non-standard value — should warn
+        {"instrument_name": "Junior Note B", "entity_level": "opco",
+         "entity_name": "Test OpCo", "ownership_pct": 100, "drawn_amount": 50e6,
+         "security_ranking": "2nd ranking bond"},
+        # (c) valid standard value — no warning
+        {"instrument_name": "Senior Note C", "entity_level": "opco",
+         "entity_name": "Test OpCo", "ownership_pct": 100, "drawn_amount": 100e6,
+         "security_ranking": "Senior Secured"},
+        # (d) case variation of valid value — no warning (case-insensitive)
+        {"instrument_name": "Note D", "entity_level": "opco",
+         "entity_name": "Test OpCo", "ownership_pct": 100, "drawn_amount": 50e6,
+         "security_ranking": "SENIOR UNSECURED"},
+    ]
+    warnings = validate_capital_stack(deal, instruments, entities)
+    msgs = [w["message"] for w in warnings]
+
+    blank_warn = [m for m in msgs if "Senior Note A" in m and "no security_ranking" in m]
+    nonstd_warn = [m for m in msgs if "Junior Note B" in m and "non-standard" in m]
+    c_warn = [m for m in msgs if "Senior Note C" in m and ("security_ranking" in m or "ranking" in m)]
+    d_warn = [m for m in msgs if "Note D" in m and ("security_ranking" in m or "non-standard" in m)]
+
+    check("Blank value raises warning", len(blank_warn) == 1)
+    check("Non-standard value raises warning", len(nonstd_warn) == 1)
+    check("Valid standard value does NOT warn", len(c_warn) == 0,
+          f"unexpected: {c_warn}")
+    check("Case-insensitive match does NOT warn", len(d_warn) == 0,
+          f"unexpected: {d_warn}")
+
+
 # -- Test 7: Validation -- missing EV --
 def test_missing_ev():
     print("\n--- Test 7: Validation -- missing EV warn ---")
@@ -344,6 +386,7 @@ if __name__ == "__main__":
     test_opco_plus_holdco_100pct()
     test_75pct_majhold()
     test_pari_passu_mismatch()
+    test_security_ranking_validation()
     test_missing_ev()
 
     print("\n" + "=" * 72)

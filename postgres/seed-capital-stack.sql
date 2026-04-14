@@ -55,7 +55,7 @@ WHERE d.slug='gatwick-airport'
     WHERE ce.deal_id = d.id AND ce.entity_name = 'Gatwick Airport Finance plc (GAF)'
   );
 
--- v8 fields on the 11 existing Class A bonds; our holding pro-rata of £125m
+-- v8/v9 fields on the 11 existing Class A bonds; our holding pro-rata of £125m
 UPDATE capital_structure_instruments SET
     entity_level = 'opco',
     entity_name = 'Gatwick Funding Limited',
@@ -65,6 +65,7 @@ UPDATE capital_structure_instruments SET
     subordination_agreement = FALSE,
     cashflow_priority_rank = 1,
     pari_passu_group = 'Class A',
+    security_ranking = 'Senior Secured',
     our_holding = ROUND(drawn_amount * (125000000.0 / 3364600000.0))
 WHERE deal_id = (SELECT id FROM deals WHERE slug='gatwick-airport')
   AND instrument_name LIKE 'Class A%';
@@ -92,6 +93,13 @@ WHERE d.slug = 'gatwick-airport'
     SELECT 1 FROM capital_structure_instruments csi
     WHERE csi.deal_id = d.id AND csi.instrument_name LIKE 'GAF 6%%'
   );
+
+-- Tag the GAF MidCo bond: Senior at MidCo level, structurally subordinated
+-- to the CTA group (captured via entity_level='midco' + cashflow_priority_rank=2).
+UPDATE capital_structure_instruments SET
+    security_ranking = 'Senior Secured HoldCo'
+WHERE deal_id = (SELECT id FROM deals WHERE slug='gatwick-airport')
+  AND entity_level = 'midco';
 
 -- ─── WIGMORE SOLAR (simple single-level control) ──────────────────────────────
 
@@ -126,7 +134,8 @@ UPDATE capital_structure_instruments SET
     ratio_consolidation_level = 'opco_standalone',
     subordination_agreement = FALSE,
     cashflow_priority_rank = 1,
-    pari_passu_group = 'Senior'
+    pari_passu_group = 'Senior',
+    security_ranking = 'Senior Secured'
 WHERE deal_id = (SELECT id FROM deals WHERE slug='wigmore-solar');
 
 -- ─── End of seed ──────────────────────────────────────────────────────────────

@@ -18425,7 +18425,7 @@ def get_capital_stack(slug: str, reporting_currency: str | None = None):
                    committed_amount, drawn_amount, currency,
                    margin_bps, maturity_date, repayment_type,
                    our_holding, our_holding_pct, dsra_months, status,
-                   pari_passu_group,
+                   pari_passu_group, security_ranking,
                    entity_level, entity_name, ownership_pct,
                    structural_seniority, ratio_consolidation_level,
                    intercompany_lender, subordination_agreement,
