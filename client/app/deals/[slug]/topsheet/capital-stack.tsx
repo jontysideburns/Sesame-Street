@@ -357,32 +357,6 @@ export default function CapitalStackBlock({ data }: { data: CapitalStackResponse
         </div>
       )}
 
-      {/* ─── Our position summary ─────────────────────────────────── */}
-      {our.dominant_rank != null && (
-        <div style={{ padding: "10px 14px", background: COLORS.panelStrong, borderRadius: 8, border: `1px solid ${COLORS.accent}`, borderLeft: `4px solid ${COLORS.accent}`, marginBottom: hasEv ? 8 : 0 }}>
-          <div style={{ fontSize: "0.72rem", fontWeight: 700, color: COLORS.accent, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>
-            Our position
-          </div>
-          <p style={{ margin: 0, fontSize: "0.86rem", lineHeight: 1.5 }}>
-            We hold <strong>{fmtMillions(our.total_holding, ccy)}</strong>
-            {ourDominantLayer && <> of the <strong>{fmtMillions(ourDominantLayer.total, ccy)}</strong> {ourDominantLayer.label.toLowerCase()}</>}
-            , ranked <strong>#{our.dominant_rank}</strong>
-            {typeof our.debt_senior_to_us === "number" && (
-              <>. Debt senior to us: <strong>{fmtMillions(our.debt_senior_to_us, ccy)}</strong></>
-            )}
-            {typeof our.subordinated_cushion === "number" && our.subordinated_cushion > 0 && (
-              <>. Subordinated cushion: <strong>{fmtMillions(our.subordinated_cushion, ccy)}</strong></>
-            )}
-            {typeof our.true_equity_cushion === "number" && (
-              <>. Equity cushion: <strong>{fmtMillions(our.true_equity_cushion, ccy)}</strong></>
-            )}
-            {ourCushion > 0 && hasEv && (
-              <>. Total cushion below us: <strong>{fmtMillions(ourCushion, ccy)}</strong> ({fmtPct((ourCushion / ev) * 100)} of EV).</>
-            )}
-          </p>
-        </div>
-      )}
-
       {/* ─── Warnings ─────────────────────────────────────────────── */}
       {data.warnings.length > 0 && (
         <div style={{ marginTop: 10, padding: "8px 12px", background: "rgba(201, 127, 31, 0.08)", border: `1px solid ${COLORS.warning}`, borderRadius: 6, fontSize: "0.78rem" }}>
