@@ -69,7 +69,7 @@ This is the core deal record. Complete as many fields as possible.
 
 **Important notes:**
 - **Sector** must match one of the system's sector templates: Wind Farm, Data Center, Port, Airport, Toll Road, Social Infrastructure, Real Estate, Clean Tech Hub, Solar
-- **Security Ranking** determines how this deal appears in portfolio analytics. Use: Senior Secured, Senior Unsecured, Second Lien, Mezzanine, Subordinated, Holdco, Majority Holdco, Minority Holdco
+- **Security Ranking** (v8 vocabulary) determines how this deal appears in portfolio analytics. Use one of: `Senior Secured`, `Senior Secured HoldCo`, `Senior Secured MajorityHoldCo`, `Senior Secured MinorityHoldCo`, `Senior Unsecured`, `Second Lien`, `Mezzanine`, `Subordinated`, `Subordinated HoldCo`, `Holdco`, `Majority Holdco`, `Minority Holdco`, `Shareholder Loan`. Choose the variant that reflects the collateral package *and* the entity level the security is taken at.
 - **Revenue Risk Code** uses the P/V/D framework: P1-P6 (Pricing), V1-V6 (Volume), D1-D5 (Duration). Lower numbers = lower risk. If unsure, leave blank and it will be assigned during review.
 - **Contracted Revenue %** and **Merchant Revenue %** should sum to 100%.
 - **Duration Coverage %** = (Contract life / Debt term) x 100. Above 100% means the contract outlasts the debt.
@@ -90,6 +90,20 @@ This is the core deal record. Complete as many fields as possible.
 
 **Why the `competitive_tender_clean_sheet` flag is a HARD FAIL with any debt reliance:** In a pure concession retender, the incumbent cannot economically out-bid clean-sheet competitors while carrying legacy debt. A rational new entrant with zero legacy debt can always bid more aggressively. Relying on winning the retender to repay legacy debt is structurally unsound.
 
+**Distribution Mechanics (new in v8)** — 10 fields describing how distributions actually flow on this deal:
+- **Distribution Frequency**: `semi_annual` | `quarterly` | `annual` — when distributions are paid.
+- **Distribution Calculation Basis**: narrative describing the figure on which distributions are calculated — e.g. `cashflow_available_for_distribution`, `net_cashflow`, `free_cashflow_after_sweep`.
+- **Distribution Waterfall Position**: integer — position in the cashflow waterfall (e.g. 12 = 12th priority after debt service, reserves, taxes, etc.).
+- **Sweep Before Distribution**: Yes/No — is a mandatory cash sweep applied before the distribution test?
+- **Sweep Included in DSCR**: Yes/No — is the cash sweep included in the DSCR calculation (typically no — DSCR is computed before the sweep).
+- **Trapped Cash Mechanism**: `retained_in_proceeds_account` | `held_in_lockup_account` | `swept_to_debt` | `released_after_cure` | `swept_then_released` — what physically happens to cash that fails the distribution test.
+- **Trapped Cash Release Conditions**: narrative — e.g. "released after 2 successive Calculation Dates where all conditions satisfied".
+- **Lock-Up Cure Window (days)**: integer — days after the Calculation Date during which the borrower can cure the failed test (e.g. 90, 45).
+- **Lock-Up Escalation Periods**: integer — number of consecutive lock-up periods before escalation kicks in (e.g. 3).
+- **Lock-Up Escalation Consequence**: what happens after the escalation threshold — `excess_cashflow_sweep` | `mandatory_prepayment` | `creditor_step_in`.
+
+Use these fields together with the itemised gates in Tab 22 (Distribution Conditions). Tab 22 captures each individual gate; Tab 1 Distribution Mechanics captures the *framework* around the gates.
+
 ### Tab 2: Capital Structure
 
 One row per debt instrument in the capital structure.
@@ -97,7 +111,7 @@ One row per debt instrument in the capital structure.
 **Minimum requirement:** At least one instrument.
 
 **Key fields:**
-- **Instrument Type:** senior_term, senior_rcf, capex_facility, mezzanine, shl, bond, note, frn, private_placement
+- **Instrument Type:** senior_term, senior_rcf, capex_facility, mezzanine, shl, bond, note, frn, private_placement, intercompany
 - **Format:** loan, bond, note, frn, il_bond, private_placement, convertible
 - **Pari-Passu Group:** Instruments in the same group (e.g. "A") rank equally in the waterfall. Different groups rank sequentially.
 - **Committed Amount:** Total facility size for this instrument
@@ -106,6 +120,18 @@ One row per debt instrument in the capital structure.
 - **Repayment Type:** bullet (single repayment at maturity), amortising (equal instalments), sculpted (shaped to cashflow), cash_sweep (excess cash applied)
 - **Our Holding:** Our share of this specific instrument (not the deal total)
 - **DSRA Months:** How many months of debt service the DSRA covers for this instrument
+
+**Capital structure taxonomy (new in v8 — columns R–Y):** these fields tell the ratio engine which entity level each instrument sits at and how it ranks in the overall cashflow priority.
+- **Entity Level (R)**: `opco` | `midco` | `holdco` | `topco` | `issuer` | `bidco` | `majority_holdco` | `minority_holdco`. This is the corporate entity that issued the debt — the same entity must appear in Tab 7 (Corporate Entities).
+- **Entity Name (S)**: must exactly match one of the entity names in Tab 7.
+- **Ownership % (T)**: the economic share that the consolidating group has in this entity (0–100). Use 100 for wholly-owned. For `majority_holdco` / `minority_holdco` rows the ownership should always be < 100.
+- **Structural Seniority (U)**: 1 = closest to the cashflows. Higher numbers = structurally further away (each layer of HoldCo adds 1).
+- **Ratio Consolidation Level (V)**: `opco_standalone` (ratios tested at OpCo only) | `consolidated` (full consolidation with no ownership adjustment — only for wholly-owned groups) | `proportional_consolidated` (applies ownership % to both cashflows AND debt — this is the correct treatment for partial-ownership structures).
+- **Intercompany Lender (W)**: populated only for internal loans (e.g. HoldCo lending to OpCo). Leave blank for external debt. Intercompany and shareholder loans are automatically excluded from ranked claims.
+- **Subordination Agreement (X)**: Yes/No — is the instrument subject to a formal intercreditor or subordination deed?
+- **Cashflow Priority Rank (Y)**: 1 = first claim on cashflows; 2 = second claim, etc. **You can leave this blank** — the system auto-assigns it based on entity level + contractual subordination. If you enter a value manually, the system respects it. Shareholder loans and intercompany loans should always be blank (they are not ranked).
+
+**Why proportional consolidation matters:** if a portfolio company is 75%-owned, accounting-style full consolidation (100% of subsidiary EBITDA less minority interest) overstates EBITDA for credit purposes. Proportional consolidation multiplies BOTH the EBITDA AND the debt by 75% — giving the correct economic picture of what the lender is exposed to.
 
 ### Tab 3: Reserve Accounts
 
@@ -153,9 +179,22 @@ Where does the borrower's business activity take place? This drives the Country 
 
 The SPV and corporate structure. One row per entity in the ownership chain.
 
-**Key fields:**
-- **Type:** opco (operating company), bidco (acquisition vehicle), holdco (holding company), topco (top company), spv (special purpose vehicle), issuer, guarantor, servicer
-- **Ring-Fenced:** Is this entity ring-fenced from the rest of the group?
+**Key fields (columns A–F):**
+- **Type:** `opco` (operating company), `midco` (intermediate holding), `bidco` (acquisition vehicle), `holdco` (holding company), `topco` (top company), `spv` (special purpose vehicle), `issuer`, `guarantor`, `servicer`, `majority_holdco`, `minority_holdco`
+- **Parent Entity:** the parent by name (must reference another row in this tab, or blank for the ultimate parent)
+- **Jurisdiction:** ISO 2-letter country code
+- **Ring-Fenced:** is this entity ring-fenced from the rest of the group?
+- **Securitisation Boundary:** is the entity within the securitisation/financing ring-fence?
+
+**Ownership, control and consolidation (new in v8 — columns G–L):**
+- **Ownership % (G)**: the percentage owned by the parent entity (0–100). 100 if wholly-owned. For joint ventures or partial stakes, enter the actual stake (e.g. 50 for a 50/50 JV, 75 for a 75% controlled subsidiary).
+- **Ownership Type (H)**: `direct` (parent directly owns) | `indirect` (held via one or more intermediate entities) | `joint_venture`.
+- **Control Type (I)**: `full_control` (>50% with consolidation) | `significant_influence` (20–50%, equity method) | `passive` (<20%) | `joint_control`.
+- **Consolidation Method (J)**: `proportional` (apply ownership % to cashflows and debt — the correct method for credit ratios) | `equity_method` (investment carried at net asset value, no cashflow consolidation) | `not_consolidated` (off-balance-sheet) | `full` (only for 100%-owned entities where IFRS full consolidation is equivalent).
+- **Within Security Perimeter (K)**: Yes/No — is this entity inside the ring-fenced financing group (i.e. its cashflows and assets are captured by the lender's security)?
+- **Ratio Level (L)**: what level of credit ratios is calculated at this entity — `opco` | `midco` | `holdco` | `issuer` | `none`. Use `none` for entities that are not the point of ratio measurement.
+
+The combination of these fields drives the proportional consolidation engine. For a 75%-owned asset, you would have `ownership_pct = 75`, `control_type = full_control`, `consolidation_method = proportional`, `within_security_perimeter = Yes`, `ratio_level = opco`.
 
 ### Tab 8: Covenant Thresholds
 
@@ -172,6 +211,8 @@ Three-tier covenant configuration. One row per tested ratio.
 
 **Example for DSCR:** Direction = min, Lockup = 1.15, Trigger = 1.10, Default = 1.05
 **Example for Net Debt/EBITDA:** Direction = max, Lockup = 7.0, Trigger = 8.5, Default = 10.0
+
+**Ratio Level (new in v8 — column L):** which entity level the covenant is actually tested at. Values: `opco` | `midco` | `holdco` | `consolidated` (full, for wholly-owned groups) | `proportional_consolidated` (uses the proportional consolidation engine described in Tab 2 / Tab 7). For a typical PF deal this is `opco`. For a HoldCo-level covenant taken on a 75%-owned asset, use `proportional_consolidated` so the covenant is tested on the proportionally-consolidated numbers.
 
 ### Tab 9: KPI Targets
 
@@ -364,6 +405,10 @@ A **write-once** frozen capture of the deal position at the point of investment.
 **Group A — Structural position at onboarding:**
 These are the tail and renewal fields frozen at entry, so you can measure drift over time. If you've already filled in the live tail/renewal fields in Tab 1, copy the same values here (they will match at the point of origination but may diverge later).
 
+Group A also captures the distribution-gates framework frozen at entry (new in v8):
+- **Number of Distribution Gates**: integer count of `distribution_condition` rows from Tab 22 at origination (e.g. 11 if the deal had 3 ratio gates + 8 non-ratio gates).
+- **Distribution Gates Summary**: one-line narrative summary — e.g. "3 ratio gates + 8 non-ratio gates + stepped cash sweep". This is the snapshot-at-origination view; the live Tab 22 itself evolves if the deal is amended or restructured.
+
 **Group B — Financial metrics at onboarding:**
 Frozen origination ratios. These tell the retrospective story of how aggressively the deal was underwritten.
 - **Entry Leverage** — Net Debt / EBITDA at purchase
@@ -410,6 +455,57 @@ If the deal is later restructured, refinanced, or re-underwritten, the platform 
 3. Both rows remain in the database; the TopSheet page shows the current snapshot plus the count of historical snapshots
 
 **A superseded snapshot cannot be edited.** The database enforces this via a trigger. The error message guides you to create a new snapshot instead.
+
+### Tab 21: Obligations & Deliverables
+
+One row per obligation from the finance documentation. Drives the Deliverables Calendar (both the per-deal view and the portfolio calendar page) and the deliverables-ingestion engine.
+
+**How to complete:**
+1. **Obligation ID**: either a taxonomy ID from the 230-item register (e.g. `INFO-001`, `NOTIF-003`, `COV-015`) or a custom ID (e.g. `CUSTOM-001`). Use taxonomy IDs where possible so the system can group obligations across deals.
+2. **Obligation Name**: short title (e.g. "Annual financial statements", "Insurance certificate").
+3. **Applicable**: Yes/No — whether this obligation applies to this deal. Mark No for any template rows that don't apply.
+4. **Responsible Party**: `borrower` | `auditor` | `agent` | `adviser` | `insurer` — who actually has to deliver the item.
+5. **Frequency**: `annual` | `semi_annual` | `quarterly` | `monthly` | `event_driven`.
+6. **Business Days After Period End**: integer. For example, 90 = "90 business days after financial year end".
+7. **Business Day Jurisdictions**: comma-separated ISO codes (e.g. `GB` for a UK-only deal, `GB,US` for a cross-border deal that needs both calendars observed).
+8. **Business Day Convention**: `modified_following` (default — move forward unless it crosses a month, then backward) | `following` | `preceding` | `no_adjustment`.
+9. **Grace Period (Business Days)**: additional business days the borrower gets before the item becomes overdue (e.g. 10).
+10. **Severity if Missed**: `informational` | `potential_default` | `event_of_default`.
+11. **Phase**: `all` | `construction` | `operational` — some obligations only apply in certain phases.
+12. **Source Clause**: reference to the finance document clause (e.g. `CTA 18.5(a)(iv)`, `SFA Cl. 9.4`).
+13. **Notes**: free text for any nuances.
+
+**What happens at ingestion:** the system generates one deliverable per (obligation × reporting period) for the life of the deal, applies the business-day convention and jurisdiction calendar, and writes them into the deliverables table. The Calendar page then shows them grouped by due date with status (delivered / approaching / overdue) colour-coded.
+
+**Pre-seeded template:** the template ships with ~30 of the most common obligations already listed. Fill in the columns and set `Applicable = No` for anything that doesn't apply.
+
+### Tab 22: Distribution Conditions
+
+One row per **condition** that must be satisfied before cash can be distributed to equity. This captures the full lock-up / trigger-event / event-of-default regime from the finance documentation. Powers the Distribution Assessment engine — which reads this tab to determine, for any given period, whether distributions are allowed.
+
+**Minimum requirement:** at least one `distribution_condition` row. Covenant-based conditions must reference ratios that also exist in Tab 8.
+
+**How to complete:**
+1. **Condition ID**: sequential `DC-001`, `DC-002`, ... unique within the deal.
+2. **Condition Name**: short title (e.g. "Senior DSCR historic 12m", "DSRA fully funded", "No Event of Default outstanding").
+3. **Category**: `ratio` | `reserve` | `compliance` | `timing` | `structural` | `behavioural` | `cash_sweep` | `credit_support` | `rating` | `liquidity` | `regulatory` | `capex_funding` | `incurrence` | `revolving_facility`.
+4. **Consequence Tier**: what happens if the condition fails — `distribution_condition` (lock-up) | `trigger_event` (cash trap) | `cash_trap` | `remedial_plan` | `incurrence_test` | `event_of_default` | `sweep_mechanic`.
+5. **Ratio Name** (if category = ratio): `seniorDscr` | `llcr` | `ltv` | `icr` | `netDebtEbitda` | `debtYield` | `seniorRar` | `seniorIcr`. Null for non-ratio conditions.
+6. **Direction**: `min` or `max`. Null for non-ratio.
+7. **Threshold Value**: decimal threshold (e.g. 1.35, 0.70). Null for non-ratio.
+8. **Threshold Variant**: if the threshold varies over time — `pre_completion` | `post_completion` | `year_1` | `year_2_plus`, etc.
+9. **Lookback Period**: `historic_12m` | `projected_12m` | `projected_24m` | `spot` | `average`.
+10. **Test Frequency**: `semi_annual` | `quarterly` | `annual` | `each_distribution` | `event_driven`.
+11. **Remedy Available**: Yes/No.
+12. **Remedy Mechanism**: narrative (equity injection, reserve top-up, director's certificate, etc.).
+13. **Sweep %** (for cash_sweep only): 0–100.
+14. **Sweep Step Schedule** (for stepped sweeps): concise format like `Y1:25, Y2:50, Y3:75, Y4:100`.
+15. **Source Clause**: reference to the finance document clause.
+16. **Notes**: free text.
+
+**Relationship with Tab 1 Distribution Mechanics:** Tab 1 captures the *framework* (frequency, calculation basis, waterfall position, sweep before/after, trapped-cash mechanism, lock-up cure window, escalation regime). Tab 22 captures the individual *gates*. Both are needed — one without the other is incomplete.
+
+**Relationship with Tab 8:** ratio-based rows in Tab 22 should reference ratios that also appear in Tab 8 (Covenant Thresholds). The system cross-validates this at ingestion and warns if a Tab 22 ratio is not configured in Tab 8.
 
 ### Validation Tab
 

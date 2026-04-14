@@ -117,14 +117,15 @@ select {
   left: 0;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 10px;
   width: var(--sidebar-width);
   height: 100vh;
-  padding: 20px 12px;
+  padding: 12px 10px;
   border-right: 1px solid var(--line);
   background: rgba(7, 19, 31, 0.04);
   backdrop-filter: blur(20px);
   z-index: 20;
+  overflow-y: auto;
 }
 
 [data-theme="dark"] .sidebar {
@@ -135,16 +136,16 @@ select {
   display: flex;
   align-items: center;
   gap: 12px;
-  min-height: 56px;
+  min-height: 40px;
 }
 
 .sidebar-brand-mark {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 48px;
-  height: 48px;
-  border-radius: 16px;
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
   background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
   color: white;
   font-family: var(--font-ui);
@@ -172,10 +173,10 @@ select {
 
 .sidebar-viewer {
   display: grid;
-  gap: 6px;
-  padding: 10px;
+  gap: 4px;
+  padding: 6px;
   border: 1px solid var(--line);
-  border-radius: 20px;
+  border-radius: 12px;
   background: var(--panel);
 }
 
@@ -191,11 +192,12 @@ select {
 .sidebar-viewer-select {
   width: 100%;
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 10px;
   background: var(--surface);
   color: var(--ink);
   font: inherit;
-  padding: 10px 12px;
+  font-size: 0.78rem;
+  padding: 5px 8px;
 }
 
 .sidebar-viewer-meta {
@@ -207,22 +209,23 @@ select {
 
 .sidebar-nav {
   display: grid;
-  gap: 6px;
+  gap: 2px;
 }
 
 .sidebar-nav-bottom {
   margin-top: auto;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
 }
 
 .sidebar-link {
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 8px;
-  gap: 12px;
-  min-height: 48px;
-  padding: 10px;
-  border-radius: 20px;
+  gap: 10px;
+  min-height: 30px;
+  padding: 5px 8px;
+  border-radius: 10px;
   color: var(--ink-soft);
   border: 1px solid transparent;
   background: transparent;
@@ -289,20 +292,20 @@ select {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 20px;
+  height: 20px;
   flex-shrink: 0;
 }
 
 .sidebar-icon {
-  width: 24px;
-  height: 24px;
+  width: 18px;
+  height: 18px;
 }
 
 .sidebar-label {
   display: inline;
   font-family: var(--font-ui);
-  font-size: 0.95rem;
+  font-size: 0.82rem;
   font-weight: 600;
   white-space: nowrap;
 }

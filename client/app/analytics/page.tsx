@@ -1146,6 +1146,89 @@ The funding is broken down by source:
 
 **FX snapshot endpoint:** \`GET /api/fx/snapshot?reporting_currency=GBP\` returns the EUR-base rates plus the cross-rates to the chosen reporting currency, the effective date, and the source label.`,
   },
+  {
+    id: "capital-structure-engine",
+    name: "Capital Structure Taxonomy & Cashflow Priority Ranking",
+    category: "Data & Models",
+    summary: "Classifies every debt instrument by entity level (OpCo/MidCo/HoldCo), auto-assigns cashflow priority rank, and handles proportional consolidation for partial-ownership structures.",
+    detail: `Introduced in TopSheet v8 to handle multi-level debt structures and partial ownership correctly. Implemented in \`server/capital_structure_engine.py\`.
+
+**Taxonomy captured per instrument (Tab 2):**
+- **Entity Level** — opco | midco | holdco | topco | issuer | bidco | majority_holdco | minority_holdco
+- **Ownership %** — economic share of the entity at this level (100 if wholly-owned)
+- **Structural Seniority** — 1 = closest to cashflows; higher = further away
+- **Ratio Consolidation Level** — opco_standalone | consolidated | proportional_consolidated
+- **Intercompany Lender** — populated when the loan is internal (non-external debt)
+- **Subordination Agreement** — formal intercreditor / subordination documented?
+- **Cashflow Priority Rank** — 1 = first claim. Blank for shareholder / intercompany loans.
+
+**Auto-assignment algorithm (\`assign_cashflow_priority_ranks\`):**
+- Walk levels in order \`opco → midco → holdco → majority_holdco → minority_holdco\`.
+- The first level with external debt anchors **rank 1**.
+- Each subsequent level with external debt bumps the base rank by +1 (structural subordination).
+- Contractually subordinated instruments (mezzanine, second lien, subordinated, junior enforcement class) get +1 within their level.
+- \`minority_holdco\` gets an extra +1 iff OpCo debt exists.
+- Shareholder loans (\`shl\`, \`shareholder_loan\`) and intercompany loans stay unranked.
+- Manually entered ranks are respected (never overwritten).
+
+**Proportional consolidation (\`proportional_consolidation\`):**
+When \`ratio_consolidation_level = proportional_consolidated\`, apply the entity's ownership % to BOTH cashflows AND debt:
+\`\`\`
+Consolidated EBITDA = Σ (ownership_pct_i × EBITDA_i)
+Consolidated Debt   = Σ (ownership_pct_i × Debt_i)
+Consolidated CFADS  = Σ (ownership_pct_i × CFADS_i)
+Consolidated DS     = Σ (ownership_pct_i × DS_i)
+\`\`\`
+**Critical:** this is NOT IFRS full consolidation (which fully consolidates 100% of subsidiary figures and then deducts minority interest). The accounting approach overstates EBITDA for credit purposes. Proportional consolidation gives the correct economic picture.
+
+**Cross-validation (\`validate_capital_structure\`):**
+- Instruments without \`entity_level\` → warning
+- Instruments at majority/minority_holdco with \`ownership_pct = 100\` → warning (expected < 100)
+- References to entities not in Tab 7 → warning
+- Pari-passu group with inconsistent ranks → error
+- HoldCo-level instrument at rank 1 while OpCo-level external debt exists → error`,
+  },
+  {
+    id: "deliverables-calendar-engine",
+    name: "Deliverables Calendar & Business Day Engine",
+    category: "Data & Display",
+    summary: "Computes due dates for every deal obligation using the deal's reporting schedule, business-day conventions, grace periods, and jurisdiction public-holiday calendars.",
+    detail: `Powers the Calendar page (\`/calendar\`) and per-deal deliverables block. Sourced from Tab 21 (Obligations & Deliverables) of the TopSheet.
+
+**Per-obligation inputs:**
+- Frequency (annual / semi_annual / quarterly / monthly / event_driven)
+- Business Days After Period End (e.g. 90)
+- Business Day Jurisdictions (ISO codes, e.g. "GB,US")
+- Business Day Convention (modified_following | following | preceding | no_adjustment)
+- Grace Period (business days)
+- Severity on miss (informational | potential_default | event_of_default)
+
+**Business-day maths:**
+- \`_is_business_day(date, jurisdictions)\` — skip weekends + any date in \`public_holidays\` for any of the jurisdictions.
+- \`_add_business_days(start, n, jurisdictions)\` — add N business days.
+- \`_apply_convention(date, convention, jurisdictions)\` — adjust a date landing on a non-business day:
+  - **modified_following** — move forward, but if that crosses a month boundary, move backward instead
+  - **following** — move forward to next business day
+  - **preceding** — move backward to previous business day
+  - **no_adjustment** — use the calendar date as-is
+
+**Public-holiday coverage:** \`public_holidays\` table is seeded with 483 holidays across 7 jurisdictions (GB, US, FR, DE, NL, IT, ES) for 2024–2030.
+
+**Per-deliverable output:**
+- Due date (after business-day maths + convention)
+- Grace expiry (due date + grace_period_business_days)
+- Status: \`delivered\` | \`not_yet_due\` | \`approaching\` (within 30 days) | \`overdue\` | \`late_within_grace\`
+
+**Endpoints:**
+- \`GET /api/deals/{slug}/deliverables-calendar\` — per-deal list
+- \`GET /api/portfolio/deliverables-calendar\` — cross-portfolio list, respects same filters as the dashboard
+
+**Calendar page rendering:**
+- Monthly grid with weekend shading and today highlighted
+- Deliverables shown as coloured dots per day; click a day to expand the list
+- Jurisdiction public holidays shown as greyed cells
+- List view available as a toggle, grouped by month with overdue items pinned to the top`,
+  },
 ];
 
 /* ── Categories ──────────────────────────────────────────────────── */

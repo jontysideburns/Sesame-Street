@@ -42,17 +42,43 @@ docker exec docker-postgres-1 psql -U sesame -d sesamestreet -f //migrations//mi
 ## What's Been Built
 
 ### Core Platform
-- 7 demo deals (all data centre sector), full seed data
+- 12 demo deals across multiple sectors and currencies:
+  - **Data centre (USD):** Aurora Prime, Granite Switchyard, Meridian Edge (EUR),
+    Ion Harbor, Summit Loop, Cobalt Grid, Apollo Edge
+  - **Infrastructure (GBP/EUR):** North Sea OWF, Wigmore Solar, M6 Toll,
+    Getlink Eurotunnel, Gatwick Airport
+  - **Real estate (EUR):** Beta PRS, Delta PRS, Project Alpha Port
 - Deal pages with structure, covenants, financials, risk register
 - Document intake pipeline with proposal/commit workflow
 - Activity events, notifications, to-dos (database-persisted)
 
-### Performance Grade Engine (`server/grade_engine.py`)
-- DSCR + collateral headroom assessment with 4-grade scale
-- Trend detection (improving/flat/deteriorating/deteriorating_rapidly)
-- Auto-watchlist flagging (grade 3+ or deteriorating trend)
-- Alert generation for grade changes and trend warnings
-- Auto-compute hook in `commit_document_proposal()` on financial period commits
+### Engines (all in `server/`)
+- **Performance Grade Engine** (`grade_engine.py`) — DSCR + collateral headroom
+  assessment with 4-grade scale; trend detection; auto-watchlist flagging;
+  alert generation. Auto-compute hook in `commit_document_proposal()` on
+  financial period commits.
+- **Plan Variance Trend Engine v5** (in `main.py`, `detect_trends`) — headroom
+  erosion vs management case on one cash-cover ratio + one collateral ratio
+  per deal; 7-band classification from rapid improvement to rapid deterioration.
+- **Covenant Testing Engine** — runs every covenant in `covenant_thresholds`
+  against actuals, writes tiered test results (performing/lockup/trigger/default)
+  into `covenant_tests`.
+- **Distribution Assessment Engine** (`assess_distribution`, data-driven) —
+  reads `deal_distribution_conditions`, evaluates each gate, returns blocker
+  count + status (allowed / review_required / restricted / blocked).
+- **Variance Engine** — actuals vs management case, direction + materiality.
+- **Three-Case Comparison Engine** — actuals vs management / lender /
+  combined-downside simultaneously.
+- **Ratio Reconciliation Engine** — borrower-reported ratios vs platform-computed.
+- **Risk Narrative Generator** (`generate_risk_narrative`) — template-driven
+  deterministic synthesis from structured risk register fields.
+- **Deliverables Calendar with Business Day Engine** — modified-following
+  convention, 483 holidays × 7 jurisdictions, per-deal and portfolio endpoints.
+- **Reserve Account History Engine** — time-series of required / actual /
+  expected / shortfall / variance with top-up alerts.
+- **Capital Structure Engine v8** (`capital_structure_engine.py`, see below).
+- **FX Engine** (in `main.py`) — EUR-base cross-rates, per-deal native
+  currency, portfolio-level conversion at spot.
 
 ### JPS (Portfolio Summary) Page
 - **Portfolio summary dashboard** above deal table with Recharts charts
@@ -106,9 +132,39 @@ docker exec docker-postgres-1 psql -U sesame -d sesamestreet -f //migrations//mi
 - Capital structure instruments seeded for all 7 deals with margin_bps
 - WA Spread computed from exposure-weighted instrument margins
 
+### Feeds — Market TopSheet (`/feeds`)
+- Centralised market-data feeds consumed by the platform API
+- Live FX reference rate table (13 currencies, ECB-seed snapshot)
+- Placeholder cards for planned feeds: risk-free rates (SONIA / €STR / SOFR),
+  swap curves, credit spreads (iTraxx / CDX), government yields, inflation
+  indices, commodities, equity & property indices, carbon / ESG
+- Sidebar item between Calendar and Portfolio
+
+### TopSheet Excel template (v8, 26 tabs)
+- `docs/topsheet-data-template-v8.xlsx`
+- Covers every field the platform stores per deal
+- **Tab 1 Deal Identity** — includes Distribution Mechanics block (v8)
+- **Tab 2 Capital Structure** — 25 columns incl. capital-structure taxonomy
+  (entity_level, ownership_pct, structural_seniority, ratio_consolidation_level,
+  cashflow_priority_rank, etc.)
+- **Tab 7 Corporate Entities** — 12 columns incl. ownership / control /
+  consolidation fields (v8)
+- **Tab 8 Covenant Thresholds** — incl. ratio_level (v8)
+- **Tab 20 Onboarding Snapshot** — write-once, frozen at investment
+- **Tab 21 Obligations & Deliverables** — drives the Deliverables Calendar
+- **Tab 22 Distribution Conditions** — full lock-up / trigger / EOD register
+- Generator: `scripts/create-topsheet-template.py`
+- Importer: `server/topsheet_importer.py`
+- Instructions: `docs/topsheet-template-instructions.md`
+- Full field spec: `docs/topsheet-complete-specification.md`
+
 ### Deal TopSheet Visualisation
 - Full-page single-scroll view at `/deals/[slug]/topsheet`
-- 10 sections: Identity, Capital Structure, Counterparties, Reserves, KPIs, Performance, Risk, Development, Distribution, Forecasts
+- Sections: Identity, Onboarding Snapshot, Capital Structure, Counterparties,
+  Reserves, KPIs, Performance, Tail & Renewal, Risk, Development,
+  Distribution Mechanics + Conditions register, Forecasts
+- Sourced from the 26-tab v8 Excel template (see TopSheet Excel template
+  section below)
 - Accessed via "View Full TopSheet" button on deal page
 
 ### Capital Structure Taxonomy (v8)
