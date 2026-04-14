@@ -1062,5 +1062,64 @@ INSERT INTO fx_rates (base_currency, quote_currency, rate, effective_date, sourc
 ON CONFLICT (base_currency, quote_currency, effective_date) DO NOTHING;
 
 -- ═══════════════════════════════════════════════════════════════════════════════
+-- TopSheet v8 — Distribution Mechanics, Capital Structure Taxonomy,
+-- Cashflow Priority Ranking
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+-- Tab 1 new fields: Distribution Mechanics block on deals
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS distribution_frequency VARCHAR(20);
+  -- semi_annual | quarterly | annual
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS distribution_calculation_basis TEXT;
+  -- cashflow_available_for_distribution | net_cashflow | free_cashflow_after_sweep | ...
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS distribution_waterfall_position INTEGER;
+  -- e.g. 12 = 12th priority in the cashflow waterfall
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS sweep_before_distribution BOOLEAN;
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS sweep_in_dscr BOOLEAN;
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS trapped_cash_mechanism VARCHAR(40);
+  -- retained_in_proceeds_account | held_in_lockup_account | swept_to_debt |
+  -- released_after_cure | swept_then_released
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS trapped_cash_release TEXT;
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS lockup_cure_window_days INTEGER;
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS lockup_escalation_periods INTEGER;
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS lockup_escalation_consequence TEXT;
+
+-- Tab 2 new columns on capital_structure_instruments
+ALTER TABLE capital_structure_instruments ADD COLUMN IF NOT EXISTS entity_level VARCHAR(20);
+  -- opco | midco | holdco | topco | issuer | bidco | majority_holdco | minority_holdco
+ALTER TABLE capital_structure_instruments ADD COLUMN IF NOT EXISTS entity_name TEXT;
+  -- FK by name to corporate_entities.entity_name for the same deal
+ALTER TABLE capital_structure_instruments ADD COLUMN IF NOT EXISTS ownership_pct DECIMAL(5,2);
+  -- Economic ownership at this level (0-100); 100 if wholly-owned
+ALTER TABLE capital_structure_instruments ADD COLUMN IF NOT EXISTS structural_seniority INTEGER;
+  -- 1 = closest to cashflows; higher = further away
+ALTER TABLE capital_structure_instruments ADD COLUMN IF NOT EXISTS ratio_consolidation_level VARCHAR(30);
+  -- opco_standalone | consolidated | proportional_consolidated
+ALTER TABLE capital_structure_instruments ADD COLUMN IF NOT EXISTS intercompany_lender TEXT;
+  -- If intercompany: lending entity. NULL for external debt.
+ALTER TABLE capital_structure_instruments ADD COLUMN IF NOT EXISTS subordination_agreement BOOLEAN;
+ALTER TABLE capital_structure_instruments ADD COLUMN IF NOT EXISTS cashflow_priority_rank INTEGER;
+  -- 1 = first claim on cashflows; NULL for shareholder loans / intercompany loans
+
+-- Tab 7 new columns on corporate_entities
+ALTER TABLE corporate_entities ADD COLUMN IF NOT EXISTS ownership_pct DECIMAL(5,2);
+ALTER TABLE corporate_entities ADD COLUMN IF NOT EXISTS ownership_type VARCHAR(20);
+  -- direct | indirect | joint_venture
+ALTER TABLE corporate_entities ADD COLUMN IF NOT EXISTS control_type VARCHAR(25);
+  -- full_control | significant_influence | passive | joint_control
+ALTER TABLE corporate_entities ADD COLUMN IF NOT EXISTS consolidation_method VARCHAR(25);
+  -- proportional | equity_method | not_consolidated | full
+ALTER TABLE corporate_entities ADD COLUMN IF NOT EXISTS within_security_perimeter BOOLEAN;
+ALTER TABLE corporate_entities ADD COLUMN IF NOT EXISTS ratio_level VARCHAR(20);
+  -- opco | midco | holdco | issuer | none
+
+-- Tab 8 new column on covenant_thresholds
+ALTER TABLE covenant_thresholds ADD COLUMN IF NOT EXISTS ratio_level VARCHAR(30);
+  -- opco | midco | holdco | consolidated | proportional_consolidated
+
+-- Tab 20 Onboarding Snapshot — distribution gates count + summary
+ALTER TABLE deal_onboarding_snapshots ADD COLUMN IF NOT EXISTS distribution_gates_count INTEGER;
+ALTER TABLE deal_onboarding_snapshots ADD COLUMN IF NOT EXISTS distribution_gates_summary TEXT;
+
+-- ═══════════════════════════════════════════════════════════════════════════════
 -- End of migrations — all statements above are idempotent
 -- ═══════════════════════════════════════════════════════════════════════════════

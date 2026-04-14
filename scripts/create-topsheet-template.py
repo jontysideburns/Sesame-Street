@@ -99,7 +99,7 @@ ws.column_dimensions["C"].width = 50
 
 # Version header
 ws.merge_cells("A1:C1")
-ws["A1"] = "TOPSHEET DATA TEMPLATE v1.0"
+ws["A1"] = "TOPSHEET DATA TEMPLATE v8.0"
 ws["A1"].font = version_font
 ws.merge_cells("A2:C2")
 ws["A2"] = "Fill in yellow cells. Required fields marked with *. Grey cells are computed by the system."
@@ -117,7 +117,9 @@ dv_sector = DataValidation(type="list", formula1='"Wind Farm,Data Center,Port,Ai
 dv_phase = DataValidation(type="list", formula1='"construction,ramp_up,operational,refinancing"')
 dv_region = DataValidation(type="list", formula1='"EMEA,North America,APAC,LATAM,Middle East Africa"')
 dv_yesno = DataValidation(type="list", formula1='"Yes,No"')
-dv_ranking = DataValidation(type="list", formula1='"Senior Secured,Senior Unsecured,Second Lien,Mezzanine,Subordinated,Holdco,Majority Holdco,Minority Holdco"')
+dv_ranking = DataValidation(type="list", formula1='"Senior Secured,Senior Secured HoldCo,Senior Secured MajorityHoldCo,Senior Secured MinorityHoldCo,Senior Unsecured,Second Lien,Mezzanine,Subordinated,Subordinated HoldCo,Holdco,Majority Holdco,Minority Holdco,Shareholder Loan"')
+dv_dist_freq = DataValidation(type="list", formula1='"semi_annual,quarterly,annual"')
+dv_trapped_cash = DataValidation(type="list", formula1='"retained_in_proceeds_account,held_in_lockup_account,swept_to_debt,released_after_cure,swept_then_released"')
 dv_risk_level = DataValidation(type="list", formula1='"very_low,low,moderate,high,very_high"')
 
 r = 4
@@ -164,7 +166,9 @@ add_field(ws, r, "Reporting Periodicity", guidance="semi_annual, quarterly, annu
 add_field(ws, r, "Governing Law", guidance="English, New York, etc."); r += 1
 
 r += 1; make_section(ws, r, 3, "SECURITY & RANKING"); r += 1
-add_field(ws, r, "Security Ranking *", True, "Select from dropdown", dv_ranking); r += 1
+add_field(ws, r, "Security Ranking *", True,
+          "Senior Secured | Senior Secured HoldCo | Senior Secured MajorityHoldCo | Senior Secured MinorityHoldCo | Senior Unsecured | Second Lien | Mezzanine | Subordinated | Subordinated HoldCo | Holdco | Shareholder Loan",
+          dv_ranking); r += 1
 add_field(ws, r, "Security Type", guidance="Description of security package"); r += 1
 add_field(ws, r, "Security Summary", guidance="Narrative"); r += 1
 
@@ -222,6 +226,18 @@ add_field(ws, r, "Equity Cure Regime", guidance="Max frequency, amount limits, m
 add_field(ws, r, "Model Version", guidance="e.g. v3.2"); r += 1
 add_field(ws, r, "Model Date", guidance="YYYY-MM-DD"); r += 1
 
+r += 1; make_section(ws, r, 3, "DISTRIBUTION MECHANICS"); r += 1
+add_field(ws, r, "Distribution Frequency", guidance="semi_annual, quarterly, annual", validation=dv_dist_freq); r += 1
+add_field(ws, r, "Distribution Calculation Basis", guidance="e.g. cashflow_available_for_distribution, net_cashflow, free_cashflow_after_sweep"); r += 1
+add_field(ws, r, "Distribution Waterfall Position", guidance="Integer: position in cashflow waterfall (e.g. 12 = 12th priority)"); r += 1
+add_field(ws, r, "Sweep Before Distribution", guidance="Yes/No \u2014 is a mandatory cash sweep applied before distribution test?", validation=dv_yesno); r += 1
+add_field(ws, r, "Sweep Included in DSCR", guidance="Yes/No \u2014 is the cash sweep included in the DSCR calculation?", validation=dv_yesno); r += 1
+add_field(ws, r, "Trapped Cash Mechanism", guidance="retained_in_proceeds_account | held_in_lockup_account | swept_to_debt | released_after_cure | swept_then_released", validation=dv_trapped_cash); r += 1
+add_field(ws, r, "Trapped Cash Release Conditions", guidance="Narrative: e.g. released after 2 successive Calculation Dates where all conditions satisfied"); r += 1
+add_field(ws, r, "Lock-Up Cure Window (days)", guidance="Integer: days after Calculation Date to cure (e.g. 90, 45)"); r += 1
+add_field(ws, r, "Lock-Up Escalation Periods", guidance="Integer: consecutive lock-up periods before escalation (e.g. 3)"); r += 1
+add_field(ws, r, "Lock-Up Escalation Consequence", guidance="excess_cashflow_sweep | mandatory_prepayment | creditor_step_in"); r += 1
+
 r += 1; make_section(ws, r, 3, "MONITORING"); r += 1
 add_field(ws, r, "Assigned HAM", guidance="Human Asset Manager"); r += 1
 add_field(ws, r, "Assigned PM", guidance="Portfolio Manager"); r += 1
@@ -235,25 +251,65 @@ add_field(ws, r, "Headroom %", computed=True, guidance="Computed: (actual-defaul
 # TAB 2: Capital Structure
 # ═══════════════════════════════════════════════════════════════════
 ws2 = wb.create_sheet("2. Capital Structure")
-ws2.merge_cells("A1:Q1")
-ws2["A1"] = "CAPITAL STRUCTURE INSTRUMENTS — One row per debt instrument"
+ws2.merge_cells("A1:Y1")
+ws2["A1"] = "CAPITAL STRUCTURE INSTRUMENTS — One row per debt instrument. Cols R\u2013Y capture the entity level and priority-of-claim ranking used by the consolidation and ratio engines."
 ws2["A1"].font = version_font
+ws2["A1"].alignment = Alignment(wrap_text=True)
 
 headers_cs = ["Instrument Name", "Type", "Format", "Security Ranking", "Pari-Passu Group",
               "Committed Amount", "Drawn Amount", "Currency", "Margin (bps)", "Base Rate",
               "Interest Type", "Maturity Date", "Repayment Type", "Our Holding Amount",
-              "Our Holding %", "DSRA Months", "Status"]
+              "Our Holding %", "DSRA Months", "Status",
+              # Capital-structure taxonomy (v8)
+              "Entity Level", "Entity Name", "Ownership %", "Structural Seniority",
+              "Ratio Consolidation Level", "Intercompany Lender", "Subordination Agreement",
+              "Cashflow Priority Rank"]
 add_table_headers(ws2, 2, headers_cs)
 
-dv_inst_type = DataValidation(type="list", formula1='"senior_term,senior_rcf,capex_facility,mezzanine,shl,bond,note,frn,private_placement"')
+# Row 3: guidance strip so users understand the v8 columns at a glance
+guidance_cs = [
+    "", "", "", "", "",
+    "", "", "", "", "",
+    "", "", "", "", "",
+    "", "",
+    "opco | midco | holdco | topco | issuer | bidco | majority_holdco | minority_holdco",
+    "Entity name from Tab 7",
+    "Economic ownership at this level (0\u2013100). 100 if wholly-owned.",
+    "Integer: 1 = closest to cashflows. Higher = further away.",
+    "opco_standalone | consolidated | proportional_consolidated",
+    "If intercompany loan: lending entity name. Blank for external debt.",
+    "Yes/No \u2014 subject to formal intercreditor/subordination agreement?",
+    "Priority of claim: 1 = first claim. Blank for shareholder loans / intercompany."
+]
+for i, g in enumerate(guidance_cs, 1):
+    if g:
+        cell = ws2.cell(row=3, column=i, value=g)
+        cell.font = note_font
+        cell.fill = PatternFill("solid", fgColor="F5F5F0")
+        cell.border = border
+        cell.alignment = Alignment(wrap_text=True, vertical="top")
+ws2.row_dimensions[3].height = 45
+
+dv_inst_type = DataValidation(type="list", formula1='"senior_term,senior_rcf,capex_facility,mezzanine,shl,bond,note,frn,private_placement,intercompany"')
 dv_format = DataValidation(type="list", formula1='"loan,bond,note,frn,il_bond,private_placement,convertible"')
 dv_int_type = DataValidation(type="list", formula1='"fixed,floating,index_linked,hybrid"')
 dv_repay = DataValidation(type="list", formula1='"bullet,amortising,sculpted,cash_sweep"')
 dv_status = DataValidation(type="list", formula1='"active,repaid,cancelled,restructured"')
+dv_entity_level = DataValidation(type="list", formula1='"opco,midco,holdco,topco,issuer,bidco,majority_holdco,minority_holdco"')
+dv_ratio_consol = DataValidation(type="list", formula1='"opco_standalone,consolidated,proportional_consolidated"')
 
-add_table_rows(ws2, 3, 8, len(headers_cs), {2: dv_inst_type, 3: dv_format, 11: dv_int_type, 13: dv_repay, 17: dv_status})
+# Data rows now start at row 4 (row 3 is guidance strip)
+add_table_rows(ws2, 4, 8, len(headers_cs), {
+    2: dv_inst_type, 3: dv_format, 11: dv_int_type, 13: dv_repay, 17: dv_status,
+    18: dv_entity_level, 22: dv_ratio_consol, 24: dv_yesno,
+})
+cs_widths = {
+    18: 18, 19: 22, 20: 12, 21: 14, 22: 28, 23: 22, 24: 12, 25: 14,
+}
 for c in range(1, len(headers_cs) + 1):
-    ws2.column_dimensions[get_column_letter(c)].width = max(14, len(headers_cs[c-1]) + 2)
+    width = cs_widths.get(c, max(14, len(headers_cs[c-1]) + 2))
+    ws2.column_dimensions[get_column_letter(c)].width = width
+ws2.freeze_panes = "A4"
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -336,40 +392,91 @@ for c in range(1, len(headers_js) + 1):
 # TAB 7: Corporate Entities
 # ═══════════════════════════════════════════════════════════════════
 ws7 = wb.create_sheet("7. Corporate Entities")
-ws7.merge_cells("A1:F1")
-ws7["A1"] = "CORPORATE ENTITY STRUCTURE"
+ws7.merge_cells("A1:L1")
+ws7["A1"] = "CORPORATE ENTITY STRUCTURE — One row per entity in the group. Columns G\u2013L capture ownership, control and consolidation treatment used by the proportional consolidation engine."
 ws7["A1"].font = version_font
+ws7["A1"].alignment = Alignment(wrap_text=True)
 
-headers_ce = ["Entity Name", "Type", "Parent Entity", "Jurisdiction", "Ring-Fenced", "Securitisation Boundary"]
+headers_ce = ["Entity Name", "Type", "Parent Entity", "Jurisdiction", "Ring-Fenced", "Securitisation Boundary",
+              # v8 additions
+              "Ownership %", "Ownership Type", "Control Type", "Consolidation Method",
+              "Within Security Perimeter", "Ratio Level"]
 add_table_headers(ws7, 2, headers_ce)
 
-dv_ent_type = DataValidation(type="list", formula1='"opco,bidco,holdco,topco,spv,issuer,guarantor,servicer"')
-add_table_rows(ws7, 3, 6, len(headers_ce), {2: dv_ent_type, 5: dv_yesno, 6: dv_yesno})
+guidance_ce = [
+    "", "", "", "", "", "",
+    "% owned by parent entity (0\u2013100). 100 if wholly-owned.",
+    "direct | indirect | joint_venture",
+    "full_control (>50%) | significant_influence (20\u201350%) | passive (<20%) | joint_control",
+    "proportional | equity_method | not_consolidated | full",
+    "Yes/No \u2014 is this entity within the ring-fenced financing group?",
+    "opco | midco | holdco | issuer | none",
+]
+for i, g in enumerate(guidance_ce, 1):
+    if g:
+        cell = ws7.cell(row=3, column=i, value=g)
+        cell.font = note_font
+        cell.fill = PatternFill("solid", fgColor="F5F5F0")
+        cell.border = border
+        cell.alignment = Alignment(wrap_text=True, vertical="top")
+ws7.row_dimensions[3].height = 50
+
+dv_ent_type = DataValidation(type="list", formula1='"opco,bidco,holdco,topco,midco,spv,issuer,guarantor,servicer,majority_holdco,minority_holdco"')
+dv_own_type = DataValidation(type="list", formula1='"direct,indirect,joint_venture"')
+dv_ctrl_type = DataValidation(type="list", formula1='"full_control,significant_influence,passive,joint_control"')
+dv_consol = DataValidation(type="list", formula1='"proportional,equity_method,not_consolidated,full"')
+dv_ratio_level = DataValidation(type="list", formula1='"opco,midco,holdco,issuer,none"')
+
+add_table_rows(ws7, 4, 6, len(headers_ce), {
+    2: dv_ent_type, 5: dv_yesno, 6: dv_yesno,
+    8: dv_own_type, 9: dv_ctrl_type, 10: dv_consol, 11: dv_yesno, 12: dv_ratio_level,
+})
 for c in range(1, len(headers_ce) + 1):
-    ws7.column_dimensions[get_column_letter(c)].width = 22
+    ws7.column_dimensions[get_column_letter(c)].width = max(18, len(headers_ce[c-1]) + 2)
+ws7.freeze_panes = "A4"
 
 
 # ═══════════════════════════════════════════════════════════════════
 # TAB 8: Covenant Thresholds
 # ═══════════════════════════════════════════════════════════════════
 ws8 = wb.create_sheet("8. Covenant Thresholds")
-ws8.merge_cells("A1:K1")
-ws8["A1"] = "COVENANT THRESHOLD CONFIGURATION — Three-tier framework per ratio"
+ws8.merge_cells("A1:L1")
+ws8["A1"] = "COVENANT THRESHOLD CONFIGURATION \u2014 Three-tier framework per ratio. Column L records which entity level the covenant is tested at (needed for multi-level structures)."
 ws8["A1"].font = version_font
+ws8["A1"].alignment = Alignment(wrap_text=True)
 
 headers_ct = ["Covenant Name", "Ratio Name", "Category", "Test Type", "Direction",
               "Test Frequency", "Enforcement Class", "Lockup Level", "Trigger Level",
-              "Default Level", "Equity Cure Available"]
+              "Default Level", "Equity Cure Available",
+              "Ratio Level"]
 add_table_headers(ws8, 2, headers_ct)
+
+guidance_ct = [
+    "", "", "", "", "", "", "", "", "", "", "",
+    "opco | midco | holdco | consolidated | proportional_consolidated",
+]
+for i, g in enumerate(guidance_ct, 1):
+    if g:
+        cell = ws8.cell(row=3, column=i, value=g)
+        cell.font = note_font
+        cell.fill = PatternFill("solid", fgColor="F5F5F0")
+        cell.border = border
+        cell.alignment = Alignment(wrap_text=True, vertical="top")
+ws8.row_dimensions[3].height = 35
 
 dv_cov_cat = DataValidation(type="list", formula1='"cash_flow_cover,collateral_value,incurrence,distribution,financial_maintenance"')
 dv_test_type = DataValidation(type="list", formula1='"hard_covenant,distribution_condition,trigger,default"')
 dv_direction = DataValidation(type="list", formula1='"min,max"')
 dv_freq = DataValidation(type="list", formula1='"quarterly,semi_annual,annual"')
+dv_cov_ratio_level = DataValidation(type="list", formula1='"opco,midco,holdco,consolidated,proportional_consolidated"')
 
-add_table_rows(ws8, 3, 6, len(headers_ct), {3: dv_cov_cat, 4: dv_test_type, 5: dv_direction, 6: dv_freq, 11: dv_yesno})
+add_table_rows(ws8, 4, 6, len(headers_ct), {
+    3: dv_cov_cat, 4: dv_test_type, 5: dv_direction, 6: dv_freq,
+    11: dv_yesno, 12: dv_cov_ratio_level,
+})
 for c in range(1, len(headers_ct) + 1):
     ws8.column_dimensions[get_column_letter(c)].width = max(14, len(headers_ct[c-1]) + 2)
+ws8.freeze_panes = "A4"
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -1002,6 +1109,8 @@ add_field(ws_ob, r, "Renewal Profile at Onboarding", guidance="Same values as ma
 add_field(ws_ob, r, "Debt Repayment From Renewal % at Onboarding", guidance="0-100"); r += 1
 add_field(ws_ob, r, "Revenue Risk Code at Onboarding", guidance="Frozen P-V-D code (e.g. P3-V5-D5)"); r += 1
 add_field(ws_ob, r, "Concession Years Remaining at Onboarding", guidance="Years remaining at investment date"); r += 1
+add_field(ws_ob, r, "Number of Distribution Gates", guidance="Integer: count of distribution_condition rows in Tab 22"); r += 1
+add_field(ws_ob, r, "Distribution Gates Summary", guidance="One-line summary: e.g. 3 ratio gates + 8 non-ratio gates + stepped cash sweep"); r += 1
 
 # Group B
 r += 1; make_section(ws_ob, r, 3, "B. FINANCIAL METRICS AT ONBOARDING"); r += 1
@@ -1274,6 +1383,6 @@ ws13.cell(row=next_row, column=3).border = border
 
 # Save
 import os
-out = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs", "topsheet-data-template-v7.xlsx")
+out = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs", "topsheet-data-template-v8.xlsx")
 wb.save(out)
 print(f"Saved to {out}")

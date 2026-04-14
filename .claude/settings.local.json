@@ -177,7 +177,9 @@
       "Bash(curl -s \"http://localhost:4000/api/portfolio?reporting_currency=GBP\")",
       "Bash(python -c \"import sys, json; d=json.load\\(sys.stdin\\); print\\('reportingCurrency:', d.get\\('reportingCurrency'\\)\\); print\\('totalExposure:', d['summary']['totalExposure']\\); print\\('first 3 deals:'\\); [print\\(' ',x['dealName'], 'native:', x.get\\('nativeExposure'\\), x.get\\('nativeCurrency'\\), '/ converted:', x['exposure']\\) for x in d['deals'][:3]]\")",
       "Bash(curl -s \"http://localhost:4000/api/portfolio?reporting_currency=USD\")",
-      "Bash(curl -s \"http://localhost:4000/api/portfolio?reporting_currency=EUR\")"
+      "Bash(curl -s \"http://localhost:4000/api/portfolio?reporting_currency=EUR\")",
+      "Bash(ls -la docs/topsheet-data-template*.xlsx)",
+      "Bash(python -c ':*)"
     ]
   }
 }

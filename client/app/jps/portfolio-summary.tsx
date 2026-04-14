@@ -418,7 +418,7 @@ export default function PortfolioSummary({
           value={stats.waLife != null ? `${stats.waLife.toFixed(1)}yr` : "\u2014"}
         />
         <KpiCard
-          label="Wtd DSCR"
+          label="WA DSCR"
           value={stats.weightedDscr != null ? `${stats.weightedDscr.toFixed(2)}x` : "\u2014"}
           tone={stats.weightedDscr != null ? (stats.weightedDscr < 1.0 ? "critical" : stats.weightedDscr < 1.2 ? "warning" : "good") : undefined}
         />

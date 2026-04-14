@@ -111,6 +111,28 @@ docker exec docker-postgres-1 psql -U sesame -d sesamestreet -f //migrations//mi
 - 10 sections: Identity, Capital Structure, Counterparties, Reserves, KPIs, Performance, Risk, Development, Distribution, Forecasts
 - Accessed via "View Full TopSheet" button on deal page
 
+### Capital Structure Taxonomy (v8)
+- `capital_structure_instruments` columns (per instrument): `entity_level`,
+  `entity_name`, `ownership_pct`, `structural_seniority`,
+  `ratio_consolidation_level`, `intercompany_lender`,
+  `subordination_agreement`, `cashflow_priority_rank`
+- `corporate_entities` columns (per entity): `ownership_pct`, `ownership_type`,
+  `control_type`, `consolidation_method`, `within_security_perimeter`,
+  `ratio_level`
+- `covenant_thresholds.ratio_level` — entity level the covenant is tested at
+- **`server/capital_structure_engine.py`**:
+  - `assign_cashflow_priority_ranks(instruments)` — auto-assigns rank 1 to
+    the closest-to-cashflows external debt, +1 per structural level after
+    that, +1 for contractual subordination, +1 extra for `minority_holdco`
+    if OpCo debt exists. Shareholder loans and intercompany loans stay
+    unranked. Manual overrides are respected.
+  - `proportional_consolidation(entities)` — applies ownership% to BOTH
+    cashflows AND debt (NOT accounting IFRS full-consolidation), returns
+    consolidated EBITDA, CFADS, Debt, DS, DSCR, ND:EBITDA.
+  - `validate_capital_structure(instruments, entities)` — warnings/errors
+    for missing entity_level, inconsistent pari-passu ranks, HoldCo-at-rank-1
+    conflicts, etc.
+
 ### FX Architecture
 - `fx_rates` table — ECB-style EUR-base reference rates (snapshot time-series)
 - Cross-rate maths: amount_in_target = amount * (rate(EUR, target) / rate(EUR, source))

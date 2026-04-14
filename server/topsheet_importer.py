@@ -67,6 +67,12 @@ DEALS_COLUMNS = {
     "equity_cure_available", "equity_cure_regime",
     "overall_covenant_status", "compliance_status", "distribution_status",
     "consecutive_lockup_periods", "assigned_ham", "assigned_pm",
+    # v8 Distribution Mechanics (Tab 1)
+    "distribution_frequency", "distribution_calculation_basis",
+    "distribution_waterfall_position", "sweep_before_distribution",
+    "sweep_in_dscr", "trapped_cash_mechanism", "trapped_cash_release",
+    "lockup_cure_window_days", "lockup_escalation_periods",
+    "lockup_escalation_consequence",
     "development_phases", "rollout_plan",
     "hedging_policy", "hedging_portfolio",
     "model_version", "model_date",
@@ -428,6 +434,9 @@ def parse_covenant_sheet(ws) -> dict:
             raw = _val(v)
             return _num(raw) if raw is not None else None
 
+        # NOTE: this parser predates the v8 template and uses its own column
+        # order. For the public Tab 8 layout, use ``parse_covenant_thresholds_v8``
+        # below which reads ``ratio_level`` as well.
         covenants.append({
             "covenant_name": first,
             "ratio_name": _val(row[1]) if len(row) > 1 else None,
@@ -439,9 +448,34 @@ def parse_covenant_sheet(ws) -> dict:
             "default_level": thresh(row[7]) if len(row) > 7 else None,
             "composition_tag": _val(row[8]) if len(row) > 8 else None,
             "test_frequency": _val(row[9]) if len(row) > 9 else None,
+            "ratio_level": _val(row[11]) if len(row) > 11 else None,
         })
 
     return {"covenants": covenants, "proxy_flags": proxy_flags}
+
+
+def parse_covenant_thresholds_v8(ws) -> list[dict]:
+    """Parse Tab 8 (Covenant Thresholds) in the v8 template layout.
+
+    Columns (0-indexed): 0 Covenant Name, 1 Ratio Name, 2 Category,
+    3 Test Type, 4 Direction, 5 Test Frequency, 6 Enforcement Class,
+    7 Lockup Level, 8 Trigger Level, 9 Default Level,
+    10 Equity Cure Available, 11 Ratio Level (v8 addition).
+    """
+    col_map = {
+        "covenant_name": 0, "ratio_name": 1, "covenant_category": 2,
+        "test_type": 3, "direction": 4, "test_frequency": 5,
+        "enforcement_class": 6, "lockup_level": 7, "trigger_level": 8,
+        "default_level": 9, "equity_cure_available": 10,
+        "ratio_level": 11,
+    }
+    rows = parse_table_sheet(ws, col_map)
+    for r in rows:
+        r["lockup_level"] = _num(r.get("lockup_level"))
+        r["trigger_level"] = _num(r.get("trigger_level"))
+        r["default_level"] = _num(r.get("default_level"))
+        r["equity_cure_available"] = _bool(r.get("equity_cure_available"))
+    return rows
 
 
 def parse_forecast_sheet(ws) -> dict[str, dict[str, Any]]:
@@ -707,7 +741,12 @@ def parse_table_sheet(ws, column_map: dict[str, int], skip_header: bool = True) 
 
 
 def parse_capital_structure_sheet(ws) -> list[dict]:
-    """Parse Sheet 3: Capital Structure (one row per instrument)."""
+    """Parse Sheet 3: Capital Structure (one row per instrument).
+
+    v8: also reads the capital-structure taxonomy columns R\u2013Y (entity_level
+    through cashflow_priority_rank). These are optional — if the sheet was
+    authored against an older template the new fields simply stay None.
+    """
     col_map = {
         "instrument_name": 0, "instrument_type": 1, "waterfall_priority": 2,
         "enforcement_class": 3, "committed_amount": 4, "drawn_amount": 5,
@@ -715,6 +754,11 @@ def parse_capital_structure_sheet(ws) -> list[dict]:
         "interest_type": 9, "base_rate": 10, "margin_bps": 11,
         "repayment_type": 12, "our_holding": 13, "our_holding_pct": 14,
         "dsra_months": 15, "status": 16, "notes": 17,
+        # v8: capital-structure taxonomy
+        "entity_level": 18, "entity_name": 19, "ownership_pct": 20,
+        "structural_seniority": 21, "ratio_consolidation_level": 22,
+        "intercompany_lender": 23, "subordination_agreement": 24,
+        "cashflow_priority_rank": 25,
     }
     rows = parse_table_sheet(ws, col_map)
     for r in rows:
@@ -727,6 +771,11 @@ def parse_capital_structure_sheet(ws) -> list[dict]:
         r["waterfall_priority"] = int(_num(r["waterfall_priority"])) if _num(r.get("waterfall_priority")) is not None else None
         r["start_date"] = _date(r.get("start_date"))
         r["maturity_date"] = _date(r.get("maturity_date"))
+        # v8 coercions
+        r["ownership_pct"] = _num(r.get("ownership_pct"))
+        r["structural_seniority"] = int(_num(r["structural_seniority"])) if _num(r.get("structural_seniority")) is not None else None
+        r["subordination_agreement"] = _bool(r.get("subordination_agreement"))
+        r["cashflow_priority_rank"] = int(_num(r["cashflow_priority_rank"])) if _num(r.get("cashflow_priority_rank")) is not None else None
     return rows
 
 
@@ -751,7 +800,12 @@ def parse_enforcement_classes_sheet(ws) -> list[dict]:
 
 
 def parse_entity_map_sheet(ws) -> list[dict]:
-    """Parse Sheet 5: Entity Map."""
+    """Parse Sheet 5: Entity Map (legacy shape).
+
+    Kept for backwards compatibility with the legacy internal sheet shape.
+    For the public v8 template (7. Corporate Entities) use
+    ``parse_corporate_entities_v8``.
+    """
     col_map = {
         "entity_name": 0, "entity_type": 1, "parent_entity": 2,
         "position": 3, "jurisdiction": 4, "securitisation_boundary": 5,
@@ -767,6 +821,30 @@ def parse_entity_map_sheet(ws) -> list[dict]:
                 r["intercompany_loans"] = json.loads(v)
             except json.JSONDecodeError:
                 r["intercompany_loans"] = None
+    return rows
+
+
+def parse_corporate_entities_v8(ws) -> list[dict]:
+    """Parse Tab 7 (Corporate Entities) in the v8 template layout.
+
+    Columns (0-indexed): 0 Entity Name, 1 Type, 2 Parent Entity, 3 Jurisdiction,
+    4 Ring-Fenced, 5 Securitisation Boundary, then v8 additions: 6 Ownership %,
+    7 Ownership Type, 8 Control Type, 9 Consolidation Method, 10 Within
+    Security Perimeter, 11 Ratio Level.
+    """
+    col_map = {
+        "entity_name": 0, "entity_type": 1, "parent_entity": 2,
+        "jurisdiction": 3, "ring_fenced": 4, "securitisation_boundary": 5,
+        "ownership_pct": 6, "ownership_type": 7, "control_type": 8,
+        "consolidation_method": 9, "within_security_perimeter": 10,
+        "ratio_level": 11,
+    }
+    rows = parse_table_sheet(ws, col_map)
+    for r in rows:
+        r["ring_fenced"] = _bool(r.get("ring_fenced"))
+        r["securitisation_boundary"] = _bool(r.get("securitisation_boundary"))
+        r["ownership_pct"] = _num(r.get("ownership_pct"))
+        r["within_security_perimeter"] = _bool(r.get("within_security_perimeter"))
     return rows
 
 

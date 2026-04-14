@@ -1,9 +1,29 @@
 # TopSheet Data Template — Instructions for Completion
 
-**Template Version:** v5 (April 2026)
-**Template File:** `topsheet-data-template-v5.xlsx`
+**Template Version:** v8 (April 2026)
+**Template File:** `topsheet-data-template-v8.xlsx`
 
 This document explains how to complete the TopSheet data template. These instructions are written for both human users and AI assistants (Claude, ChatGPT, etc.) that may be populating the template from source documents.
+
+## What's new in v8
+
+- **Tab 1 — Distribution Mechanics section.** Ten new fields describing how distributions actually work on this deal: frequency, calculation basis, waterfall position, sweep behaviour, trapped-cash mechanism, lock-up cure window and escalation regime.
+- **Tab 1 — Security Ranking vocabulary expanded** to cover HoldCo-level debt: `Senior Secured HoldCo`, `Senior Secured MajorityHoldCo`, `Senior Secured MinorityHoldCo`, `Subordinated HoldCo`, `Shareholder Loan`.
+- **Tab 2 — Capital Structure taxonomy** (8 new columns R–Y): `Entity Level`, `Entity Name`, `Ownership %`, `Structural Seniority`, `Ratio Consolidation Level`, `Intercompany Lender`, `Subordination Agreement`, `Cashflow Priority Rank`. Supports multi-level structures (OpCo/MidCo/HoldCo) with proportional consolidation for partial ownership.
+- **Tab 7 — Corporate Entities** (6 new columns G–L): `Ownership %`, `Ownership Type`, `Control Type`, `Consolidation Method`, `Within Security Perimeter`, `Ratio Level`.
+- **Tab 8 — Covenant Thresholds** (1 new column L): `Ratio Level` — which entity level the covenant is tested at.
+- **Tab 20 — Onboarding Snapshot** (2 new fields): `Number of Distribution Gates`, `Distribution Gates Summary`.
+- **Tab 22 — Distribution Conditions** (unchanged from v7).
+
+### Cashflow Priority Ranking
+
+Column Y on Tab 2 records the **priority of claim** each instrument has on the deal's cashflows. Rank 1 is the first claim. The system auto-assigns ranks after ingestion using structural level + contractual subordination. Shareholder loans and intercompany loans are always unranked (blank).
+
+If a cell is left blank, the engine assigns it. If a value is entered manually, the engine respects it.
+
+### Proportional Consolidation
+
+When `Ratio Consolidation Level = proportional_consolidated`, the system applies the entity's `Ownership %` to BOTH cashflows AND debt before computing ratios. This is NOT the same as IFRS full consolidation (which fully consolidates 100% of subsidiary figures and then deducts minority interest) — that approach overstates EBITDA and understates leverage. Proportional consolidation gives the correct economic picture for credit ratios.
 
 ---
 

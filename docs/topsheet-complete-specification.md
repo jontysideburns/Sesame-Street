@@ -1,8 +1,35 @@
 # TopSheet Complete Specification
 ## Data Template for Manual Population
 
-**Version:** Current as at April 2026
+**Version:** v8 — April 2026
+**Template file:** `topsheet-data-template-v8.xlsx`
 **Purpose:** This document defines every field, table, and line item in the TopSheet system. Use it to populate deal data outside of Claude Code.
+
+### What's new in v8
+
+- **Tab 1 Distribution Mechanics block** — 10 fields on `deals`:
+  `distribution_frequency`, `distribution_calculation_basis`,
+  `distribution_waterfall_position`, `sweep_before_distribution`,
+  `sweep_in_dscr`, `trapped_cash_mechanism`, `trapped_cash_release`,
+  `lockup_cure_window_days`, `lockup_escalation_periods`,
+  `lockup_escalation_consequence`.
+- **Tab 1 Security Ranking** vocabulary expanded to cover HoldCo-level debt.
+- **Tab 2 Capital Structure** — 8 new columns on
+  `capital_structure_instruments`: `entity_level`, `entity_name`,
+  `ownership_pct`, `structural_seniority`, `ratio_consolidation_level`,
+  `intercompany_lender`, `subordination_agreement`, `cashflow_priority_rank`.
+  Supports multi-level structures with proportional consolidation for
+  partial ownership.
+- **Tab 7 Corporate Entities** — 6 new columns on `corporate_entities`:
+  `ownership_pct`, `ownership_type`, `control_type`, `consolidation_method`,
+  `within_security_perimeter`, `ratio_level`.
+- **Tab 8 Covenant Thresholds** — new `ratio_level` column (which entity
+  level the covenant is tested at).
+- **Tab 20 Onboarding Snapshot** — `distribution_gates_count` +
+  `distribution_gates_summary` on `deal_onboarding_snapshots`.
+- Engine support: `server/capital_structure_engine.py` provides
+  `assign_cashflow_priority_ranks()`, `proportional_consolidation()`, and
+  `validate_capital_structure()`.
 
 ---
 
