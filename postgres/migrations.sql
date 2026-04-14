@@ -1121,5 +1121,29 @@ ALTER TABLE deal_onboarding_snapshots ADD COLUMN IF NOT EXISTS distribution_gate
 ALTER TABLE deal_onboarding_snapshots ADD COLUMN IF NOT EXISTS distribution_gates_summary TEXT;
 
 -- ═══════════════════════════════════════════════════════════════════════════════
+-- TopSheet v9 — Capital Stack: Valuation & Equity + shareholder-level pledges
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+-- Tab 1 new VALUATION & EQUITY section on deals
+-- enterprise_value already exists from the topsheet-spec-project-finance work.
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS valuation_date DATE;
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS valuation_method VARCHAR(20);
+  -- transaction | dcf | multiples | appraisal | mark_to_model | book
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS valuation_entity TEXT;
+  -- soft FK by name to corporate_entities.entity_name (per deal); usually OpCo
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS equity_invested NUMERIC;
+  -- Initial sponsor equity cheque at origination (optional)
+
+-- Tab 2 optional pledged-share fields on capital_structure_instruments.
+-- Present when a debt is secured only on a specific shareholding (e.g. an
+-- NAV facility pledged on one shareholder's stake). When populated, the
+-- Capital Stack engine computes a grossed-up consolidated-equivalent
+-- leverage using face_value / pledged_share_pct.
+ALTER TABLE capital_structure_instruments
+    ADD COLUMN IF NOT EXISTS pledged_share_entity TEXT;
+ALTER TABLE capital_structure_instruments
+    ADD COLUMN IF NOT EXISTS pledged_share_pct DECIMAL(5,2);
+
+-- ═══════════════════════════════════════════════════════════════════════════════
 -- End of migrations — all statements above are idempotent
 -- ═══════════════════════════════════════════════════════════════════════════════

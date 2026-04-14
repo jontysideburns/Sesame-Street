@@ -1,9 +1,14 @@
 # TopSheet Data Template — Instructions for Completion
 
-**Template Version:** v8 (April 2026)
-**Template File:** `topsheet-data-template-v8.xlsx`
+**Template Version:** v9 (April 2026)
+**Template File:** `topsheet-data-template-v9.xlsx`
 
 This document explains how to complete the TopSheet data template. These instructions are written for both human users and AI assistants (Claude, ChatGPT, etc.) that may be populating the template from source documents.
+
+## What's new in v9
+
+- **Tab 1 — new VALUATION & EQUITY section** (5 fields): Enterprise Value, Valuation Date, Valuation Method, Valuation Entity, and Equity Invested at Origination. Anchors the Capital Stack feature — the single most important input is the Enterprise Value.
+- **Tab 2 — two optional columns (Z and AA)** for shareholder-level debt: `Pledged Share Entity` and `Pledged Share %`. Present only when a debt is secured on a specific shareholder's stake (e.g. NAV facility). When populated, the Capital Stack engine computes a grossed-up consolidated-equivalent leverage using `face_value / pledged_share_pct`.
 
 ## What's new in v8
 
@@ -90,6 +95,13 @@ This is the core deal record. Complete as many fields as possible.
 
 **Why the `competitive_tender_clean_sheet` flag is a HARD FAIL with any debt reliance:** In a pure concession retender, the incumbent cannot economically out-bid clean-sheet competitors while carrying legacy debt. A rational new entrant with zero legacy debt can always bid more aggressively. Relying on winning the retender to repay legacy debt is structurally unsound.
 
+**Valuation & Equity (new in v9)** — 5 fields anchoring the Capital Stack:
+- **Enterprise Value ***: the anchor for the entire capital stack. Every LTV, equity cushion and leverage lens derives from this. If you enter nothing else here, enter this.
+- **Valuation Date ***: when the EV was struck (YYYY-MM-DD). Stacks drift over time; stale dates (>12 months) will be flagged in the validation panel.
+- **Valuation Method ***: one of `transaction` (price paid on a recent trade), `dcf` (discounted cashflow), `multiples` (peer-set EV/EBITDA or similar), `appraisal` (independent valuer), `mark_to_model` (internal valuation), `book` (GAAP/IFRS book value). Makes the basis of the EV explicit so deals aren't silently compared across incompatible methods.
+- **Valuation Entity**: which entity in Tab 7 the EV is measured at. Almost always the OpCo (the operating asset). The stack engine anchors at this entity and walks up the ownership chain from there.
+- **Equity Invested at Origination**: the initial sponsor cheque when the deal was done. Used by the IRR / MOIC / performance attribution engines. Optional — leave blank if not known — but recommended for deals acquired (vs originated) by the current holders.
+
 **Distribution Mechanics (new in v8)** — 10 fields describing how distributions actually flow on this deal:
 - **Distribution Frequency**: `semi_annual` | `quarterly` | `annual` — when distributions are paid.
 - **Distribution Calculation Basis**: narrative describing the figure on which distributions are calculated — e.g. `cashflow_available_for_distribution`, `net_cashflow`, `free_cashflow_after_sweep`.
@@ -132,6 +144,14 @@ One row per debt instrument in the capital structure.
 - **Cashflow Priority Rank (Y)**: 1 = first claim on cashflows; 2 = second claim, etc. **You can leave this blank** — the system auto-assigns it based on entity level + contractual subordination. If you enter a value manually, the system respects it. Shareholder loans and intercompany loans should always be blank (they are not ranked).
 
 **Why proportional consolidation matters:** if a portfolio company is 75%-owned, accounting-style full consolidation (100% of subsidiary EBITDA less minority interest) overstates EBITDA for credit purposes. Proportional consolidation multiplies BOTH the EBITDA AND the debt by 75% — giving the correct economic picture of what the lender is exposed to.
+
+**Shareholder-level pledge (new in v9 — columns Z, AA):** only populate these two columns when a debt is secured specifically on one shareholder's stake rather than on the operating-company assets or on a common MidCo's shareholding. A typical example is a shareholder-NAV facility: the lender advances funds to a sponsor-specific SPV that holds a particular stake, with security limited to that stake.
+- **Pledged Share Entity**: the entity in Tab 7 whose shareholding is pledged (e.g. the sponsor's holding vehicle).
+- **Pledged Share %**: the percentage of the group's ownership represented by that stake. For a 49.99% shareholder's NAV facility, enter 49.99.
+
+When these fields are populated, the Capital Stack engine computes a **grossed-up consolidated-equivalent leverage** as `face_value / pledged_share_pct`. A £475m debt secured on a 49.99% stake has the same distribution-coverage impact as a £950m debt at the consolidated group level, because the operating company has to distribute £2 to put £1 in the pledged shareholder's hands for debt service.
+
+Leave both blank for normal debt instruments (debt at the OpCo, Issuer, or a common MidCo whose shares are 100%-owned within the group).
 
 ### Tab 3: Reserve Accounts
 

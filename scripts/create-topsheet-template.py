@@ -99,7 +99,7 @@ ws.column_dimensions["C"].width = 50
 
 # Version header
 ws.merge_cells("A1:C1")
-ws["A1"] = "TOPSHEET DATA TEMPLATE v8.0"
+ws["A1"] = "TOPSHEET DATA TEMPLATE v9.0"
 ws["A1"].font = version_font
 ws.merge_cells("A2:C2")
 ws["A2"] = "Fill in yellow cells. Required fields marked with *. Grey cells are computed by the system."
@@ -120,6 +120,7 @@ dv_yesno = DataValidation(type="list", formula1='"Yes,No"')
 dv_ranking = DataValidation(type="list", formula1='"Senior Secured,Senior Secured HoldCo,Senior Secured MajorityHoldCo,Senior Secured MinorityHoldCo,Senior Unsecured,Second Lien,Mezzanine,Subordinated,Subordinated HoldCo,Holdco,Majority Holdco,Minority Holdco,Shareholder Loan"')
 dv_dist_freq = DataValidation(type="list", formula1='"semi_annual,quarterly,annual"')
 dv_trapped_cash = DataValidation(type="list", formula1='"retained_in_proceeds_account,held_in_lockup_account,swept_to_debt,released_after_cure,swept_then_released"')
+dv_val_method = DataValidation(type="list", formula1='"transaction,dcf,multiples,appraisal,mark_to_model,book"')
 dv_risk_level = DataValidation(type="list", formula1='"very_low,low,moderate,high,very_high"')
 
 r = 4
@@ -204,6 +205,13 @@ add_field(ws, r, "Fitch Rating", guidance="e.g. BBB, or n/a"); r += 1
 add_field(ws, r, "Fitch Outlook", guidance="stable, positive, negative"); r += 1
 add_field(ws, r, "Internal Credit Score *", True, "Required if no external rating"); r += 1
 
+r += 1; make_section(ws, r, 3, "VALUATION & EQUITY"); r += 1
+add_field(ws, r, "Enterprise Value *", True, "Anchor for the capital stack. Single most important field \u2014 every LTV and equity cushion is derived from this."); r += 1
+add_field(ws, r, "Valuation Date *", True, "When the EV was struck (YYYY-MM-DD). Stale dates (>12 months) will be flagged in the stack validation."); r += 1
+add_field(ws, r, "Valuation Method *", True, "transaction | dcf | multiples | appraisal | mark_to_model | book", validation=dv_val_method); r += 1
+add_field(ws, r, "Valuation Entity", guidance="Entity in Tab 7 the EV is measured at (usually OpCo). Drives which entity the stack is anchored to."); r += 1
+add_field(ws, r, "Equity Invested at Origination", guidance="Initial sponsor equity cheque. Optional but recommended \u2014 used for IRR/MOIC tracking and performance attribution."); r += 1
+
 r += 1; make_section(ws, r, 3, "FACILITY ECONOMICS"); r += 1
 add_field(ws, r, "Total Facility Size *", True, "Total committed across all tranches"); r += 1
 add_field(ws, r, "Our Exposure *", True, "Our current holding amount"); r += 1
@@ -251,8 +259,8 @@ add_field(ws, r, "Headroom %", computed=True, guidance="Computed: (actual-defaul
 # TAB 2: Capital Structure
 # ═══════════════════════════════════════════════════════════════════
 ws2 = wb.create_sheet("2. Capital Structure")
-ws2.merge_cells("A1:Y1")
-ws2["A1"] = "CAPITAL STRUCTURE INSTRUMENTS — One row per debt instrument. Cols R\u2013Y capture the entity level and priority-of-claim ranking used by the consolidation and ratio engines."
+ws2.merge_cells("A1:AA1")
+ws2["A1"] = "CAPITAL STRUCTURE INSTRUMENTS — One row per debt instrument. Cols R\u2013Y capture the entity level and priority-of-claim ranking used by the consolidation and ratio engines. Cols Z\u2013AA (v9) capture shareholder-level pledges for the capital stack engine."
 ws2["A1"].font = version_font
 ws2["A1"].alignment = Alignment(wrap_text=True)
 
@@ -263,10 +271,12 @@ headers_cs = ["Instrument Name", "Type", "Format", "Security Ranking", "Pari-Pas
               # Capital-structure taxonomy (v8)
               "Entity Level", "Entity Name", "Ownership %", "Structural Seniority",
               "Ratio Consolidation Level", "Intercompany Lender", "Subordination Agreement",
-              "Cashflow Priority Rank"]
+              "Cashflow Priority Rank",
+              # Shareholder-level pledge (v9) — for capital-stack gross-up
+              "Pledged Share Entity", "Pledged Share %"]
 add_table_headers(ws2, 2, headers_cs)
 
-# Row 3: guidance strip so users understand the v8 columns at a glance
+# Row 3: guidance strip so users understand the v8+v9 columns at a glance
 guidance_cs = [
     "", "", "", "", "",
     "", "", "", "", "",
@@ -279,7 +289,9 @@ guidance_cs = [
     "opco_standalone | consolidated | proportional_consolidated",
     "If intercompany loan: lending entity name. Blank for external debt.",
     "Yes/No \u2014 subject to formal intercreditor/subordination agreement?",
-    "Priority of claim: 1 = first claim. Blank for shareholder loans / intercompany."
+    "Priority of claim: 1 = first claim. Blank for shareholder loans / intercompany.",
+    "v9: shareholder entity in Tab 7 whose stake secures this debt (blank for normal debt)",
+    "v9: ownership % pledged \u2014 drives the grossed-up leverage factor (1 / pct)",
 ]
 for i, g in enumerate(guidance_cs, 1):
     if g:
@@ -288,7 +300,7 @@ for i, g in enumerate(guidance_cs, 1):
         cell.fill = PatternFill("solid", fgColor="F5F5F0")
         cell.border = border
         cell.alignment = Alignment(wrap_text=True, vertical="top")
-ws2.row_dimensions[3].height = 45
+ws2.row_dimensions[3].height = 50
 
 dv_inst_type = DataValidation(type="list", formula1='"senior_term,senior_rcf,capex_facility,mezzanine,shl,bond,note,frn,private_placement,intercompany"')
 dv_format = DataValidation(type="list", formula1='"loan,bond,note,frn,il_bond,private_placement,convertible"')
@@ -305,6 +317,7 @@ add_table_rows(ws2, 4, 8, len(headers_cs), {
 })
 cs_widths = {
     18: 18, 19: 22, 20: 12, 21: 14, 22: 28, 23: 22, 24: 12, 25: 14,
+    26: 22, 27: 14,
 }
 for c in range(1, len(headers_cs) + 1):
     width = cs_widths.get(c, max(14, len(headers_cs[c-1]) + 2))
@@ -1383,6 +1396,6 @@ ws13.cell(row=next_row, column=3).border = border
 
 # Save
 import os
-out = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs", "topsheet-data-template-v8.xlsx")
+out = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs", "topsheet-data-template-v9.xlsx")
 wb.save(out)
 print(f"Saved to {out}")
