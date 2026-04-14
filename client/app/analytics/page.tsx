@@ -272,18 +272,36 @@ A positive headroom means the deal is above the lockup threshold.`,
     id: "headroom",
     name: "Headroom",
     category: "Covenant & Ratio Analysis",
-    summary: "Percentage distance between actual ratio and the lockup covenant threshold.",
-    detail: `**Formula:** ((Actual Value − Lockup Threshold) / Lockup Threshold) × 100
+    summary: "How much of the management-case cushion above the default threshold remains. 100% = at plan; 0% = at default; >100% = ahead of plan.",
+    detail: `Headroom is **not** distance to the lock-up — it's how much of the *expected* cushion above the **default** threshold has been preserved. This is anchored to the management case so the same number means the same thing across deals with different absolute ratio levels.
 
-**Example:** If DSCR actual = 1.32x and lockup = 1.20x:
-Headroom = ((1.32 − 1.20) / 1.20) × 100 = 10.0%
+**Primary formula** (when a management-case value is available):
+\`\`\`
+headroom_pct = ((actual − default_threshold) / (management_case − default_threshold)) × 100
+\`\`\`
 
-**Interpretation:**
-- Positive headroom = ratio is above the lockup threshold (performing)
-- Zero = exactly at the lockup threshold (lock-up imminent)
-- Negative = ratio has breached the lockup threshold
+| Reading | Interpretation |
+|---|---|
+| **100%** | Performing exactly at management case |
+| **>100%** | Outperforming the management case (extra cushion) |
+| **50%** | Halfway between management case and default — eroded but still safe |
+| **0%** | At the default threshold |
+| **Negative** | Default threshold breached |
 
-The portfolio-level "Avg Headroom" KPI is an exposure-weighted average of deal-level headroom percentages.`,
+**Worked example.** Senior DSCR — management case = 1.50x, default = 1.10x, actual = 1.62x.
+- Expected cushion = 1.50 − 1.10 = 0.40x
+- Actual cushion  = 1.62 − 1.10 = 0.52x
+- Headroom = 0.52 / 0.40 × 100 = **130%** (deal is performing 30% better than plan)
+
+**Fallback** (when no management case is configured): \`((actual − default) / default) × 100\` — i.e. % above the default threshold.
+
+**Portfolio "Headroom" KPI on the Dashboard:** exposure-weighted average of every deal's \`headroomPct\`. Formula:
+\`\`\`
+WA Headroom = Σ(exposure_i × headroom_pct_i) / Σ exposure_i
+\`\`\`
+A value of 131% means the typical deal in the book is performing about 31% better than its management case projection — entirely consistent with a healthy portfolio where most deals are at or above plan. It is **not** measuring distance to lock-up.
+
+Implementation: \`portfolio_headroom_pct()\` in \`server/main.py\`. Aggregation: \`PortfolioSummary\` component on the Dashboard.`,
   },
   {
     id: "variance-materiality",

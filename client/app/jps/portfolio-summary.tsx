@@ -222,6 +222,13 @@ export default function PortfolioSummary({
     }
     const avgHeadroom = hdrDen > 0 ? hdrNum / hdrDen : null;
 
+    // Weighted avg ND:EBITDA (exposure-weighted, only deals where ND:EBITDA available)
+    let ndNum = 0, ndDen = 0;
+    for (const d of deals) {
+      if (d.ndEbitda != null) { ndNum += d.exposure * d.ndEbitda; ndDen += d.exposure; }
+    }
+    const waNdEbitda = ndDen > 0 ? ndNum / ndDen : null;
+
     // Weighted avg spread (exposure-weighted)
     let spreadNum = 0, spreadDen = 0;
     for (const d of deals) {
@@ -385,7 +392,7 @@ export default function PortfolioSummary({
       .slice(0, 5);
 
     return {
-      totalExposure, dealCount, waSpread, waLife, waRatingLabel, weightedDscr, avgHeadroom,
+      totalExposure, dealCount, waSpread, waLife, waRatingLabel, weightedDscr, waNdEbitda, avgHeadroom,
       watchlistCount, overdueCount,
       sectorData, countryData, securityData, formatData,
       ratingData, gradeData, trendData, covenantData, ratioStatusData,
@@ -421,6 +428,11 @@ export default function PortfolioSummary({
           label="WA DSCR"
           value={stats.weightedDscr != null ? `${stats.weightedDscr.toFixed(2)}x` : "\u2014"}
           tone={stats.weightedDscr != null ? (stats.weightedDscr < 1.0 ? "critical" : stats.weightedDscr < 1.2 ? "warning" : "good") : undefined}
+        />
+        <KpiCard
+          label="WA ND:EBITDA"
+          value={stats.waNdEbitda != null ? `${stats.waNdEbitda.toFixed(1)}x` : "\u2014"}
+          tone={stats.waNdEbitda != null ? (stats.waNdEbitda > 8 ? "critical" : stats.waNdEbitda > 6 ? "warning" : "good") : undefined}
         />
         <KpiCard
           label="Headroom"
