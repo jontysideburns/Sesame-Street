@@ -150,9 +150,10 @@ export default function CapitalStackBlock({ data }: { data: CapitalStackResponse
         </span>
       </div>
       <p className="topsheet-meta-note" style={{ marginBottom: 12 }}>
-        Anchored at <strong>{data.valuation.entity ?? "\u2014"}</strong>. Each row shows a layer of
-        the stack from senior-most (rank 1) at the bottom through to residual equity at the top.
-        Total column is the whole market position at that layer; Our column is our client&apos;s slice.
+        Anchored at <strong>{data.valuation.entity ?? "\u2014"}</strong>. Rows ordered senior-first
+        (rank 1 at the top, residual equity at the bottom). Total column is the whole market
+        position at that layer; Our column is our client&apos;s slice; ND:EBITDA is the cumulative
+        leverage to and including that attach point.
       </p>
 
       {/* ─── Two-column layered table ─────────────────────────────── */}
@@ -170,8 +171,8 @@ export default function CapitalStackBlock({ data }: { data: CapitalStackResponse
             </tr>
           </thead>
           <tbody>
-            {/* Render top-down (equity first, senior last) for visual stack convention */}
-            {[...visualLayers].reverse().map((v, i) => {
+            {/* Render top-down senior first, then subordinated layers, equity last */}
+            {visualLayers.map((v, i) => {
               const isEquity = v.rank === "equity";
               const nd = typeof v.rank === "number" ? ndByRank[v.rank] : null;
               return (
