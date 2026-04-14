@@ -188,6 +188,9 @@ export default async function DealPage({
               </p>
             </div>
             <div className="topsheet-actions">
+              <Link className="button secondary" href="/jps">
+                Back to Dashboard
+              </Link>
               <Link className="button secondary" href="/portfolio">
                 Back to Portfolio
               </Link>

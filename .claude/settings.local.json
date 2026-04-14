@@ -179,7 +179,8 @@
       "Bash(curl -s \"http://localhost:4000/api/portfolio?reporting_currency=USD\")",
       "Bash(curl -s \"http://localhost:4000/api/portfolio?reporting_currency=EUR\")",
       "Bash(ls -la docs/topsheet-data-template*.xlsx)",
-      "Bash(python -c ':*)"
+      "Bash(python -c ':*)",
+      "Bash(ls client/app/deals/\\\\[slug\\\\]/*.tsx)"
     ]
   }
 }
