@@ -1412,5 +1412,245 @@ COMMENT ON VIEW v_topsheet_field_audit_status IS
     'Per (deal, table) audit coverage. In production, SELECT * FROM this WHERE missing_count > 0 must be empty. In the demo portfolio, expect missing_count = total_rows for every row.';
 
 -- ═══════════════════════════════════════════════════════════════════════════════
+-- KPI SCENARIOS as FIRST-CLASS TIME SERIES
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- Retires `deal_kpi_targets` (scalar per-scenario values) in favour of
+-- `forecast_period_items` rows keyed on (forecast_case_version, period, line_key).
+-- Management case KPI series == IC baseline. Stress cases get their own
+-- `forecast_cases` rows, optionally linked to the risk that motivated the stress
+-- via forecast_cases.driving_risk_id.
+--
+-- See docs/architecture/kpi-scenarios.md for the full pattern.
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+-- 1) forecast_cases gains risk linkage + stress metadata
+ALTER TABLE forecast_cases
+    ADD COLUMN IF NOT EXISTS driving_risk_id UUID REFERENCES deal_risk_register(id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS stress_label    TEXT,
+    ADD COLUMN IF NOT EXISTS scenario_kind   TEXT;
+
+COMMENT ON COLUMN forecast_cases.driving_risk_id IS
+    'When the scenario is a stress case motivated by an IC-identified risk, the FK to that risk register entry.';
+COMMENT ON COLUMN forecast_cases.stress_label IS
+    'Human-readable name for a stress scenario, e.g. "P90 wind resource", "Pandemic passenger shock".';
+COMMENT ON COLUMN forecast_cases.scenario_kind IS
+    'Canonical scenario discriminator. One of: management_case, credit_case, lender_case, combined_downside, single_variant_stress, custom.';
+
+CREATE INDEX IF NOT EXISTS idx_forecast_cases_driving_risk
+    ON forecast_cases(driving_risk_id) WHERE driving_risk_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_forecast_cases_scenario_kind
+    ON forecast_cases(scenario_kind) WHERE scenario_kind IS NOT NULL;
+
+-- Backfill scenario_kind from existing case_type values (idempotent)
+UPDATE forecast_cases SET scenario_kind = case_type
+    WHERE scenario_kind IS NULL AND case_type IS NOT NULL;
+
+-- 2) deal_kpi_observations gains audit-trail FK pointers
+ALTER TABLE deal_kpi_observations
+    ADD COLUMN IF NOT EXISTS base_forecast_item_id   INTEGER REFERENCES forecast_period_items(id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS stress_forecast_item_id INTEGER REFERENCES forecast_period_items(id) ON DELETE SET NULL;
+
+COMMENT ON COLUMN deal_kpi_observations.base_forecast_item_id IS
+    'The forecast_period_items row used as the base-case reference for deviation_to_stress on this observation (audit trail).';
+COMMENT ON COLUMN deal_kpi_observations.stress_forecast_item_id IS
+    'The forecast_period_items row used as the stress-case reference for deviation_to_stress on this observation (audit trail).';
+
+-- 3) Migrate deal_kpi_targets → forecast_period_items (if table still exists)
+DO $kpi_mig$
+DECLARE
+    v_target       RECORD;
+    v_case_id      INTEGER;
+    v_version_id   INTEGER;
+    v_kind         TEXT;
+    v_case_key     TEXT;
+    v_new_case_id  INTEGER;
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_class c
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        WHERE c.relname = 'deal_kpi_targets' AND n.nspname = 'public'
+    ) THEN
+        RAISE NOTICE 'deal_kpi_targets already retired; skipping migration.';
+        RETURN;
+    END IF;
+
+    FOR v_target IN
+        SELECT dkt.deal_id, dkt.kpi_key, dkt.kpi_label, dkt.scenario,
+               dkt.target_value, dkt.target_floor, dkt.target_ceiling,
+               dkt.direction, dkt.unit, dkt.source, dkt.source_date,
+               dkt.source_document_id, dkt.source_page, dkt.source_snippet,
+               dkt.source_extracted_by, dkt.source_extracted_at
+        FROM deal_kpi_targets dkt
+        ORDER BY dkt.deal_id, dkt.scenario, dkt.kpi_key
+    LOOP
+        -- Map legacy 'scenario' text to scenario_kind
+        IF v_target.scenario = 'base_case' OR v_target.scenario = 'management_case' THEN
+            v_kind := 'management_case';
+            v_case_key := NULL;  -- resolved by scenario_kind match
+        ELSIF v_target.scenario = 'stress_case' OR v_target.scenario = 'combined_downside' THEN
+            v_kind := 'combined_downside';
+            v_case_key := NULL;
+        ELSE
+            v_kind := 'combined_downside';  -- default stresses to combined downside
+            v_case_key := NULL;
+        END IF;
+
+        -- Find the forecast_case for this deal + scenario_kind (or case_type)
+        SELECT id INTO v_case_id
+        FROM forecast_cases
+        WHERE deal_id = v_target.deal_id
+          AND (scenario_kind = v_kind OR case_type = v_kind)
+        ORDER BY id
+        LIMIT 1;
+
+        -- If no combined_downside case exists, create one
+        IF v_case_id IS NULL AND v_kind = 'combined_downside' THEN
+            INSERT INTO forecast_cases (
+                deal_id, case_key, case_name, case_type, scenario_kind,
+                comparison_priority, drives_monitoring, owner_name, summary, created_at
+            ) VALUES (
+                v_target.deal_id,
+                'combined_downside_migrated',
+                'Combined downside (migrated from deal_kpi_targets)',
+                'combined_downside',
+                'combined_downside',
+                3, FALSE, 'Migration',
+                'Automatically created during deal_kpi_targets retirement to hold the stress-case KPI values.',
+                NOW()
+            )
+            ON CONFLICT (deal_id, case_key) DO UPDATE SET case_name = EXCLUDED.case_name
+            RETURNING id INTO v_new_case_id;
+            v_case_id := v_new_case_id;
+        END IF;
+
+        IF v_case_id IS NULL THEN
+            RAISE NOTICE 'No forecast_case found for deal_id=% scenario_kind=%; skipping target row.',
+                v_target.deal_id, v_kind;
+            CONTINUE;
+        END IF;
+
+        -- Find the active version for that case (create v1 if missing)
+        SELECT id INTO v_version_id
+        FROM forecast_case_versions
+        WHERE forecast_case_id = v_case_id AND is_active = TRUE
+        ORDER BY version_number DESC
+        LIMIT 1;
+
+        IF v_version_id IS NULL THEN
+            INSERT INTO forecast_case_versions (
+                forecast_case_id, version_number, version_label, version_status,
+                source_domain, summary, effective_from, activated_at, is_active
+            ) VALUES (
+                v_case_id, 1, 'v1 (migrated)', 'active',
+                'migration', 'Auto-created v1 during deal_kpi_targets migration.',
+                COALESCE(v_target.source_date, CURRENT_DATE),
+                NOW(), TRUE
+            )
+            RETURNING id INTO v_version_id;
+        END IF;
+
+        -- Ensure the line_key exists in line_item_definitions (it should for sector_kpi_*)
+        IF NOT EXISTS (SELECT 1 FROM line_item_definitions WHERE line_key = v_target.kpi_key) THEN
+            INSERT INTO line_item_definitions (line_key, section, display_label, row_order, is_generic, unit)
+            VALUES (v_target.kpi_key, 'sector_kpi', v_target.kpi_label, 99, FALSE, v_target.unit)
+            ON CONFLICT (line_key) DO NOTHING;
+        END IF;
+
+        -- Write the scalar target value into forecast_period_items for EVERY reporting period of this deal
+        -- (same value across periods — this is the semantic bridge from scalar to series)
+        INSERT INTO forecast_period_items (
+            deal_id, forecast_case_version_id, reporting_period_id, line_key, value
+        )
+        SELECT
+            v_target.deal_id, v_version_id, drp.id, v_target.kpi_key, v_target.target_value
+        FROM deal_reporting_periods drp
+        WHERE drp.deal_id = v_target.deal_id
+        ON CONFLICT (forecast_case_version_id, reporting_period_id, line_key) DO NOTHING;
+
+        -- Keep the deal_line_item_labels override up to date
+        INSERT INTO deal_line_item_labels (deal_id, line_key, display_label, ordinal, is_active)
+        VALUES (
+            v_target.deal_id, v_target.kpi_key, v_target.kpi_label,
+            COALESCE(SUBSTRING(v_target.kpi_key FROM 'sector_kpi_(\d+)')::INTEGER, 99),
+            TRUE
+        )
+        ON CONFLICT (deal_id, line_key) DO NOTHING;
+    END LOOP;
+
+    RAISE NOTICE 'deal_kpi_targets migration complete.';
+END;
+$kpi_mig$;
+
+-- 4) Rebuild v_topsheet_field_audit_status WITHOUT the deal_kpi_targets union branch
+CREATE OR REPLACE VIEW v_topsheet_field_audit_status AS
+    SELECT deal_id, 'capital_structure_instruments'::text AS table_name,
+           COUNT(*) AS total_rows,
+           COUNT(*) FILTER (WHERE source_document_id IS NULL) AS missing_count
+    FROM capital_structure_instruments GROUP BY deal_id
+    UNION ALL
+    SELECT deal_id, 'corporate_entities', COUNT(*),
+           COUNT(*) FILTER (WHERE source_document_id IS NULL)
+    FROM corporate_entities GROUP BY deal_id
+    UNION ALL
+    SELECT deal_id, 'deal_jurisdiction_splits', COUNT(*),
+           COUNT(*) FILTER (WHERE source_document_id IS NULL)
+    FROM deal_jurisdiction_splits GROUP BY deal_id
+    UNION ALL
+    SELECT deal_id, 'covenant_thresholds', COUNT(*),
+           COUNT(*) FILTER (WHERE source_document_id IS NULL)
+    FROM covenant_thresholds GROUP BY deal_id
+    UNION ALL
+    SELECT deal_id, 'deal_distribution_conditions', COUNT(*),
+           COUNT(*) FILTER (WHERE source_document_id IS NULL)
+    FROM deal_distribution_conditions GROUP BY deal_id
+    UNION ALL
+    SELECT deal_id, 'deal_eod_register', COUNT(*),
+           COUNT(*) FILTER (WHERE source_document_id IS NULL)
+    FROM deal_eod_register GROUP BY deal_id
+    UNION ALL
+    SELECT deal_id, 'deal_trigger_events', COUNT(*),
+           COUNT(*) FILTER (WHERE source_document_id IS NULL)
+    FROM deal_trigger_events GROUP BY deal_id
+    UNION ALL
+    SELECT deal_id, 'deal_counterparties', COUNT(*),
+           COUNT(*) FILTER (WHERE source_document_id IS NULL)
+    FROM deal_counterparties GROUP BY deal_id
+    UNION ALL
+    SELECT deal_id, 'deal_reserve_accounts', COUNT(*),
+           COUNT(*) FILTER (WHERE source_document_id IS NULL)
+    FROM deal_reserve_accounts GROUP BY deal_id
+    UNION ALL
+    SELECT deal_id, 'hedge_portfolio', COUNT(*),
+           COUNT(*) FILTER (WHERE source_document_id IS NULL)
+    FROM hedge_portfolio GROUP BY deal_id
+    UNION ALL
+    SELECT deal_id, 'deal_risk_register', COUNT(*),
+           COUNT(*) FILTER (WHERE source_document_id IS NULL)
+    FROM deal_risk_register GROUP BY deal_id
+    UNION ALL
+    SELECT deal_id, 'deal_amendments', COUNT(*),
+           COUNT(*) FILTER (WHERE source_document_id IS NULL)
+    FROM deal_amendments GROUP BY deal_id
+    UNION ALL
+    SELECT deal_id, 'deal_consent_mechanics', COUNT(*),
+           COUNT(*) FILTER (WHERE source_document_id IS NULL)
+    FROM deal_consent_mechanics GROUP BY deal_id
+    UNION ALL
+    SELECT deal_id, 'deal_development_phases', COUNT(*),
+           COUNT(*) FILTER (WHERE source_document_id IS NULL)
+    FROM deal_development_phases GROUP BY deal_id
+    UNION ALL
+    SELECT deal_id, 'deal_obligation_register', COUNT(*),
+           COUNT(*) FILTER (WHERE source_document_id IS NULL)
+    FROM deal_obligation_register GROUP BY deal_id
+    UNION ALL
+    SELECT deal_id, 'deal_onboarding_snapshots', COUNT(*),
+           COUNT(*) FILTER (WHERE source_document_id IS NULL)
+    FROM deal_onboarding_snapshots GROUP BY deal_id;
+
+-- 5) Retire the old table
+DROP TABLE IF EXISTS deal_kpi_targets CASCADE;
+
+-- ═══════════════════════════════════════════════════════════════════════════════
 -- End of migrations — all statements above are idempotent
 -- ═══════════════════════════════════════════════════════════════════════════════

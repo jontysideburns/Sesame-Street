@@ -169,36 +169,58 @@ INSERT INTO covenant_thresholds (
  5.5, 7.0, TRUE)
 ON CONFLICT DO NOTHING;
 
--- ─── 9. KPI TARGETS ─────────────────────────────────────────────────────────
--- Base case targets
-INSERT INTO deal_kpi_targets (
-    deal_id, kpi_key, kpi_label, scenario,
-    target_value, target_floor, target_ceiling, direction, unit, source
-) VALUES
-(v_deal_id, 'sector_kpi_1', 'TEU Throughput (000s)', 'base_case',
- 1900, NULL, NULL, 'higher_is_better', 'count', 'ic_memo'),
-(v_deal_id, 'sector_kpi_2', 'Capacity Utilisation (%)', 'base_case',
- 75, NULL, NULL, 'higher_is_better', 'percentage', 'ic_memo'),
-(v_deal_id, 'sector_kpi_3', 'Gateway Share (%)', 'base_case',
- 45, NULL, NULL, 'higher_is_better', 'percentage', 'ic_memo'),
-(v_deal_id, 'sector_kpi_4', 'Revenue per TEU (EUR)', 'base_case',
- NULL, NULL, NULL, 'higher_is_better', 'currency', 'ic_memo'),
-(v_deal_id, 'sector_kpi_5', 'EBITDA Margin (%)', 'base_case',
- NULL, NULL, NULL, 'higher_is_better', 'percentage', 'ic_memo'),
-(v_deal_id, 'sector_kpi_6', 'Offtaker 1 Concentration (%)', 'base_case',
- 65, NULL, 80, 'lower_is_better', 'percentage', 'ic_memo')
-ON CONFLICT (deal_id, kpi_key, scenario) DO NOTHING;
+-- ─── 9. KPI SCENARIO SERIES ─────────────────────────────────────────────────
+-- Held constant across all reporting periods; a real IC memo would vary by year.
+-- Management case (IC baseline)
+INSERT INTO forecast_period_items (deal_id, forecast_case_version_id, reporting_period_id, line_key, value)
+SELECT v_deal_id, fcv.id, drp.id, kpi.kpi_key, kpi.value
+FROM (VALUES
+    ('sector_kpi_1', 1900.0),   -- TEU Throughput (000s)
+    ('sector_kpi_2',   75.0),   -- Capacity Utilisation (%)
+    ('sector_kpi_3',   45.0),   -- Gateway Share (%)
+    ('sector_kpi_6',   65.0)    -- Offtaker 1 Concentration (%)
+) AS kpi(kpi_key, value)
+CROSS JOIN deal_reporting_periods drp
+JOIN forecast_cases fc ON fc.deal_id = v_deal_id AND (fc.scenario_kind = 'management_case' OR fc.case_type = 'management_case')
+JOIN forecast_case_versions fcv ON fcv.forecast_case_id = fc.id AND fcv.is_active = TRUE
+WHERE drp.deal_id = v_deal_id
+ON CONFLICT (forecast_case_version_id, reporting_period_id, line_key) DO NOTHING;
 
--- Stress case targets
-INSERT INTO deal_kpi_targets (
-    deal_id, kpi_key, kpi_label, scenario,
-    target_value, direction, unit, source
-) VALUES
-(v_deal_id, 'sector_kpi_1', 'TEU Throughput (000s)', 'stress_case',
- 1600, 'higher_is_better', 'count', 'ic_memo'),
-(v_deal_id, 'sector_kpi_2', 'Capacity Utilisation (%)', 'stress_case',
- 60, 'higher_is_better', 'percentage', 'ic_memo')
-ON CONFLICT (deal_id, kpi_key, scenario) DO NOTHING;
+-- Combined downside — ensure a combined_downside forecast_case exists for this deal
+INSERT INTO forecast_cases (deal_id, case_key, case_name, case_type, scenario_kind,
+                            comparison_priority, drives_monitoring, owner_name, summary, created_at)
+VALUES (v_deal_id, 'alpha-downside', 'Combined downside', 'combined_downside', 'combined_downside',
+        3, FALSE, 'Credit Committee', 'Alpha combined-downside KPI floor.', NOW())
+ON CONFLICT (deal_id, case_key) DO NOTHING;
+
+INSERT INTO forecast_case_versions (forecast_case_id, version_number, version_label, version_status,
+                                    source_domain, summary, effective_from, activated_at, is_active)
+SELECT fc.id, 1, 'v1', 'active', 'pm_downside', 'IC-approved stress trajectory for Alpha KPIs.',
+       CURRENT_DATE, NOW(), TRUE
+FROM forecast_cases fc WHERE fc.deal_id = v_deal_id AND fc.case_key = 'alpha-downside'
+ON CONFLICT (forecast_case_id, version_number) DO NOTHING;
+
+INSERT INTO forecast_period_items (deal_id, forecast_case_version_id, reporting_period_id, line_key, value)
+SELECT v_deal_id, fcv.id, drp.id, kpi.kpi_key, kpi.value
+FROM (VALUES
+    ('sector_kpi_1', 1600.0),  -- Throughput stress
+    ('sector_kpi_2',   60.0)   -- Utilisation stress
+) AS kpi(kpi_key, value)
+CROSS JOIN deal_reporting_periods drp
+JOIN forecast_cases fc ON fc.deal_id = v_deal_id AND fc.case_key = 'alpha-downside'
+JOIN forecast_case_versions fcv ON fcv.forecast_case_id = fc.id AND fcv.is_active = TRUE
+WHERE drp.deal_id = v_deal_id
+ON CONFLICT (forecast_case_version_id, reporting_period_id, line_key) DO NOTHING;
+
+-- KPI display labels
+INSERT INTO deal_line_item_labels (deal_id, line_key, display_label, ordinal, is_active) VALUES
+(v_deal_id, 'sector_kpi_1', 'TEU Throughput (000s)',        1, TRUE),
+(v_deal_id, 'sector_kpi_2', 'Capacity Utilisation (%)',     2, TRUE),
+(v_deal_id, 'sector_kpi_3', 'Gateway Share (%)',            3, TRUE),
+(v_deal_id, 'sector_kpi_4', 'Revenue per TEU (EUR)',        4, TRUE),
+(v_deal_id, 'sector_kpi_5', 'EBITDA Margin (%)',            5, TRUE),
+(v_deal_id, 'sector_kpi_6', 'Offtaker 1 Concentration (%)', 6, TRUE)
+ON CONFLICT (deal_id, line_key) DO NOTHING;
 
 -- ─── 10. FINANCIAL TEMPLATE ─────────────────────────────────────────────────
 INSERT INTO deal_financial_template (

@@ -495,22 +495,41 @@ ws8.freeze_panes = "A4"
 # ═══════════════════════════════════════════════════════════════════
 # TAB 9: KPI Targets
 # ═══════════════════════════════════════════════════════════════════
-ws9 = wb.create_sheet("9. KPI Targets")
-ws9.merge_cells("A1:H1")
-ws9["A1"] = "IC MEMO KPI TARGETS — Frozen at ingestion. Base case and stress case."
+ws9 = wb.create_sheet("9. KPI Scenario Series")
+ws9.merge_cells("A1:G1")
+ws9["A1"] = (
+    "IC MEMO KPI SCENARIO SERIES — One row per (scenario × period × KPI) trajectory point. "
+    "Management case = IC baseline. Single-variant stresses link to a risk_id from Tab 6 risk register. "
+    "Combined downside is the aggregate stress scenario. Sparse: only fill the rows the IC defined."
+)
 ws9["A1"].font = version_font
+ws9["A1"].alignment = Alignment(wrap_text=True)
+ws9.row_dimensions[1].height = 55
 
-headers_kpi = ["KPI Name", "Base Case Value", "Stress Case Value", "Target Floor",
-               "Target Ceiling", "Direction", "Unit", "Source"]
+headers_kpi = [
+    "kpi_key",           # sector_kpi_1 .. sector_kpi_10
+    "kpi_label",         # human label, denormalised for ingestion provenance
+    "scenario_kind",     # management_case | single_variant_stress | combined_downside
+    "stress_label",      # human name when scenario_kind = single_variant_stress
+    "driving_risk_ref",  # RISK-XX-NNN matching a risk_id in Tab 6 (only for single_variant_stress)
+    "period_flag",       # e.g. FY2026 — must exist in deal_reporting_periods
+    "value",             # numeric expected value for that (scenario, period, KPI)
+]
 add_table_headers(ws9, 2, headers_kpi)
 
-dv_dir = DataValidation(type="list", formula1='"higher_is_better,lower_is_better,range"')
-dv_unit = DataValidation(type="list", formula1='"percentage,currency,count,ratio,years,bps"')
-dv_source = DataValidation(type="list", formula1='"ic_memo,business_plan,management_presentation,lender_model"')
+dv_kind = DataValidation(
+    type="list",
+    formula1='"management_case,single_variant_stress,combined_downside,credit_case,lender_case,custom"',
+)
+dv_kpi_key = DataValidation(
+    type="list",
+    formula1='"sector_kpi_1,sector_kpi_2,sector_kpi_3,sector_kpi_4,sector_kpi_5,sector_kpi_6,sector_kpi_7,sector_kpi_8,sector_kpi_9,sector_kpi_10"',
+)
 
-add_table_rows(ws9, 3, 12, len(headers_kpi), {6: dv_dir, 7: dv_unit, 8: dv_source})
-for c in range(1, len(headers_kpi) + 1):
-    ws9.column_dimensions[get_column_letter(c)].width = max(16, len(headers_kpi[c-1]) + 2)
+add_table_rows(ws9, 3, 60, len(headers_kpi), {1: dv_kpi_key, 3: dv_kind})
+widths = [18, 34, 26, 28, 20, 14, 14]
+for c, w in enumerate(widths, start=1):
+    ws9.column_dimensions[get_column_letter(c)].width = w
 
 
 # ═══════════════════════════════════════════════════════════════════

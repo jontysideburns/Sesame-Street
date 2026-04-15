@@ -1380,6 +1380,229 @@ def _upsert_financial_template(conn, deal_id: int, labels: dict,
 
 # ── Main entry point ──────────────────────────────────────────────────────────
 
+def parse_kpi_scenario_series_sheet(ws) -> list[dict]:
+    """Parse the 'KPI Scenario Series' tab (Tab 9 in v9 template).
+
+    Columns:
+      1 kpi_key          (e.g. sector_kpi_1)
+      2 kpi_label        (human label)
+      3 scenario_kind    (management_case | single_variant_stress | combined_downside | credit_case | lender_case | custom)
+      4 stress_label     (human name for single_variant_stress scenarios)
+      5 driving_risk_ref (RISK-XX-NNN matching a deal_risk_register.risk_id — optional)
+      6 period_flag      (e.g. FY2026)
+      7 value            (numeric)
+
+    Returns a list of dicts with the above keys. Sparse rows allowed — rows where
+    kpi_key, scenario_kind, period_flag, or value are empty are skipped.
+    """
+    rows: list[dict] = []
+    header_row = 2
+    data_start = 3
+
+    for row in ws.iter_rows(min_row=data_start, values_only=True):
+        if not row or not any(row):
+            continue
+        if len(row) < 7:
+            continue
+        kpi_key = _val(row[0])
+        scenario_kind = _val(row[2])
+        period_flag = _val(row[5])
+        value = _num(row[6])
+
+        if not kpi_key or not scenario_kind or not period_flag or value is None:
+            continue
+
+        rows.append({
+            "kpi_key": str(kpi_key).strip(),
+            "kpi_label": str(_val(row[1]) or kpi_key).strip(),
+            "scenario_kind": str(scenario_kind).strip().lower(),
+            "stress_label": str(_val(row[3]) or "").strip() or None,
+            "driving_risk_ref": str(_val(row[4]) or "").strip() or None,
+            "period_flag": str(period_flag).strip(),
+            "value": value,
+        })
+    return rows
+
+
+def _upsert_kpi_scenario_series(conn, deal_id: int, rows: list[dict], errors: list[str]) -> int:
+    """Write KPI scenario series rows into forecast_period_items.
+
+    For each (scenario_kind, stress_label, driving_risk_ref) combination, find
+    or create a forecast_case + active forecast_case_version. Then write one
+    forecast_period_items row per (period, kpi_key) trajectory point.
+
+    Returns the count of forecast_period_items rows written or confirmed present.
+    """
+    if not rows:
+        return 0
+
+    # Group rows by the scenario they belong to — each distinct combo = one forecast_case
+    def scenario_signature(r: dict) -> tuple[str, str | None, str | None]:
+        if r["scenario_kind"] == "single_variant_stress":
+            return ("single_variant_stress", r.get("stress_label"), r.get("driving_risk_ref"))
+        return (r["scenario_kind"], None, None)
+
+    grouped: dict[tuple, list[dict]] = {}
+    for r in rows:
+        grouped.setdefault(scenario_signature(r), []).append(r)
+
+    written = 0
+
+    for (scenario_kind, stress_label, risk_ref), group_rows in grouped.items():
+        # 1) Resolve driving_risk_id by matching on risk_id (text key) within this deal
+        driving_risk_id = None
+        if risk_ref:
+            r = conn.execute(
+                "SELECT id FROM deal_risk_register WHERE deal_id = %s AND risk_id = %s",
+                (deal_id, risk_ref),
+            ).fetchone()
+            if r:
+                driving_risk_id = r["id"]
+            else:
+                errors.append(
+                    f"KPI scenario references risk '{risk_ref}' but no matching "
+                    f"deal_risk_register.risk_id found for this deal — stress case "
+                    f"will be created without a driving_risk link."
+                )
+
+        # 2) Find or create the forecast_case
+        # Canonical case_key by scenario kind + optional stress label
+        if scenario_kind == "management_case":
+            case_key = "management_case"
+            case_name = "Management Case (IC baseline)"
+        elif scenario_kind == "combined_downside":
+            case_key = "combined_downside"
+            case_name = "Combined downside"
+        elif scenario_kind == "single_variant_stress":
+            # Stable key from stress_label slug
+            slug_source = (stress_label or risk_ref or "unnamed").lower()
+            slug = "".join(ch if ch.isalnum() else "_" for ch in slug_source).strip("_")[:60]
+            case_key = f"stress_{slug}"
+            case_name = f"Stress — {stress_label or risk_ref or 'unnamed'}"
+        elif scenario_kind in ("credit_case", "lender_case"):
+            case_key = scenario_kind
+            case_name = "Credit case" if scenario_kind == "credit_case" else "Lender case"
+        else:
+            case_key = scenario_kind
+            case_name = scenario_kind.replace("_", " ").title()
+
+        # Decide case_type for backward-compat column
+        case_type_map = {
+            "management_case": "management_case",
+            "combined_downside": "combined_downside",
+            "single_variant_stress": "single_variant_stress",
+            "credit_case": "credit_case",
+            "lender_case": "lender_case",
+        }
+        case_type = case_type_map.get(scenario_kind, scenario_kind)
+
+        existing = conn.execute(
+            "SELECT id FROM forecast_cases WHERE deal_id = %s AND case_key = %s",
+            (deal_id, case_key),
+        ).fetchone()
+        if existing:
+            forecast_case_id = existing["id"]
+            # Update driving_risk_id / stress_label if we now have them and they were empty
+            conn.execute(
+                """UPDATE forecast_cases
+                     SET scenario_kind = %s,
+                         driving_risk_id = COALESCE(driving_risk_id, %s),
+                         stress_label = COALESCE(stress_label, %s)
+                   WHERE id = %s""",
+                (scenario_kind, driving_risk_id, stress_label, forecast_case_id),
+            )
+        else:
+            r = conn.execute(
+                """INSERT INTO forecast_cases
+                     (deal_id, case_key, case_name, case_type, scenario_kind,
+                      comparison_priority, drives_monitoring, owner_name, summary, created_at,
+                      driving_risk_id, stress_label)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), %s, %s)
+                   RETURNING id""",
+                (
+                    deal_id, case_key, case_name, case_type, scenario_kind,
+                    1 if scenario_kind == "management_case" else 3,
+                    False,
+                    "TopSheet importer",
+                    f"{case_name} imported from KPI Scenario Series tab.",
+                    driving_risk_id, stress_label,
+                ),
+            ).fetchone()
+            forecast_case_id = r["id"]
+
+        # 3) Find or create the active forecast_case_version
+        active_version = conn.execute(
+            """SELECT id FROM forecast_case_versions
+               WHERE forecast_case_id = %s AND is_active = TRUE
+               ORDER BY version_number DESC LIMIT 1""",
+            (forecast_case_id,),
+        ).fetchone()
+        if active_version:
+            version_id = active_version["id"]
+        else:
+            next_num = conn.execute(
+                "SELECT COALESCE(MAX(version_number), 0) + 1 AS n FROM forecast_case_versions WHERE forecast_case_id = %s",
+                (forecast_case_id,),
+            ).fetchone()["n"]
+            r = conn.execute(
+                """INSERT INTO forecast_case_versions
+                     (forecast_case_id, version_number, version_label, version_status,
+                      source_domain, summary, effective_from, activated_at, is_active)
+                   VALUES (%s, %s, %s, 'active', 'topsheet_import',
+                           'Auto-created from KPI Scenario Series import.',
+                           CURRENT_DATE, NOW(), TRUE)
+                   RETURNING id""",
+                (forecast_case_id, next_num, f"Imported v{next_num}"),
+            ).fetchone()
+            version_id = r["id"]
+
+        # 4) Insert forecast_period_items rows, resolving period_id from period_flag
+        for row in group_rows:
+            period = conn.execute(
+                "SELECT id FROM deal_reporting_periods WHERE deal_id = %s AND period_flag = %s",
+                (deal_id, row["period_flag"]),
+            ).fetchone()
+            if not period:
+                errors.append(
+                    f"KPI scenario row references period_flag '{row['period_flag']}' "
+                    f"but no matching deal_reporting_periods entry — skipping."
+                )
+                continue
+
+            # Ensure line_item_definitions knows this key
+            conn.execute(
+                """INSERT INTO line_item_definitions (line_key, section, display_label, row_order, is_generic, unit)
+                   VALUES (%s, 'sector_kpi', %s, 99, FALSE, 'count')
+                   ON CONFLICT (line_key) DO NOTHING""",
+                (row["kpi_key"], row["kpi_label"]),
+            )
+
+            conn.execute(
+                """INSERT INTO forecast_period_items
+                     (deal_id, forecast_case_version_id, reporting_period_id, line_key, value)
+                   VALUES (%s, %s, %s, %s, %s)
+                   ON CONFLICT (forecast_case_version_id, reporting_period_id, line_key)
+                   DO UPDATE SET value = EXCLUDED.value""",
+                (deal_id, version_id, period["id"], row["kpi_key"], row["value"]),
+            )
+
+            # Update deal_line_item_labels with the human label
+            conn.execute(
+                """INSERT INTO deal_line_item_labels (deal_id, line_key, display_label, ordinal, is_active)
+                   VALUES (%s, %s, %s,
+                           COALESCE(SUBSTRING(%s FROM 'sector_kpi_(\\d+)')::INTEGER, 99),
+                           TRUE)
+                   ON CONFLICT (deal_id, line_key) DO UPDATE
+                     SET display_label = EXCLUDED.display_label
+                   WHERE deal_line_item_labels.display_label IS NULL
+                      OR deal_line_item_labels.display_label = deal_line_item_labels.line_key""",
+                (deal_id, row["kpi_key"], row["kpi_label"], row["kpi_key"]),
+            )
+            written += 1
+
+    return written
+
+
 def import_topsheet(conn, deal_slug: str, file_bytes: bytes) -> dict:
     """
     Parse and import a TopSheet Excel file for the given deal slug.
@@ -1533,6 +1756,14 @@ def import_topsheet(conn, deal_slug: str, file_bytes: bytes) -> dict:
             labels = parse_line_labels_sheet(wb[sn])
             n = _upsert_financial_template(conn, deal_id, labels, errors)
             counts["financial_template"] = n
+            break
+
+    # ── KPI Scenario Series (management case + stress cases) ──
+    for sn in ("9. KPI Scenario Series", "KPI Scenario Series"):
+        if sn in sheet_names:
+            kpi_rows = parse_kpi_scenario_series_sheet(wb[sn])
+            n = _upsert_kpi_scenario_series(conn, deal_id, kpi_rows, errors)
+            counts["kpi_scenario_series"] = n
             break
 
     return {

@@ -5123,6 +5123,52 @@ _SEVERITY_PHRASE = {
     5: "critical capital impact",
     6: "fatal capital impact",
 }
+
+# Legacy risk_register_entries rows store likelihood / severity / probability /
+# impact as free-text columns. Newer rows use the 1-5 integer convention, but
+# older rows carry word labels. _coerce_score normalises both.
+_LIKELIHOOD_WORD_MAP = {
+    "remote": 1, "rare": 1, "very_unlikely": 1, "very unlikely": 1,
+    "unlikely": 2, "low": 2,
+    "possible": 3, "moderate": 3, "medium": 3,
+    "likely": 4, "high": 4,
+    "almost_certain": 5, "almost certain": 5, "very_likely": 5, "very likely": 5, "certain": 5,
+}
+_SEVERITY_WORD_MAP = {
+    "negligible": 1, "very_low": 1, "very low": 1,
+    "minor": 2, "low": 2,
+    "moderate": 3, "medium": 3,
+    "major": 4, "high": 4, "significant": 4,
+    "severe": 5, "critical": 5, "very_high": 5, "very high": 5,
+    "catastrophic": 6, "fatal": 6,
+}
+
+
+def _coerce_score(value, word_map: dict[str, int] | None = None) -> int | None:
+    """Coerce a likelihood/severity/probability/impact cell to its 1-N integer.
+
+    Accepts int, numeric strings ("3", "4.0"), and word labels ("likely",
+    "high", etc.). Returns None for unrecognised or empty values so that
+    the caller can skip the affected narrative sentence rather than crash.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):  # guard: True/False would otherwise cast to 1/0
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    s = str(value).strip().lower()
+    if not s:
+        return None
+    try:
+        return int(float(s))
+    except (ValueError, TypeError):
+        pass
+    if word_map and s in word_map:
+        return word_map[s]
+    return None
 _TREND_PHRASE = {
     "improving": "The risk has been improving over recent reviews",
     "stable": "The risk has remained stable over recent reviews",
@@ -5182,12 +5228,16 @@ def generate_risk_narrative(row):
         f"{' (' + str(int(score)) + '/30)' if score is not None else ''}."
     )
 
-    # Sentence 2 — likelihood & severity
-    if likelihood and severity:
+    # Sentence 2 — likelihood & severity.
+    # Both columns may be numeric strings or word labels; coerce and skip the
+    # sentence rather than crashing on an unrecognised value.
+    lik_int = _coerce_score(likelihood, _LIKELIHOOD_WORD_MAP)
+    sev_int = _coerce_score(severity, _SEVERITY_WORD_MAP)
+    if lik_int is not None and sev_int is not None:
         parts.append(
-            f"The probability of occurrence {_LIKELIHOOD_PHRASE.get(int(likelihood), 'is unclear')} "
-            f"({int(likelihood)}/5) with {_SEVERITY_PHRASE.get(int(severity), 'unknown impact')} "
-            f"if it crystallises ({int(severity)}/6)."
+            f"The probability of occurrence {_LIKELIHOOD_PHRASE.get(lik_int, 'is unclear')} "
+            f"({lik_int}/5) with {_SEVERITY_PHRASE.get(sev_int, 'unknown impact')} "
+            f"if it crystallises ({sev_int}/6)."
         )
 
     # Sentence 3 — trend
@@ -11293,7 +11343,7 @@ def get_portfolio(
                     + CASE WHEN (SELECT count(*) FROM deal_financial_template dft WHERE dft.deal_id = d.id) > 0 THEN 10 ELSE 0 END
                     + CASE WHEN (SELECT count(*) FROM forecast_period_items fpi WHERE fpi.deal_id = d.id) > 0 THEN 10 ELSE 0 END
                     + CASE WHEN (SELECT count(*) FROM period_financial_items pfi WHERE pfi.deal_id = d.id) > 0 THEN 10 ELSE 0 END
-                    + CASE WHEN (SELECT count(*) FROM deal_kpi_targets dkt WHERE dkt.deal_id = d.id) > 0 THEN 10 ELSE 0 END
+                    + CASE WHEN (SELECT count(*) FROM forecast_period_items fpi2 WHERE fpi2.deal_id = d.id AND fpi2.line_key LIKE 'sector_kpi_%') > 0 THEN 10 ELSE 0 END
                     + CASE WHEN (SELECT count(*) FROM performance_assessments pa WHERE pa.deal_id = d.id) > 0 THEN 10 ELSE 0 END
                     + CASE WHEN (SELECT count(*) FROM deal_jurisdiction_splits djs WHERE djs.deal_id = d.id) > 0 THEN 10 ELSE 0 END
                     ) AS completeness_pct
@@ -12147,7 +12197,7 @@ def get_dashboard(
                     + CASE WHEN (SELECT count(*) FROM deal_financial_template dft WHERE dft.deal_id = d.id) > 0 THEN 10 ELSE 0 END
                     + CASE WHEN (SELECT count(*) FROM forecast_period_items fpi WHERE fpi.deal_id = d.id) > 0 THEN 10 ELSE 0 END
                     + CASE WHEN (SELECT count(*) FROM period_financial_items pfi WHERE pfi.deal_id = d.id) > 0 THEN 10 ELSE 0 END
-                    + CASE WHEN (SELECT count(*) FROM deal_kpi_targets dkt WHERE dkt.deal_id = d.id) > 0 THEN 10 ELSE 0 END
+                    + CASE WHEN (SELECT count(*) FROM forecast_period_items fpi2 WHERE fpi2.deal_id = d.id AND fpi2.line_key LIKE 'sector_kpi_%') > 0 THEN 10 ELSE 0 END
                     + CASE WHEN (SELECT count(*) FROM performance_assessments pa WHERE pa.deal_id = d.id) > 0 THEN 10 ELSE 0 END
                     + CASE WHEN (SELECT count(*) FROM deal_jurisdiction_splits djs WHERE djs.deal_id = d.id) > 0 THEN 10 ELSE 0 END
                     ) AS completeness_pct
@@ -18870,6 +18920,41 @@ def get_deal_topsheet(slug: str):
             (deal_id,),
         ).fetchall()
 
+        # KPI scenario series — every forecast_period_items row for line_keys
+        # LIKE 'sector_kpi_%', joined to the scenario metadata on forecast_cases
+        # and (optionally) the driving risk for stress cases.
+        kpi_rows = conn.execute(
+            """SELECT fc.id AS forecast_case_id,
+                      fc.case_key,
+                      fc.case_name,
+                      fc.case_type,
+                      fc.scenario_kind,
+                      fc.stress_label,
+                      fc.comparison_priority,
+                      fc.drives_monitoring,
+                      fc.driving_risk_id::text AS driving_risk_id,
+                      drr.risk_id AS driving_risk_code,
+                      drr.commentary AS driving_risk_commentary,
+                      fcv.id AS forecast_case_version_id,
+                      fcv.version_label,
+                      fpi.id AS forecast_period_item_id,
+                      fpi.line_key,
+                      drp.period_flag,
+                      drp.period_label,
+                      drp.period_ordinal,
+                      fpi.value
+               FROM forecast_period_items fpi
+               JOIN forecast_case_versions fcv ON fcv.id = fpi.forecast_case_version_id
+               JOIN forecast_cases fc ON fc.id = fcv.forecast_case_id
+               JOIN deal_reporting_periods drp ON drp.id = fpi.reporting_period_id
+               LEFT JOIN deal_risk_register drr ON drr.id = fc.driving_risk_id
+               WHERE fpi.deal_id = %s
+                 AND fpi.line_key LIKE 'sector_kpi_%%'
+                 AND fcv.is_active = TRUE
+               ORDER BY fpi.line_key, fc.comparison_priority, fc.id, drp.period_ordinal""",
+            (deal_id,),
+        ).fetchall()
+
     deal = _serialize_row(deal_row, skip_deal_id=False)
 
     # ── Tail computation ────────────────────────────────────────────────
@@ -19069,7 +19154,87 @@ def get_deal_topsheet(slug: str):
         "forecastVersions": {r["case_type"]: {"versionId": r["version_id"], "label": r["version_label"]} for r in forecast_versions},
         "forecastItems": [_serialize_row(r) for r in forecast_items],
         "actualItems": [_serialize_row(r) for r in actual_items],
+        "kpiScenarios": _build_kpi_scenarios(kpi_rows, deal_labels),
     }
+
+
+def _build_kpi_scenarios(rows, deal_labels):
+    """Group KPI forecast_period_items rows into a per-KPI structure for the API.
+
+    Shape:
+        [{ kpi_key, kpi_label, management_case: { versionId, series: [...] },
+           stress_cases: [{ forecast_case_id, forecast_case_version_id, scenario_kind,
+                            stress_label, driving_risk_id, driving_risk_code, series }] }]
+    """
+    label_map = {r["line_key"]: r["display_label"] for r in (deal_labels or [])}
+    by_kpi: dict[str, dict] = {}
+
+    for r in rows:
+        kpi_key = r["line_key"]
+        if kpi_key not in by_kpi:
+            by_kpi[kpi_key] = {
+                "kpi_key": kpi_key,
+                "kpi_label": label_map.get(kpi_key, kpi_key),
+                "management_case": None,
+                "stress_cases": [],
+            }
+        entry = by_kpi[kpi_key]
+        scenario_kind = (r.get("scenario_kind") or r.get("case_type") or "").strip()
+        point = {
+            "period_flag": r["period_flag"],
+            "period_label": r["period_label"],
+            "period_ordinal": r["period_ordinal"],
+            "value": float(r["value"]) if r["value"] is not None else None,
+            "forecast_period_item_id": r["forecast_period_item_id"],
+        }
+
+        if scenario_kind == "management_case":
+            if entry["management_case"] is None:
+                entry["management_case"] = {
+                    "forecast_case_id": r["forecast_case_id"],
+                    "forecast_case_version_id": r["forecast_case_version_id"],
+                    "version_label": r["version_label"],
+                    "case_name": r["case_name"],
+                    "series": [],
+                }
+            entry["management_case"]["series"].append(point)
+        else:
+            # Grouped by (forecast_case_id) — first point seeds the block
+            existing = next(
+                (s for s in entry["stress_cases"] if s["forecast_case_id"] == r["forecast_case_id"]),
+                None,
+            )
+            if existing is None:
+                existing = {
+                    "forecast_case_id": r["forecast_case_id"],
+                    "forecast_case_version_id": r["forecast_case_version_id"],
+                    "case_key": r["case_key"],
+                    "case_name": r["case_name"],
+                    "scenario_kind": scenario_kind or "combined_downside",
+                    "stress_label": r.get("stress_label"),
+                    "driving_risk_id": r.get("driving_risk_id"),
+                    "driving_risk_code": r.get("driving_risk_code"),
+                    "driving_risk_commentary": r.get("driving_risk_commentary"),
+                    "series": [],
+                }
+                entry["stress_cases"].append(existing)
+            existing["series"].append(point)
+
+    # Order stress_cases: combined_downside first, then single_variant_stress, alpha by case_key
+    def _stress_sort_key(s):
+        kind_rank = 0 if s["scenario_kind"] == "combined_downside" else 1 if s["scenario_kind"] == "single_variant_stress" else 2
+        return (kind_rank, s.get("case_key") or "")
+
+    for entry in by_kpi.values():
+        entry["stress_cases"].sort(key=_stress_sort_key)
+
+    # Sort KPIs by line_key (sector_kpi_1, _2, …)
+    def _kpi_sort_key(k):
+        import re as _re
+        m = _re.match(r"sector_kpi_(\d+)", k)
+        return int(m.group(1)) if m else 999
+
+    return sorted(by_kpi.values(), key=lambda e: _kpi_sort_key(e["kpi_key"]))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

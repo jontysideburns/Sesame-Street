@@ -195,6 +195,123 @@ INSERT INTO holdings (account_id, deal_id, current_amount, acquisition_date, sta
 SELECT 3, d.id, 200000000, '2019-04-01'::date, 'active' FROM deals d WHERE slug='gatwick-airport' UNION ALL
 SELECT 5, d.id, 136500000, '2019-04-01'::date, 'active' FROM deals d WHERE slug='gatwick-airport';
 
+-- ─── KPI scenario series (management + combined_downside + pandemic stress) ──
+-- Three forecast_cases hold the KPI series: the IC-baseline management case,
+-- a combined downside stress, and a single-variant pandemic passenger shock
+-- linked back to the RISK-AP-001 entry via driving_risk_id.
+
+-- A. combined_downside case + v1
+INSERT INTO forecast_cases (deal_id, case_key, case_name, case_type, scenario_kind,
+                            comparison_priority, drives_monitoring, owner_name, summary, created_at)
+SELECT d.id, 'gatwick-downside', 'Combined downside', 'combined_downside', 'combined_downside',
+       3, FALSE, 'Credit Committee',
+       'Combined downside capturing material softening across passengers, margin, and coverage.',
+       NOW()
+FROM deals d WHERE d.slug='gatwick-airport'
+ON CONFLICT (deal_id, case_key) DO NOTHING;
+
+INSERT INTO forecast_case_versions (forecast_case_id, version_number, version_label, version_status,
+                                    source_domain, summary, effective_from, activated_at, is_active)
+SELECT fc.id, 1, 'IC v1', 'active', 'ic_memo', 'IC-approved combined downside at origination.',
+       '2019-04-01'::date, '2019-04-01T09:00:00Z'::timestamptz, TRUE
+FROM forecast_cases fc JOIN deals d ON d.id = fc.deal_id
+WHERE d.slug='gatwick-airport' AND fc.case_key='gatwick-downside'
+ON CONFLICT (forecast_case_id, version_number) DO NOTHING;
+
+-- B. single_variant_stress for the pandemic passenger shock, linked to RISK-AP-001
+INSERT INTO forecast_cases (deal_id, case_key, case_name, case_type, scenario_kind,
+                            comparison_priority, drives_monitoring, owner_name, summary, created_at,
+                            driving_risk_id, stress_label)
+SELECT d.id, 'gatwick-stress-pandemic', 'Stress — pandemic passenger shock',
+       'single_variant_stress', 'single_variant_stress',
+       5, FALSE, 'Credit Committee',
+       'Single-variant stress reflecting a repeat of a pandemic-style passenger collapse on sector_kpi_1.',
+       NOW(),
+       drr.id,
+       'Pandemic passenger shock'
+FROM deals d
+JOIN deal_risk_register drr ON drr.deal_id = d.id AND drr.risk_id = 'RISK-AP-001'
+WHERE d.slug='gatwick-airport'
+ON CONFLICT (deal_id, case_key) DO NOTHING;
+
+INSERT INTO forecast_case_versions (forecast_case_id, version_number, version_label, version_status,
+                                    source_domain, summary, effective_from, activated_at, is_active)
+SELECT fc.id, 1, 'IC v1', 'active', 'ic_memo',
+       'IC-approved pandemic passenger shock trajectory at origination.',
+       '2019-04-01'::date, '2019-04-01T09:00:00Z'::timestamptz, TRUE
+FROM forecast_cases fc JOIN deals d ON d.id = fc.deal_id
+WHERE d.slug='gatwick-airport' AND fc.case_key='gatwick-stress-pandemic'
+ON CONFLICT (forecast_case_id, version_number) DO NOTHING;
+
+-- C. Management case KPI series for FY2025–FY2033 (9 periods)
+INSERT INTO forecast_period_items (deal_id, forecast_case_version_id, reporting_period_id, line_key, value)
+SELECT d.id, fcv.id, drp.id, kpi.line_key, kpi.value
+FROM deals d
+JOIN forecast_cases fc ON fc.deal_id = d.id AND fc.case_key = 'management_case'
+JOIN forecast_case_versions fcv ON fcv.forecast_case_id = fc.id AND fcv.is_active = TRUE
+JOIN deal_reporting_periods drp ON drp.deal_id = d.id
+JOIN (VALUES
+    ('FY2025', 'sector_kpi_1', 44.0),  ('FY2026', 'sector_kpi_1', 46.0),  ('FY2027', 'sector_kpi_1', 48.0),
+    ('FY2028', 'sector_kpi_1', 49.0),  ('FY2029', 'sector_kpi_1', 49.5),  ('FY2030', 'sector_kpi_1', 50.0),
+    ('FY2031', 'sector_kpi_1', 50.0),  ('FY2032', 'sector_kpi_1', 50.0),  ('FY2033', 'sector_kpi_1', 50.0),
+    ('FY2025', 'sector_kpi_2',  5.5),  ('FY2026', 'sector_kpi_2',  5.7),  ('FY2027', 'sector_kpi_2',  5.9),
+    ('FY2028', 'sector_kpi_2',  6.1),  ('FY2029', 'sector_kpi_2',  6.3),  ('FY2030', 'sector_kpi_2',  6.4),
+    ('FY2031', 'sector_kpi_2',  6.5),  ('FY2032', 'sector_kpi_2',  6.6),  ('FY2033', 'sector_kpi_2',  6.7),
+    ('FY2025', 'sector_kpi_3', 52.0),  ('FY2026', 'sector_kpi_3', 53.0),  ('FY2027', 'sector_kpi_3', 54.0),
+    ('FY2028', 'sector_kpi_3', 55.0),  ('FY2029', 'sector_kpi_3', 55.0),  ('FY2030', 'sector_kpi_3', 55.0),
+    ('FY2031', 'sector_kpi_3', 55.0),  ('FY2032', 'sector_kpi_3', 55.0),  ('FY2033', 'sector_kpi_3', 55.0),
+    ('FY2025', 'sector_kpi_4',  4.0),  ('FY2026', 'sector_kpi_4',  4.2),  ('FY2027', 'sector_kpi_4',  4.4),
+    ('FY2028', 'sector_kpi_4',  4.6),  ('FY2029', 'sector_kpi_4',  4.8),  ('FY2030', 'sector_kpi_4',  5.0),
+    ('FY2031', 'sector_kpi_4',  5.2),  ('FY2032', 'sector_kpi_4',  5.4),  ('FY2033', 'sector_kpi_4',  5.6),
+    ('FY2025', 'sector_kpi_5',  0.48), ('FY2026', 'sector_kpi_5',  0.46), ('FY2027', 'sector_kpi_5',  0.44),
+    ('FY2028', 'sector_kpi_5',  0.42), ('FY2029', 'sector_kpi_5',  0.40), ('FY2030', 'sector_kpi_5',  0.38),
+    ('FY2031', 'sector_kpi_5',  0.36), ('FY2032', 'sector_kpi_5',  0.34), ('FY2033', 'sector_kpi_5',  0.32)
+) AS kpi(period_flag, line_key, value) ON kpi.period_flag = drp.period_flag
+WHERE d.slug='gatwick-airport'
+ON CONFLICT (forecast_case_version_id, reporting_period_id, line_key) DO NOTHING;
+
+-- D. Combined downside KPI series (all 5 KPIs materially softer)
+INSERT INTO forecast_period_items (deal_id, forecast_case_version_id, reporting_period_id, line_key, value)
+SELECT d.id, fcv.id, drp.id, kpi.line_key, kpi.value
+FROM deals d
+JOIN forecast_cases fc ON fc.deal_id = d.id AND fc.case_key = 'gatwick-downside'
+JOIN forecast_case_versions fcv ON fcv.forecast_case_id = fc.id AND fcv.is_active = TRUE
+JOIN deal_reporting_periods drp ON drp.deal_id = d.id
+JOIN (VALUES
+    ('FY2025', 'sector_kpi_1', 35.0),  ('FY2026', 'sector_kpi_1', 36.0),  ('FY2027', 'sector_kpi_1', 38.0),
+    ('FY2028', 'sector_kpi_1', 40.0),  ('FY2029', 'sector_kpi_1', 42.0),  ('FY2030', 'sector_kpi_1', 43.0),
+    ('FY2031', 'sector_kpi_1', 44.0),  ('FY2032', 'sector_kpi_1', 45.0),  ('FY2033', 'sector_kpi_1', 45.0),
+    ('FY2025', 'sector_kpi_2',  4.8),  ('FY2026', 'sector_kpi_2',  5.0),  ('FY2027', 'sector_kpi_2',  5.1),
+    ('FY2028', 'sector_kpi_2',  5.2),  ('FY2029', 'sector_kpi_2',  5.3),  ('FY2030', 'sector_kpi_2',  5.3),
+    ('FY2031', 'sector_kpi_2',  5.4),  ('FY2032', 'sector_kpi_2',  5.4),  ('FY2033', 'sector_kpi_2',  5.5),
+    ('FY2025', 'sector_kpi_3', 40.0),  ('FY2026', 'sector_kpi_3', 42.0),  ('FY2027', 'sector_kpi_3', 45.0),
+    ('FY2028', 'sector_kpi_3', 47.0),  ('FY2029', 'sector_kpi_3', 48.0),  ('FY2030', 'sector_kpi_3', 49.0),
+    ('FY2031', 'sector_kpi_3', 50.0),  ('FY2032', 'sector_kpi_3', 50.0),  ('FY2033', 'sector_kpi_3', 50.0),
+    ('FY2025', 'sector_kpi_4',  2.0),  ('FY2026', 'sector_kpi_4',  2.2),  ('FY2027', 'sector_kpi_4',  2.5),
+    ('FY2028', 'sector_kpi_4',  2.8),  ('FY2029', 'sector_kpi_4',  3.0),  ('FY2030', 'sector_kpi_4',  3.2),
+    ('FY2031', 'sector_kpi_4',  3.4),  ('FY2032', 'sector_kpi_4',  3.5),  ('FY2033', 'sector_kpi_4',  3.6),
+    ('FY2025', 'sector_kpi_5',  0.55), ('FY2026', 'sector_kpi_5',  0.53), ('FY2027', 'sector_kpi_5',  0.52),
+    ('FY2028', 'sector_kpi_5',  0.50), ('FY2029', 'sector_kpi_5',  0.49), ('FY2030', 'sector_kpi_5',  0.48),
+    ('FY2031', 'sector_kpi_5',  0.47), ('FY2032', 'sector_kpi_5',  0.46), ('FY2033', 'sector_kpi_5',  0.45)
+) AS kpi(period_flag, line_key, value) ON kpi.period_flag = drp.period_flag
+WHERE d.slug='gatwick-airport'
+ON CONFLICT (forecast_case_version_id, reporting_period_id, line_key) DO NOTHING;
+
+-- E. Pandemic passenger shock single-variant stress — only affects sector_kpi_1 (Passengers)
+INSERT INTO forecast_period_items (deal_id, forecast_case_version_id, reporting_period_id, line_key, value)
+SELECT d.id, fcv.id, drp.id, 'sector_kpi_1', v.value
+FROM deals d
+JOIN forecast_cases fc ON fc.deal_id = d.id AND fc.case_key = 'gatwick-stress-pandemic'
+JOIN forecast_case_versions fcv ON fcv.forecast_case_id = fc.id AND fcv.is_active = TRUE
+JOIN deal_reporting_periods drp ON drp.deal_id = d.id
+JOIN (VALUES
+    ('FY2025', 15.0), ('FY2026', 30.0), ('FY2027', 40.0),
+    ('FY2028', 45.0), ('FY2029', 48.0), ('FY2030', 50.0),
+    ('FY2031', 50.0), ('FY2032', 50.0), ('FY2033', 50.0)
+) AS v(period_flag, value) ON v.period_flag = drp.period_flag
+WHERE d.slug='gatwick-airport'
+ON CONFLICT (forecast_case_version_id, reporting_period_id, line_key) DO NOTHING;
+
 COMMIT;
 
 SELECT id, slug, name FROM deals WHERE slug='gatwick-airport';

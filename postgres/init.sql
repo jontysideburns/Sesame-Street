@@ -2963,29 +2963,11 @@ ALTER TABLE deals ADD COLUMN IF NOT EXISTS merchant_revenue_pct DECIMAL;
 ALTER TABLE deals ADD COLUMN IF NOT EXISTS primary_contract_expiry DATE;
 ALTER TABLE deals ADD COLUMN IF NOT EXISTS duration_coverage_pct DECIMAL;
 
--- IC Memo KPI targets — origination expectations per scenario
-CREATE TABLE IF NOT EXISTS deal_kpi_targets (
-    id                  SERIAL PRIMARY KEY,
-    deal_id             INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
-    kpi_key             TEXT NOT NULL,
-    kpi_label           TEXT NOT NULL,
-    scenario            TEXT NOT NULL,
-    target_value        NUMERIC,
-    target_floor        NUMERIC,
-    target_ceiling      NUMERIC,
-    direction           TEXT NOT NULL DEFAULT 'higher_is_better',
-    unit                TEXT NOT NULL DEFAULT 'count',
-    source              TEXT,
-    source_date         DATE,
-    notes               TEXT,
-    created_at          TIMESTAMPTZ DEFAULT NOW(),
-    updated_at          TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE(deal_id, kpi_key, scenario)
-);
-CREATE INDEX idx_dkt_deal ON deal_kpi_targets(deal_id);
-CREATE INDEX idx_dkt_scenario ON deal_kpi_targets(deal_id, scenario);
-
 -- KPI observations — actuals per period with proximity-to-stress computation
+-- Note: IC Memo KPI expectations are stored as time-series in forecast_period_items
+-- (with line_key LIKE 'sector_kpi_%' and forecast_case_version tied to management_case
+-- or a stress forecast_case linked back to deal_risk_register via driving_risk_id).
+-- See docs/architecture/kpi-scenarios.md.
 CREATE TABLE IF NOT EXISTS deal_kpi_observations (
     id                      SERIAL PRIMARY KEY,
     deal_id                 INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
@@ -3613,36 +3595,68 @@ CREATE TABLE IF NOT EXISTS forecast_model_metadata (
 );
 CREATE INDEX idx_fmm_deal ON forecast_model_metadata(deal_id);
 
--- SEED: IC Memo KPI targets and observations for Aurora Prime (deal_id = 1)
+-- SEED: IC Memo KPI scenario series for Aurora Prime (deal_id = 1)
 -- ═══════════════════════════════════════════════════════════════════════════════
+-- Stored as forecast_period_items under (management_case, combined_downside)
+-- forecast_case_versions, same machinery that holds the financial-line forecasts.
+-- Values are held constant across all reporting periods (scalar-bridged from the
+-- prior deal_kpi_targets shape — a real IC memo would vary these year by year).
 
--- Base case targets (from IC memo at origination)
-INSERT INTO deal_kpi_targets (deal_id, kpi_key, kpi_label, scenario, target_value, target_floor, direction, unit, source, source_date) VALUES
-(1, 'sector_kpi_1',  'Contracted Capacity (MW)',           'base_case', 36.0,  30.0,  'higher_is_better', 'count',      'ic_memo', '2023-03-01'),
-(1, 'sector_kpi_2',  'Leased Capacity (%)',                'base_case', 75.0,  60.0,  'higher_is_better', 'percentage', 'ic_memo', '2023-03-01'),
-(1, 'sector_kpi_3',  'PUE',                                'base_case', 1.25,  NULL,  'lower_is_better',  'ratio',      'ic_memo', '2023-03-01'),
-(1, 'sector_kpi_4',  'Weighted Average Lease Term (yrs)',  'base_case', 7.0,   5.0,   'higher_is_better', 'years',      'ic_memo', '2023-03-01'),
-(1, 'sector_kpi_5',  'Blended $/kW/month',                'base_case', 145.0, 120.0, 'higher_is_better', 'currency',   'ic_memo', '2023-03-01'),
-(1, 'sector_kpi_6',  'GPU Utilisation (%)',                'base_case', 70.0,  50.0,  'higher_is_better', 'percentage', 'ic_memo', '2023-03-01'),
-(1, 'sector_kpi_7',  'Customer Concentration (top 3 %)',   'base_case', 55.0,  NULL,  'lower_is_better',  'percentage', 'ic_memo', '2023-03-01'),
-(1, 'sector_kpi_8',  'Availability (% uptime)',            'base_case', 99.95, 99.5,  'higher_is_better', 'percentage', 'ic_memo', '2023-03-01'),
-(1, 'sector_kpi_9',  'Carbon Intensity (tCO2e/MW)',        'base_case', 0.35,  NULL,  'lower_is_better',  'ratio',      'ic_memo', '2023-03-01'),
-(1, 'sector_kpi_10', 'Capex per MW Installed',             'base_case', 7.5,   NULL,  'lower_is_better',  'currency',   'ic_memo', '2023-03-01')
-ON CONFLICT (deal_id, kpi_key, scenario) DO NOTHING;
+-- Management case (IC baseline) KPI series — 10 KPIs × every Aurora reporting period
+INSERT INTO forecast_period_items (deal_id, forecast_case_version_id, reporting_period_id, line_key, value)
+SELECT 1, fcv.id, drp.id, kpi.kpi_key, kpi.value
+FROM (VALUES
+    ('sector_kpi_1',   36.0),   -- Contracted Capacity (MW)
+    ('sector_kpi_2',   75.0),   -- Leased Capacity (%)
+    ('sector_kpi_3',    1.25),  -- PUE
+    ('sector_kpi_4',    7.0),   -- WALT (yrs)
+    ('sector_kpi_5',  145.0),   -- Blended $/kW/month
+    ('sector_kpi_6',   70.0),   -- GPU Utilisation (%)
+    ('sector_kpi_7',   55.0),   -- Customer Concentration (top 3 %)
+    ('sector_kpi_8',   99.95),  -- Availability (%)
+    ('sector_kpi_9',    0.35),  -- Carbon Intensity (tCO2e/MW)
+    ('sector_kpi_10',   7.5)    -- Capex per MW Installed
+) AS kpi(kpi_key, value)
+CROSS JOIN deal_reporting_periods drp
+JOIN forecast_cases fc ON fc.deal_id = 1 AND (fc.scenario_kind = 'management_case' OR fc.case_type = 'management_case')
+JOIN forecast_case_versions fcv ON fcv.forecast_case_id = fc.id AND fcv.is_active = TRUE
+WHERE drp.deal_id = 1
+ON CONFLICT (forecast_case_version_id, reporting_period_id, line_key) DO NOTHING;
 
--- Stress case targets (downside scenario from IC memo)
-INSERT INTO deal_kpi_targets (deal_id, kpi_key, kpi_label, scenario, target_value, direction, unit, source, source_date, notes) VALUES
-(1, 'sector_kpi_1',  'Contracted Capacity (MW)',           'stress_case', 36.0,  'higher_is_better', 'count',      'ic_memo', '2023-03-01', 'Capacity fixed at build spec'),
-(1, 'sector_kpi_2',  'Leased Capacity (%)',                'stress_case', 50.0,  'higher_is_better', 'percentage', 'ic_memo', '2023-03-01', 'Lease-up stalls at 50%'),
-(1, 'sector_kpi_3',  'PUE',                                'stress_case', 1.45,  'lower_is_better',  'ratio',      'ic_memo', '2023-03-01', 'Cooling inefficiency in summer peaks'),
-(1, 'sector_kpi_4',  'Weighted Average Lease Term (yrs)',  'stress_case', 3.5,   'higher_is_better', 'years',      'ic_memo', '2023-03-01', 'Short-term contracts only'),
-(1, 'sector_kpi_5',  'Blended $/kW/month',                'stress_case', 105.0, 'higher_is_better', 'currency',   'ic_memo', '2023-03-01', 'Pricing pressure from hyperscale competition'),
-(1, 'sector_kpi_6',  'GPU Utilisation (%)',                'stress_case', 35.0,  'higher_is_better', 'percentage', 'ic_memo', '2023-03-01', 'AI demand does not materialise'),
-(1, 'sector_kpi_7',  'Customer Concentration (top 3 %)',   'stress_case', 80.0,  'lower_is_better',  'percentage', 'ic_memo', '2023-03-01', 'Single anchor tenant dominance'),
-(1, 'sector_kpi_8',  'Availability (% uptime)',            'stress_case', 98.5,  'higher_is_better', 'percentage', 'ic_memo', '2023-03-01', 'Major outage event'),
-(1, 'sector_kpi_9',  'Carbon Intensity (tCO2e/MW)',        'stress_case', 0.55,  'lower_is_better',  'ratio',      'ic_memo', '2023-03-01', 'Grid decarbonisation stalls'),
-(1, 'sector_kpi_10', 'Capex per MW Installed',             'stress_case', 9.5,   'lower_is_better',  'currency',   'ic_memo', '2023-03-01', 'Construction cost overruns')
-ON CONFLICT (deal_id, kpi_key, scenario) DO NOTHING;
+-- Combined downside KPI series — stress values held across all periods
+INSERT INTO forecast_period_items (deal_id, forecast_case_version_id, reporting_period_id, line_key, value)
+SELECT 1, fcv.id, drp.id, kpi.kpi_key, kpi.value
+FROM (VALUES
+    ('sector_kpi_1',   36.0),   -- Capacity fixed at build spec
+    ('sector_kpi_2',   50.0),   -- Lease-up stalls at 50%
+    ('sector_kpi_3',    1.45),  -- Cooling inefficiency
+    ('sector_kpi_4',    3.5),   -- Short-term contracts only
+    ('sector_kpi_5',  105.0),   -- Pricing pressure from hyperscale
+    ('sector_kpi_6',   35.0),   -- AI demand does not materialise
+    ('sector_kpi_7',   80.0),   -- Single anchor tenant dominance
+    ('sector_kpi_8',   98.5),   -- Major outage event
+    ('sector_kpi_9',    0.55),  -- Grid decarbonisation stalls
+    ('sector_kpi_10',   9.5)    -- Construction cost overruns
+) AS kpi(kpi_key, value)
+CROSS JOIN deal_reporting_periods drp
+JOIN forecast_cases fc ON fc.deal_id = 1 AND (fc.scenario_kind = 'combined_downside' OR fc.case_type = 'combined_downside')
+JOIN forecast_case_versions fcv ON fcv.forecast_case_id = fc.id AND fcv.is_active = TRUE
+WHERE drp.deal_id = 1
+ON CONFLICT (forecast_case_version_id, reporting_period_id, line_key) DO NOTHING;
+
+-- Register the Aurora KPI display labels for per-deal label override
+INSERT INTO deal_line_item_labels (deal_id, line_key, display_label, ordinal, is_active) VALUES
+(1, 'sector_kpi_1',  'Contracted Capacity (MW)',          1, TRUE),
+(1, 'sector_kpi_2',  'Leased Capacity (%)',               2, TRUE),
+(1, 'sector_kpi_3',  'PUE',                               3, TRUE),
+(1, 'sector_kpi_4',  'Weighted Average Lease Term (yrs)', 4, TRUE),
+(1, 'sector_kpi_5',  'Blended $/kW/month',                5, TRUE),
+(1, 'sector_kpi_6',  'GPU Utilisation (%)',               6, TRUE),
+(1, 'sector_kpi_7',  'Customer Concentration (top 3 %)',  7, TRUE),
+(1, 'sector_kpi_8',  'Availability (% uptime)',           8, TRUE),
+(1, 'sector_kpi_9',  'Carbon Intensity (tCO2e/MW)',       9, TRUE),
+(1, 'sector_kpi_10', 'Capex per MW Installed',           10, TRUE)
+ON CONFLICT (deal_id, line_key) DO NOTHING;
 
 -- KPI observations — Q1 2026 and Q2 2026 (mostly on track, GPU utilisation drifting toward stress)
 INSERT INTO deal_kpi_observations (deal_id, reporting_period_id, kpi_key, kpi_label, observed_value, base_case_target, stress_case_target, variance_to_base, variance_to_base_pct, deviation_to_stress, status, source, observed_at) VALUES

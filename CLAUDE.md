@@ -120,8 +120,20 @@ docker exec docker-postgres-1 psql -U sesame -d sesamestreet -f //migrations//mi
 - Pari-passu grouping, issuing entity linkage, instrument format on capital structure
 
 ### IC Memo KPI Monitoring
-- `deal_kpi_targets` — base case and stress case KPI expectations from IC memo
-- `deal_kpi_observations` — actual KPI values with `deviation_to_stress` (0% = at base, 100% = at stress)
+- KPI expectations are **time series**, not scalars. Stored in `forecast_period_items`
+  under `forecast_cases` / `forecast_case_versions`, same machinery that holds
+  financial-line forecasts.
+- `forecast_cases.scenario_kind` ∈ `{management_case, credit_case, lender_case,
+  combined_downside, single_variant_stress, custom}`.
+- Management case = IC-memo baseline. Combined downside bundles several stressed
+  risks. Single-variant stresses are sparse, risk-linked (via
+  `forecast_cases.driving_risk_id` → `deal_risk_register(id)`), and cover only
+  the KPIs the IC explicitly stressed.
+- `deal_kpi_observations` — actual KPI values with `deviation_to_stress`
+  (0% = at management case, 100% = at combined downside, >100% = worse) and
+  `base_forecast_item_id` / `stress_forecast_item_id` FKs for audit trace.
+- See [docs/architecture/kpi-scenarios.md](docs/architecture/kpi-scenarios.md)
+  for the full pattern and the worked Gatwick example.
 
 ### Moody's Financial Ratios
 - FFO, RCF, Total Debt Service as computed building blocks

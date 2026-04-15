@@ -242,26 +242,54 @@ sql += "\nON CONFLICT (forecast_case_version_id, reporting_period_id, line_key) 
 
 run_sql(sql)
 
-# ── KPI targets ──
+# ── KPI scenario series (management_case + combined_downside, held constant across periods)
 run_sql(f"""
-INSERT INTO deal_kpi_targets (deal_id, kpi_key, kpi_label, scenario, target_value, target_floor, direction, unit, source, source_date) VALUES
-({DEAL_ID}, 'sector_kpi_1', 'Technical Availability (%)', 'base_case', 98, 95, 'higher_is_better', 'percentage', 'ic_memo', '2026-01-01'),
-({DEAL_ID}, 'sector_kpi_2', 'Performance Ratio (%)', 'base_case', 82, 78, 'higher_is_better', 'percentage', 'ic_memo', '2026-01-01'),
-({DEAL_ID}, 'sector_kpi_3', 'Degradation Rate (% pa)', 'base_case', 0.5, NULL, 'lower_is_better', 'percentage', 'ic_memo', '2026-01-01'),
-({DEAL_ID}, 'sector_kpi_4', 'Solar Irradiance (kWh/m2)', 'base_case', 1050, 900, 'higher_is_better', 'count', 'ic_memo', '2026-01-01'),
-({DEAL_ID}, 'sector_kpi_5', 'Net Generation (GWh)', 'base_case', 110, 95, 'higher_is_better', 'count', 'ic_memo', '2026-01-01'),
-({DEAL_ID}, 'sector_kpi_6', 'Capacity Factor (%)', 'base_case', 12.5, 10.5, 'higher_is_better', 'percentage', 'ic_memo', '2026-01-01'),
-({DEAL_ID}, 'sector_kpi_7', 'PPA Price (GBP/MWh)', 'base_case', 65, 65, 'higher_is_better', 'currency', 'ic_memo', '2026-01-01'),
-({DEAL_ID}, 'sector_kpi_8', 'Grid Curtailment (%)', 'base_case', 2, 5, 'lower_is_better', 'percentage', 'ic_memo', '2026-01-01')
-ON CONFLICT (deal_id, kpi_key, scenario) DO NOTHING;
+-- Management case (IC baseline) KPI series for Wigmore Solar
+INSERT INTO forecast_period_items (deal_id, forecast_case_version_id, reporting_period_id, line_key, value)
+SELECT {DEAL_ID}, fcv.id, drp.id, kpi.kpi_key, kpi.value
+FROM (VALUES
+    ('sector_kpi_1',   98.0),    -- Technical Availability (%)
+    ('sector_kpi_2',   82.0),    -- Performance Ratio (%)
+    ('sector_kpi_3',    0.5),    -- Degradation Rate (% pa)
+    ('sector_kpi_4', 1050.0),    -- Solar Irradiance (kWh/m2)
+    ('sector_kpi_5',  110.0),    -- Net Generation (GWh)
+    ('sector_kpi_6',   12.5),    -- Capacity Factor (%)
+    ('sector_kpi_7',   65.0),    -- PPA Price (GBP/MWh)
+    ('sector_kpi_8',    2.0)     -- Grid Curtailment (%)
+) AS kpi(kpi_key, value)
+CROSS JOIN deal_reporting_periods drp
+JOIN forecast_cases fc ON fc.deal_id = {DEAL_ID} AND (fc.scenario_kind = 'management_case' OR fc.case_type = 'management_case')
+JOIN forecast_case_versions fcv ON fcv.forecast_case_id = fc.id AND fcv.is_active = TRUE
+WHERE drp.deal_id = {DEAL_ID}
+ON CONFLICT (forecast_case_version_id, reporting_period_id, line_key) DO NOTHING;
 
-INSERT INTO deal_kpi_targets (deal_id, kpi_key, kpi_label, scenario, target_value, direction, unit, source, source_date, notes) VALUES
-({DEAL_ID}, 'sector_kpi_1', 'Technical Availability (%)', 'stress_case', 92, 'higher_is_better', 'percentage', 'ic_memo', '2026-01-01', 'Major inverter failure'),
-({DEAL_ID}, 'sector_kpi_2', 'Performance Ratio (%)', 'stress_case', 72, 'higher_is_better', 'percentage', 'ic_memo', '2026-01-01', 'Soiling + degradation'),
-({DEAL_ID}, 'sector_kpi_4', 'Solar Irradiance (kWh/m2)', 'stress_case', 850, 'higher_is_better', 'count', 'ic_memo', '2026-01-01', 'P90 solar resource'),
-({DEAL_ID}, 'sector_kpi_5', 'Net Generation (GWh)', 'stress_case', 85, 'higher_is_better', 'count', 'ic_memo', '2026-01-01', 'Low irradiance + degradation'),
-({DEAL_ID}, 'sector_kpi_8', 'Grid Curtailment (%)', 'stress_case', 8, 'lower_is_better', 'percentage', 'ic_memo', '2026-01-01', 'Grid congestion')
-ON CONFLICT (deal_id, kpi_key, scenario) DO NOTHING;
+-- Combined downside KPI series
+INSERT INTO forecast_period_items (deal_id, forecast_case_version_id, reporting_period_id, line_key, value)
+SELECT {DEAL_ID}, fcv.id, drp.id, kpi.kpi_key, kpi.value
+FROM (VALUES
+    ('sector_kpi_1',   92.0),   -- Technical Availability stress
+    ('sector_kpi_2',   72.0),   -- Performance Ratio stress
+    ('sector_kpi_4',  850.0),   -- P90 solar resource
+    ('sector_kpi_5',   85.0),   -- Low generation
+    ('sector_kpi_8',    8.0)    -- Grid congestion
+) AS kpi(kpi_key, value)
+CROSS JOIN deal_reporting_periods drp
+JOIN forecast_cases fc ON fc.deal_id = {DEAL_ID} AND (fc.scenario_kind = 'combined_downside' OR fc.case_type = 'combined_downside')
+JOIN forecast_case_versions fcv ON fcv.forecast_case_id = fc.id AND fcv.is_active = TRUE
+WHERE drp.deal_id = {DEAL_ID}
+ON CONFLICT (forecast_case_version_id, reporting_period_id, line_key) DO NOTHING;
+
+-- Register KPI display labels
+INSERT INTO deal_line_item_labels (deal_id, line_key, display_label, ordinal, is_active) VALUES
+({DEAL_ID}, 'sector_kpi_1', 'Technical Availability (%)', 1, TRUE),
+({DEAL_ID}, 'sector_kpi_2', 'Performance Ratio (%)',      2, TRUE),
+({DEAL_ID}, 'sector_kpi_3', 'Degradation Rate (% pa)',    3, TRUE),
+({DEAL_ID}, 'sector_kpi_4', 'Solar Irradiance (kWh/m2)',  4, TRUE),
+({DEAL_ID}, 'sector_kpi_5', 'Net Generation (GWh)',       5, TRUE),
+({DEAL_ID}, 'sector_kpi_6', 'Capacity Factor (%)',        6, TRUE),
+({DEAL_ID}, 'sector_kpi_7', 'PPA Price (GBP/MWh)',        7, TRUE),
+({DEAL_ID}, 'sector_kpi_8', 'Grid Curtailment (%)',       8, TRUE)
+ON CONFLICT (deal_id, line_key) DO NOTHING;
 """)
 
 print(f"\nWigmore Solar (deal {DEAL_ID}) fully ingested.")

@@ -236,16 +236,29 @@ Three-tier covenant configuration. One row per tested ratio.
 
 **Ratio Level (new in v8 — column L):** which entity level the covenant is actually tested at. Values: `opco` | `midco` | `holdco` | `consolidated` (full, for wholly-owned groups) | `proportional_consolidated` (uses the proportional consolidation engine described in Tab 2 / Tab 7). For a typical PF deal this is `opco`. For a HoldCo-level covenant taken on a 75%-owned asset, use `proportional_consolidated` so the covenant is tested on the proportionally-consolidated numbers.
 
-### Tab 9: KPI Targets
+### Tab 9: KPI Scenario Series
 
-IC memo KPI expectations. These are frozen at ingestion and used to monitor performance deviation.
+IC-memo KPI expectations, recorded as **time series** (one row per scenario × period × KPI). Frozen at ingestion and used to monitor performance deviation year-by-year.
 
-**Enter both base case and stress case values for each KPI.**
+**Schema:**
 
-**Key fields:**
-- **Direction:** higher_is_better (e.g. availability, capacity factor) or lower_is_better (e.g. PUE, curtailment, O&M cost)
-- **Unit:** percentage, currency, count, ratio, years, bps
-- **Source:** ic_memo (from investment committee paper), business_plan (from borrower), management_presentation, lender_model
+| Column | Required | Values / format | Notes |
+|---|---|---|---|
+| `kpi_key` | yes | `sector_kpi_1` … `sector_kpi_10` | Must match a slot in `deal_line_item_labels` |
+| `kpi_label` | yes | Free text | Human label, e.g. "Passengers (millions)" |
+| `scenario_kind` | yes | `management_case` / `single_variant_stress` / `combined_downside` / `credit_case` / `lender_case` / `custom` | Discriminates the scenario |
+| `stress_label` | when single-variant | Free text | Human name for the stress, e.g. "P90 wind resource" |
+| `driving_risk_ref` | when single-variant | `RISK-XX-NNN` | Must match a `risk_id` in the Tab 6 risk register — creates the link back to the IC-identified risk |
+| `period_flag` | yes | `FY2026`, `2026Q1`, etc. | Must match a row in `deal_reporting_periods` for this deal |
+| `value` | yes | Numeric | The expected value for this (scenario, period, KPI) |
+
+**Scenario kinds — when to use each:**
+- **`management_case`** — IC baseline trajectory. Every actively monitored KPI should have one. Populate across every period the IC projected.
+- **`combined_downside`** — aggregate downside bundling several stressed risks. One per deal. This is "the" stress line the dashboard treats as the floor.
+- **`single_variant_stress`** — individual sensitivity on one IC-identified risk (e.g. "Pandemic passenger shock" → passengers KPI only). Sparse: only populate the KPIs the stress actually affects. Zero, one, or many per deal. Must link back to the risk register.
+- **`credit_case`** / **`lender_case`** — lender-adjusted cases. Typically modelled on financials rather than KPIs, but supported for completeness.
+
+**Sparse rows are fine.** Leave the row blank if a scenario doesn't have a value for that KPI × period combination — no row written.
 
 **Typical KPIs by sector:**
 - **Wind:** Capacity factor, P50 yield, availability, wind speed, curtailment
@@ -254,6 +267,18 @@ IC memo KPI expectations. These are frozen at ingestion and used to monitor perf
 - **Toll Road:** AADT, traffic growth, toll rate, heavy vehicle mix
 - **Port:** TEU volume, capacity utilisation, revenue per TEU
 - **Real Estate:** Occupancy, WAULT, ERV, cap rate
+- **Airport:** Passengers, net retail per PAX, EBITDA margin, Senior ICR, Senior RAR
+
+**Example — Gatwick pandemic passenger shock:**
+
+| kpi_key | kpi_label | scenario_kind | stress_label | driving_risk_ref | period_flag | value |
+|---|---|---|---|---|---|---|
+| sector_kpi_1 | Passengers (millions) | single_variant_stress | Pandemic passenger shock | RISK-AP-001 | FY2025 | 15.0 |
+| sector_kpi_1 | Passengers (millions) | single_variant_stress | Pandemic passenger shock | RISK-AP-001 | FY2026 | 30.0 |
+| sector_kpi_1 | Passengers (millions) | single_variant_stress | Pandemic passenger shock | RISK-AP-001 | FY2027 | 40.0 |
+| … | … | … | … | … | … | … |
+
+The importer creates a dedicated `forecast_case` row for each unique (scenario_kind, stress_label, driving_risk_ref) combination, resolves the FK to the risk register row, and writes `forecast_period_items` under an active `forecast_case_version`. See [docs/architecture/kpi-scenarios.md](architecture/kpi-scenarios.md).
 
 ### Tab 10: Financial Template
 
