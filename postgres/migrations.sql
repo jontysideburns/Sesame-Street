@@ -1155,5 +1155,262 @@ ALTER TABLE capital_structure_instruments
     ADD COLUMN IF NOT EXISTS security_ranking VARCHAR(40);
 
 -- ═══════════════════════════════════════════════════════════════════════════════
+-- Audit-trail architecture scaffolding (2026-04-15)
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- Adds a standardised five-column provenance block to every deal-scoped data
+-- table that powers the TopSheet, so that when the ingestion engine comes
+-- online for the first real client, every field written can carry a pointer
+-- back to the source document it came from. All columns are nullable for
+-- the demo portfolio. A follow-up migration at real-client cutover will
+-- flip these to NOT NULL / add CHECK constraints.
+--
+-- Standard block (matches the existing pattern on actual_periods):
+--   source_document_id  INTEGER REFERENCES documents(id) ON DELETE SET NULL
+--   source_page         INTEGER
+--   source_snippet      TEXT
+--   source_extracted_by TEXT   -- 'topsheet_importer' | 'manual' | 'ai_extraction:<model>' | 'Fitch Report' | ...
+--   source_extracted_at TIMESTAMPTZ
+-- Plus an index on source_document_id for reverse lookups (which fields came
+-- from which doc).
+
+-- ── Capital stack ───────────────────────────────────────────────────────────
+ALTER TABLE capital_structure_instruments ADD COLUMN IF NOT EXISTS source_document_id  INTEGER REFERENCES documents(id) ON DELETE SET NULL;
+ALTER TABLE capital_structure_instruments ADD COLUMN IF NOT EXISTS source_page         INTEGER;
+ALTER TABLE capital_structure_instruments ADD COLUMN IF NOT EXISTS source_snippet      TEXT;
+ALTER TABLE capital_structure_instruments ADD COLUMN IF NOT EXISTS source_extracted_by TEXT;
+ALTER TABLE capital_structure_instruments ADD COLUMN IF NOT EXISTS source_extracted_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_csi_src_doc ON capital_structure_instruments(source_document_id);
+
+ALTER TABLE corporate_entities ADD COLUMN IF NOT EXISTS source_document_id  INTEGER REFERENCES documents(id) ON DELETE SET NULL;
+ALTER TABLE corporate_entities ADD COLUMN IF NOT EXISTS source_page         INTEGER;
+ALTER TABLE corporate_entities ADD COLUMN IF NOT EXISTS source_snippet      TEXT;
+ALTER TABLE corporate_entities ADD COLUMN IF NOT EXISTS source_extracted_by TEXT;
+ALTER TABLE corporate_entities ADD COLUMN IF NOT EXISTS source_extracted_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_ce_src_doc ON corporate_entities(source_document_id);
+
+ALTER TABLE deal_jurisdiction_splits ADD COLUMN IF NOT EXISTS source_document_id  INTEGER REFERENCES documents(id) ON DELETE SET NULL;
+ALTER TABLE deal_jurisdiction_splits ADD COLUMN IF NOT EXISTS source_page         INTEGER;
+ALTER TABLE deal_jurisdiction_splits ADD COLUMN IF NOT EXISTS source_snippet      TEXT;
+ALTER TABLE deal_jurisdiction_splits ADD COLUMN IF NOT EXISTS source_extracted_by TEXT;
+ALTER TABLE deal_jurisdiction_splits ADD COLUMN IF NOT EXISTS source_extracted_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_djs_src_doc ON deal_jurisdiction_splits(source_document_id);
+
+-- ── Covenants & tests ───────────────────────────────────────────────────────
+ALTER TABLE covenant_thresholds ADD COLUMN IF NOT EXISTS source_document_id  INTEGER REFERENCES documents(id) ON DELETE SET NULL;
+ALTER TABLE covenant_thresholds ADD COLUMN IF NOT EXISTS source_page         INTEGER;
+ALTER TABLE covenant_thresholds ADD COLUMN IF NOT EXISTS source_snippet      TEXT;
+ALTER TABLE covenant_thresholds ADD COLUMN IF NOT EXISTS source_extracted_by TEXT;
+ALTER TABLE covenant_thresholds ADD COLUMN IF NOT EXISTS source_extracted_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_ct_src_doc ON covenant_thresholds(source_document_id);
+
+ALTER TABLE deal_distribution_conditions ADD COLUMN IF NOT EXISTS source_document_id  INTEGER REFERENCES documents(id) ON DELETE SET NULL;
+ALTER TABLE deal_distribution_conditions ADD COLUMN IF NOT EXISTS source_page         INTEGER;
+ALTER TABLE deal_distribution_conditions ADD COLUMN IF NOT EXISTS source_snippet      TEXT;
+ALTER TABLE deal_distribution_conditions ADD COLUMN IF NOT EXISTS source_extracted_by TEXT;
+ALTER TABLE deal_distribution_conditions ADD COLUMN IF NOT EXISTS source_extracted_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_ddc_src_doc ON deal_distribution_conditions(source_document_id);
+
+ALTER TABLE deal_eod_register ADD COLUMN IF NOT EXISTS source_document_id  INTEGER REFERENCES documents(id) ON DELETE SET NULL;
+ALTER TABLE deal_eod_register ADD COLUMN IF NOT EXISTS source_page         INTEGER;
+ALTER TABLE deal_eod_register ADD COLUMN IF NOT EXISTS source_snippet      TEXT;
+ALTER TABLE deal_eod_register ADD COLUMN IF NOT EXISTS source_extracted_by TEXT;
+ALTER TABLE deal_eod_register ADD COLUMN IF NOT EXISTS source_extracted_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_deod_src_doc ON deal_eod_register(source_document_id);
+
+ALTER TABLE deal_trigger_events ADD COLUMN IF NOT EXISTS source_document_id  INTEGER REFERENCES documents(id) ON DELETE SET NULL;
+ALTER TABLE deal_trigger_events ADD COLUMN IF NOT EXISTS source_page         INTEGER;
+ALTER TABLE deal_trigger_events ADD COLUMN IF NOT EXISTS source_snippet      TEXT;
+ALTER TABLE deal_trigger_events ADD COLUMN IF NOT EXISTS source_extracted_by TEXT;
+ALTER TABLE deal_trigger_events ADD COLUMN IF NOT EXISTS source_extracted_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_dte_src_doc ON deal_trigger_events(source_document_id);
+
+-- ── Counterparties & reserves ───────────────────────────────────────────────
+ALTER TABLE deal_counterparties ADD COLUMN IF NOT EXISTS source_document_id  INTEGER REFERENCES documents(id) ON DELETE SET NULL;
+ALTER TABLE deal_counterparties ADD COLUMN IF NOT EXISTS source_page         INTEGER;
+ALTER TABLE deal_counterparties ADD COLUMN IF NOT EXISTS source_snippet      TEXT;
+ALTER TABLE deal_counterparties ADD COLUMN IF NOT EXISTS source_extracted_by TEXT;
+ALTER TABLE deal_counterparties ADD COLUMN IF NOT EXISTS source_extracted_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_dcp_src_doc ON deal_counterparties(source_document_id);
+
+ALTER TABLE deal_reserve_accounts ADD COLUMN IF NOT EXISTS source_document_id  INTEGER REFERENCES documents(id) ON DELETE SET NULL;
+ALTER TABLE deal_reserve_accounts ADD COLUMN IF NOT EXISTS source_page         INTEGER;
+ALTER TABLE deal_reserve_accounts ADD COLUMN IF NOT EXISTS source_snippet      TEXT;
+ALTER TABLE deal_reserve_accounts ADD COLUMN IF NOT EXISTS source_extracted_by TEXT;
+ALTER TABLE deal_reserve_accounts ADD COLUMN IF NOT EXISTS source_extracted_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_dra_src_doc ON deal_reserve_accounts(source_document_id);
+
+ALTER TABLE hedge_portfolio ADD COLUMN IF NOT EXISTS source_document_id  INTEGER REFERENCES documents(id) ON DELETE SET NULL;
+ALTER TABLE hedge_portfolio ADD COLUMN IF NOT EXISTS source_page         INTEGER;
+ALTER TABLE hedge_portfolio ADD COLUMN IF NOT EXISTS source_snippet      TEXT;
+ALTER TABLE hedge_portfolio ADD COLUMN IF NOT EXISTS source_extracted_by TEXT;
+ALTER TABLE hedge_portfolio ADD COLUMN IF NOT EXISTS source_extracted_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_hp_src_doc ON hedge_portfolio(source_document_id);
+
+-- ── Risk & KPIs ─────────────────────────────────────────────────────────────
+-- deal_risk_register already carries assessed_by/assessed_at as the narrative
+-- "who last reviewed this"; the new block is strictly for source-document
+-- provenance (which document sourced the risk, L/S scores, or mitigants).
+ALTER TABLE deal_risk_register ADD COLUMN IF NOT EXISTS source_document_id  INTEGER REFERENCES documents(id) ON DELETE SET NULL;
+ALTER TABLE deal_risk_register ADD COLUMN IF NOT EXISTS source_page         INTEGER;
+ALTER TABLE deal_risk_register ADD COLUMN IF NOT EXISTS source_snippet      TEXT;
+ALTER TABLE deal_risk_register ADD COLUMN IF NOT EXISTS source_extracted_by TEXT;
+ALTER TABLE deal_risk_register ADD COLUMN IF NOT EXISTS source_extracted_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_drr_src_doc ON deal_risk_register(source_document_id);
+
+ALTER TABLE deal_kpi_targets ADD COLUMN IF NOT EXISTS source_document_id  INTEGER REFERENCES documents(id) ON DELETE SET NULL;
+ALTER TABLE deal_kpi_targets ADD COLUMN IF NOT EXISTS source_page         INTEGER;
+ALTER TABLE deal_kpi_targets ADD COLUMN IF NOT EXISTS source_snippet      TEXT;
+ALTER TABLE deal_kpi_targets ADD COLUMN IF NOT EXISTS source_extracted_by TEXT;
+ALTER TABLE deal_kpi_targets ADD COLUMN IF NOT EXISTS source_extracted_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_dkt_src_doc ON deal_kpi_targets(source_document_id);
+
+-- ── Lifecycle & governance ──────────────────────────────────────────────────
+ALTER TABLE deal_amendments ADD COLUMN IF NOT EXISTS source_document_id  INTEGER REFERENCES documents(id) ON DELETE SET NULL;
+ALTER TABLE deal_amendments ADD COLUMN IF NOT EXISTS source_page         INTEGER;
+ALTER TABLE deal_amendments ADD COLUMN IF NOT EXISTS source_snippet      TEXT;
+ALTER TABLE deal_amendments ADD COLUMN IF NOT EXISTS source_extracted_by TEXT;
+ALTER TABLE deal_amendments ADD COLUMN IF NOT EXISTS source_extracted_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_dam_src_doc ON deal_amendments(source_document_id);
+
+ALTER TABLE deal_consent_mechanics ADD COLUMN IF NOT EXISTS source_document_id  INTEGER REFERENCES documents(id) ON DELETE SET NULL;
+ALTER TABLE deal_consent_mechanics ADD COLUMN IF NOT EXISTS source_page         INTEGER;
+ALTER TABLE deal_consent_mechanics ADD COLUMN IF NOT EXISTS source_snippet      TEXT;
+ALTER TABLE deal_consent_mechanics ADD COLUMN IF NOT EXISTS source_extracted_by TEXT;
+ALTER TABLE deal_consent_mechanics ADD COLUMN IF NOT EXISTS source_extracted_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_dcm_src_doc ON deal_consent_mechanics(source_document_id);
+
+ALTER TABLE deal_development_phases ADD COLUMN IF NOT EXISTS source_document_id  INTEGER REFERENCES documents(id) ON DELETE SET NULL;
+ALTER TABLE deal_development_phases ADD COLUMN IF NOT EXISTS source_page         INTEGER;
+ALTER TABLE deal_development_phases ADD COLUMN IF NOT EXISTS source_snippet      TEXT;
+ALTER TABLE deal_development_phases ADD COLUMN IF NOT EXISTS source_extracted_by TEXT;
+ALTER TABLE deal_development_phases ADD COLUMN IF NOT EXISTS source_extracted_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_ddp_src_doc ON deal_development_phases(source_document_id);
+
+ALTER TABLE deal_obligation_register ADD COLUMN IF NOT EXISTS source_document_id  INTEGER REFERENCES documents(id) ON DELETE SET NULL;
+ALTER TABLE deal_obligation_register ADD COLUMN IF NOT EXISTS source_page         INTEGER;
+ALTER TABLE deal_obligation_register ADD COLUMN IF NOT EXISTS source_snippet      TEXT;
+ALTER TABLE deal_obligation_register ADD COLUMN IF NOT EXISTS source_extracted_by TEXT;
+ALTER TABLE deal_obligation_register ADD COLUMN IF NOT EXISTS source_extracted_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_dor_src_doc ON deal_obligation_register(source_document_id);
+
+ALTER TABLE deal_onboarding_snapshots ADD COLUMN IF NOT EXISTS source_document_id  INTEGER REFERENCES documents(id) ON DELETE SET NULL;
+ALTER TABLE deal_onboarding_snapshots ADD COLUMN IF NOT EXISTS source_page         INTEGER;
+ALTER TABLE deal_onboarding_snapshots ADD COLUMN IF NOT EXISTS source_snippet      TEXT;
+ALTER TABLE deal_onboarding_snapshots ADD COLUMN IF NOT EXISTS source_extracted_by TEXT;
+ALTER TABLE deal_onboarding_snapshots ADD COLUMN IF NOT EXISTS source_extracted_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_dos_src_doc ON deal_onboarding_snapshots(source_document_id);
+
+-- ── evidence_citations.field_key convention ─────────────────────────────────
+-- Freeform TEXT today; formalised pattern so the ingestion engine and
+-- TopSheet rendering layer share one convention.
+--   row-level:      {table}:{pk_or_natural_id}        e.g. capital_structure_instruments:15
+--   column-level:   {table}.{column}:{pk_or_nat_id}   e.g. deals.enterprise_value:26
+--   natural-key:    {table}:{natural_id}              e.g. deal_risk_register:RISK-ST-008
+-- Regex (for future CHECK): ^[a-z_]+(\.[a-z_]+)?:[A-Za-z0-9_-]+$
+COMMENT ON COLUMN evidence_citations.field_key IS
+    'Field_key convention: {table}:{pk} | {table}.{column}:{pk} | {table}:{natural_id}. Regex: ^[a-z_]+(\.[a-z_]+)?:[A-Za-z0-9_-]+$. A future migration at real-client cutover will add this as a CHECK constraint.';
+
+-- ── Snapshot pinning — immutable per-field citations frozen at snapshot time ─
+-- Populated by the TopSheet snapshot engine when a snapshot is taken.
+-- Every rendered field gets one row pinning its citation. Rows are immutable
+-- thereafter (application-enforced now; trigger-enforced post-cutover).
+CREATE TABLE IF NOT EXISTS topsheet_snapshot_field_citations (
+    id                  SERIAL PRIMARY KEY,
+    snapshot_id         INTEGER NOT NULL REFERENCES deal_topsheet_snapshots(id) ON DELETE CASCADE,
+    field_key           TEXT NOT NULL,
+    source_document_id  INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+    source_page         INTEGER,
+    source_cell_ref     TEXT,
+    source_snippet      TEXT,
+    source_extracted_by TEXT,
+    source_confidence   NUMERIC(5,2),
+    pinned_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (snapshot_id, field_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_tsfc_snapshot ON topsheet_snapshot_field_citations(snapshot_id);
+CREATE INDEX IF NOT EXISTS idx_tsfc_document ON topsheet_snapshot_field_citations(source_document_id);
+
+COMMENT ON TABLE topsheet_snapshot_field_citations IS
+    'Per-field immutable citation pinning for TopSheet snapshots. Populated at snapshot time. Complements topsheet_snapshot_provenance (which records event-level snapshot context).';
+
+-- ── Helper view — audit coverage by deal and table ──────────────────────────
+-- Returns one row per (deal_id, table_name) with total_rows and
+-- missing_count (rows where source_document_id IS NULL). Used as a CI check
+-- in production ("must be empty") and as a dashboard widget for % coverage.
+CREATE OR REPLACE VIEW v_topsheet_field_audit_status AS
+  SELECT deal_id, 'capital_structure_instruments'::text AS table_name,
+         COUNT(*) AS total_rows,
+         COUNT(*) FILTER (WHERE source_document_id IS NULL) AS missing_count
+  FROM capital_structure_instruments GROUP BY deal_id
+  UNION ALL
+  SELECT deal_id, 'corporate_entities', COUNT(*),
+         COUNT(*) FILTER (WHERE source_document_id IS NULL)
+  FROM corporate_entities GROUP BY deal_id
+  UNION ALL
+  SELECT deal_id, 'deal_jurisdiction_splits', COUNT(*),
+         COUNT(*) FILTER (WHERE source_document_id IS NULL)
+  FROM deal_jurisdiction_splits GROUP BY deal_id
+  UNION ALL
+  SELECT deal_id, 'covenant_thresholds', COUNT(*),
+         COUNT(*) FILTER (WHERE source_document_id IS NULL)
+  FROM covenant_thresholds GROUP BY deal_id
+  UNION ALL
+  SELECT deal_id, 'deal_distribution_conditions', COUNT(*),
+         COUNT(*) FILTER (WHERE source_document_id IS NULL)
+  FROM deal_distribution_conditions GROUP BY deal_id
+  UNION ALL
+  SELECT deal_id, 'deal_eod_register', COUNT(*),
+         COUNT(*) FILTER (WHERE source_document_id IS NULL)
+  FROM deal_eod_register GROUP BY deal_id
+  UNION ALL
+  SELECT deal_id, 'deal_trigger_events', COUNT(*),
+         COUNT(*) FILTER (WHERE source_document_id IS NULL)
+  FROM deal_trigger_events GROUP BY deal_id
+  UNION ALL
+  SELECT deal_id, 'deal_counterparties', COUNT(*),
+         COUNT(*) FILTER (WHERE source_document_id IS NULL)
+  FROM deal_counterparties GROUP BY deal_id
+  UNION ALL
+  SELECT deal_id, 'deal_reserve_accounts', COUNT(*),
+         COUNT(*) FILTER (WHERE source_document_id IS NULL)
+  FROM deal_reserve_accounts GROUP BY deal_id
+  UNION ALL
+  SELECT deal_id, 'hedge_portfolio', COUNT(*),
+         COUNT(*) FILTER (WHERE source_document_id IS NULL)
+  FROM hedge_portfolio GROUP BY deal_id
+  UNION ALL
+  SELECT deal_id, 'deal_risk_register', COUNT(*),
+         COUNT(*) FILTER (WHERE source_document_id IS NULL)
+  FROM deal_risk_register GROUP BY deal_id
+  UNION ALL
+  SELECT deal_id, 'deal_kpi_targets', COUNT(*),
+         COUNT(*) FILTER (WHERE source_document_id IS NULL)
+  FROM deal_kpi_targets GROUP BY deal_id
+  UNION ALL
+  SELECT deal_id, 'deal_amendments', COUNT(*),
+         COUNT(*) FILTER (WHERE source_document_id IS NULL)
+  FROM deal_amendments GROUP BY deal_id
+  UNION ALL
+  SELECT deal_id, 'deal_consent_mechanics', COUNT(*),
+         COUNT(*) FILTER (WHERE source_document_id IS NULL)
+  FROM deal_consent_mechanics GROUP BY deal_id
+  UNION ALL
+  SELECT deal_id, 'deal_development_phases', COUNT(*),
+         COUNT(*) FILTER (WHERE source_document_id IS NULL)
+  FROM deal_development_phases GROUP BY deal_id
+  UNION ALL
+  SELECT deal_id, 'deal_obligation_register', COUNT(*),
+         COUNT(*) FILTER (WHERE source_document_id IS NULL)
+  FROM deal_obligation_register GROUP BY deal_id
+  UNION ALL
+  SELECT deal_id, 'deal_onboarding_snapshots', COUNT(*),
+         COUNT(*) FILTER (WHERE source_document_id IS NULL)
+  FROM deal_onboarding_snapshots GROUP BY deal_id;
+
+COMMENT ON VIEW v_topsheet_field_audit_status IS
+    'Per (deal, table) audit coverage. In production, SELECT * FROM this WHERE missing_count > 0 must be empty. In the demo portfolio, expect missing_count = total_rows for every row.';
+
+-- ═══════════════════════════════════════════════════════════════════════════════
 -- End of migrations — all statements above are idempotent
 -- ═══════════════════════════════════════════════════════════════════════════════

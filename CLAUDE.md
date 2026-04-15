@@ -9,6 +9,7 @@ A demo platform for monitoring private credit / infrastructure debt portfolios. 
 - **Database**: PostgreSQL 16 (Alpine) — schema in `postgres/init.sql`
 - **Docker**: All services via `docker/docker-compose.yml`, images built from `docker/*.Dockerfile`
 - **Working directory for docker commands**: `C:\Users\jpste\OneDrive\Documents\Startups\DEMO\xsesamestreet\docker`
+- **Audit-trail provenance**: every deal-scoped table carries a five-column `source_*` block; snapshot-time field citations are pinned in `topsheet_snapshot_field_citations`. See [docs/architecture/audit-trail.md](docs/architecture/audit-trail.md).
 
 ## Key Conventions
 - Server is a single large Python file (`server/main.py`) — search by endpoint path or function name

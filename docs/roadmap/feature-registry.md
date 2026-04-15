@@ -90,6 +90,10 @@ Features are grouped into six build layers. Each layer builds on the one below i
 | P-03 | Client reporting automation | P | Future | M | 9. Portfolio Analytics | E-13, E-06 | — | Export tool | Quarterly deck generation with citations. Filtered by organisation/account. Template-driven. |
 | P-04 | Expanded register coverage | P | Future | L | 1. Compliance Monitoring | E-01 | Obligation | — | Validate against real estate, USPP, direct lending documentation. Extend Master Register items. |
 | P-05 | Full benchmarking analytics | P | Future | L | 9. Portfolio Analytics | P-01, P-02 | — | New screens | Cross-market peer comparison. Spread-vs-risk. Early warning signals from behavioural features. |
+| | | | | | | | | | |
+| **AUDIT-TRAIL CUTOVER** | | | | | | | | | |
+| F-10 | Audit-trail scaffolding | F | MVP | M | 8. Document Intelligence | F-01, F-03 | 17 deal-scoped tables + evidence_citations + topsheet_snapshot_field_citations | — | **DONE 2026-04-15.** Five-column source_* block added to every deal-scoped TopSheet table. `evidence_citations.field_key` convention formalised. `topsheet_snapshot_field_citations` created for immutable per-field snapshot pinning. `v_topsheet_field_audit_status` coverage view. All columns nullable — demo portfolio unaffected. See `docs/architecture/audit-trail.md`. |
+| F-11 | Audit-trail hard-enforcement | F | Future | M | 8. Document Intelligence | F-10, I-02, I-04, topsheet_importer.py | — | — | **Triggered by first real-client onboarding.** Follow-up migration: (a) `ALTER COLUMN source_document_id SET NOT NULL` on every scaffolded table, (b) `CHECK` constraint on `evidence_citations.field_key` enforcing the regex `^[a-z_]+(\.[a-z_]+)?:[A-Za-z0-9_-]+$`, (c) BEFORE UPDATE trigger on `topsheet_snapshot_field_citations` enforcing immutability, (d) CI check on `v_topsheet_field_audit_status` (`missing_count > 0` fails the build). Bundled with the ingestion engine — every importer must write source_document_id on every row. |
 
 ---
 
