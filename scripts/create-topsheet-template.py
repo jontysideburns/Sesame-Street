@@ -660,7 +660,7 @@ sections = [
     ("6. Jurisdictions", "Must sum to 100% per activity type"),
     ("7. Corporate Entities", "At least borrower SPV"),
     ("8. Covenant Thresholds", "DSCR covenant required"),
-    ("9. KPI Targets", "3-5 sector KPIs recommended"),
+    ("9. KPI Scenario Series", "Management case + stresses (time series per KPI)"),
     ("10. Financial Template", "Sector template selection required"),
     ("11. Development Phases", "If construction phase"),
     ("12. Consent Mechanics", "Majority threshold required"),

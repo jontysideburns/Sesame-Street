@@ -478,20 +478,23 @@ Computed by the API: `profileLabel`, `flagLevel` (ok / amber / red / hard_fail),
 | equity_cure_available | Boolean | |
 | step_down_schedule | JSONB | Year-by-year step-down |
 
-### KPI Targets (`deal_kpi_targets`)
+### KPI Scenario Series (`forecast_period_items` where `line_key LIKE 'sector_kpi_%'`)
+
+IC-memo KPI expectations are stored as **time series**, not scalars, under the same `forecast_cases` / `forecast_case_versions` / `forecast_period_items` machinery that holds financial-line forecasts. One row per (scenario × period × KPI) trajectory point.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| kpi_key | Text | sector_kpi_1, sector_kpi_2, etc. |
-| kpi_label | Text | e.g. "Technical Availability (%)" |
-| scenario | Text | base_case, stress_case |
-| target_value | Decimal | Expected value |
-| target_floor | Decimal | Minimum acceptable |
-| target_ceiling | Decimal | Maximum (lower_is_better) |
-| direction | Text | higher_is_better, lower_is_better |
-| unit | Text | percentage, currency, count, ratio, years |
-| source | Text | ic_memo, business_plan |
-| source_date | Date | |
+| kpi_key | Text | sector_kpi_1, sector_kpi_2, etc. (line_key column) |
+| kpi_label | Text | Per-deal override in `deal_line_item_labels` (e.g. "Passengers (millions)") |
+| scenario_kind | Text | `management_case` / `combined_downside` / `single_variant_stress` / `credit_case` / `lender_case` / `custom` (on `forecast_cases`) |
+| stress_label | Text | Human name for the stress (e.g. "Pandemic passenger shock") |
+| driving_risk_id | UUID | FK to `deal_risk_register(id)` — populated when the scenario is a single-variant stress motivated by an IC-identified risk |
+| period_flag | Text | e.g. FY2026, 2026Q1 — resolves to `deal_reporting_periods` |
+| value | Numeric | The expected KPI value at that scenario × period |
+
+Single-variant stresses are **sparse** (only the KPIs the stress affects) and always link back to the risk that motivated them. Combined downside is the aggregate stress trajectory bundling several risks. Management case = IC-memo baseline. See [docs/architecture/kpi-scenarios.md](architecture/kpi-scenarios.md) for the full pattern.
+
+KPI observations (actuals) are paired against these series via `deal_kpi_observations` with `deviation_to_stress` banded `on_track` / `watch` / `approaching_stress` / `breached_stress`.
 
 ### Consent Mechanics (`deal_consent_mechanics`)
 

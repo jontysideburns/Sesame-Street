@@ -569,25 +569,62 @@ Maps \`improving\`, \`stable\`, \`deteriorating\`, \`deteriorating_rapidly\`, \`
 - Client: Risk Register card on the deal page prefers \`entry.generatedNarrative\` over \`entry.summary\``,
   },
   {
+    id: "kpi-scenario-series",
+    name: "KPI Scenario Series (IC memo baseline + stresses)",
+    category: "Risk Assessment",
+    summary: "IC-memo KPI expectations stored as time series in forecast_period_items, with stress cases optionally linked to the risk that motivated them.",
+    detail: `KPI expectations are **time series**, not scalars. Each expected KPI value for each reporting period is stored as a row in \`forecast_period_items\` with \`line_key LIKE 'sector_kpi_%'\` — the same machinery that holds financial-line forecasts.
+
+**Scenarios on \`forecast_cases.scenario_kind\`:**
+
+| scenario_kind | Meaning |
+|---|---|
+| \`management_case\` | IC-memo baseline. Every actively-monitored KPI has one. |
+| \`combined_downside\` | Aggregate stress bundling several risks. One per deal. The "floor" the dashboard treats as the stress line. |
+| \`single_variant_stress\` | Individual sensitivity on one IC-identified risk (e.g. "Pandemic passenger shock" on passengers). Sparse — only the KPIs the stress actually affects. Zero, one, or many per deal. |
+| \`credit_case\` / \`lender_case\` | Lender-adjusted expected cases. |
+| \`custom\` | Escape hatch. |
+
+**Stress attribution:** \`forecast_cases.driving_risk_id\` is a FK to \`deal_risk_register(id)\`. Populated on \`single_variant_stress\` scenarios — lets the UI show which IC-identified risk drives each stress line on the KPI chart (e.g. Gatwick's "Pandemic passenger shock" stress on \`sector_kpi_1\` links to RISK-AP-001).
+
+**Immutability:** a \`forecast_case_version\` is frozen at IC approval (\`forecast_model_metadata.approved_at\`). Reforecasting creates a new version (v2); v1 stays as history with \`is_active = FALSE\`.
+
+**Writer contract:** the TopSheet v9 "KPI Scenario Series" tab — columns \`kpi_key, kpi_label, scenario_kind, stress_label, driving_risk_ref, period_flag, value\`. Importer finds-or-creates \`forecast_cases\` + versions, resolves \`driving_risk_ref\` to a UUID against the deal risk register, writes \`forecast_period_items\` rows.
+
+**Reader contract:** \`/api/deals/{slug}/topsheet\` returns a \`kpiScenarios\` block — per KPI, with management_case series + stress_cases array (each carrying driving risk metadata). The Sector KPIs chart on the deal overview page overlays:
+- Management case (dashed soft blue)
+- Combined downside (dashed red) — with a red-tinted shaded band between the two
+- Single-variant stress lines (thin dashed) with per-card risk attribution footer
+- Actuals (solid bold) sitting on top
+
+**Historical note:** replaces the retired \`deal_kpi_targets\` scalar table. Migration copied each scalar across every reporting period as a constant-trajectory bridge; newly authored scenarios are genuinely time-varying.`,
+  },
+  {
     id: "deviation-to-stress",
     name: "KPI Deviation to Stress",
     category: "Risk Assessment",
-    summary: "Measures how far an actual KPI has drifted from base case toward the IC memo stress case.",
-    detail: `**Formula:** (Base Case Target − Observed Value) / (Base Case Target − Stress Case Target) × 100
+    summary: "Measures how far an actual KPI has drifted from the period-matched management case toward the period-matched combined downside.",
+    detail: `**Formula (higher is better):** (Management Case_period − Observed Value) / (Management Case_period − Combined Downside_period) × 100
+
+Both reference values are **period-matched** — looked up from \`forecast_period_items\` for the same reporting period as the observation, under the active management_case and combined_downside \`forecast_case_version\` rows respectively.
 
 **Interpretation:**
-- **0%** = performing exactly at the base case (no deviation)
-- **50%** = halfway between base case and stress case
-- **100%** = at the stress case threshold
-- **>100%** = worse than the stress case
+- **0%** = performing exactly at the management case (no deviation)
+- **50%** = halfway between management case and combined downside
+- **100%** = at the combined downside
+- **>100%** = worse than the combined downside
 
-**For "lower is better" metrics** (e.g. PUE), the formula adjusts so that a higher observed value (worse) produces a positive deviation.
+**For "lower is better" metrics** (e.g. PUE, carbon intensity), the formula is sign-flipped so that a higher observed value (worse) produces a positive deviation.
 
-**Status thresholds:**
-- on_track: deviation < 25%
-- watch: 25% ≤ deviation < 60%
-- approaching_stress: 60% ≤ deviation < 100%
-- breached_stress: deviation ≥ 100%`,
+**Status thresholds** (on \`deal_kpi_observations.status\`):
+- on_track: deviation ≤ 50%
+- watch: 50% < deviation ≤ 90%
+- approaching_stress: 90% < deviation < 100%
+- breached_stress: deviation ≥ 100%
+
+**Audit trail:** each observation row records \`base_forecast_item_id\` and \`stress_forecast_item_id\` — FKs to the two \`forecast_period_items\` rows actually used for the computation. Denormalised \`base_case_target\` / \`stress_case_target\` columns keep the numeric values as a write-time snapshot (so reforecasting the underlying scenario doesn't change historical observations).
+
+See the [KPI Scenario Series](#kpi-scenario-series) rule for how the two reference values are populated.`,
   },
   {
     id: "revenue-risk-taxonomy",

@@ -219,13 +219,16 @@ const TABLES: Table[] = [
     name: "forecast_cases",
     label: "Forecast Cases",
     group: "Template 1",
-    description: "Base, upside, downside scenarios per deal",
+    description: "Management, credit/lender, combined-downside and single-variant stress scenarios per deal. Stress cases link back to deal_risk_register via driving_risk_id.",
     columns: [
       { name: "id", type: "SERIAL", pk: true },
       { name: "deal_id", type: "INTEGER", fk: "deals.id" },
       { name: "case_key", type: "TEXT", unique: true },
       { name: "case_name", type: "TEXT" },
       { name: "case_type", type: "TEXT" },
+      { name: "scenario_kind", type: "TEXT" },
+      { name: "stress_label", type: "TEXT" },
+      { name: "driving_risk_id", type: "UUID", fk: "deal_risk_register.id" },
       { name: "drives_monitoring", type: "BOOLEAN" },
     ],
   },
@@ -233,7 +236,7 @@ const TABLES: Table[] = [
     name: "forecast_case_versions",
     label: "Forecast Versions",
     group: "Template 1",
-    description: "Version history for each forecast case",
+    description: "Version history for each forecast case. Frozen at IC approval; reforecast = new version, old stays as history.",
     columns: [
       { name: "id", type: "SERIAL", pk: true },
       { name: "forecast_case_id", type: "INTEGER", fk: "forecast_cases.id" },
@@ -243,10 +246,24 @@ const TABLES: Table[] = [
     ],
   },
   {
-    name: "forecast_case_periods",
-    label: "Forecast Periods",
+    name: "forecast_period_items",
+    label: "Forecast Grid",
     group: "Template 1",
-    description: "Period-level forecast metrics (scenario_metrics JSONB)",
+    description: "Normalised (version × period × line_key) grid holding financial-line AND KPI forecasts. Line keys like 'sector_kpi_1' are KPI expectations; 'total_revenue', 'senior_dscr' etc. are financial lines.",
+    columns: [
+      { name: "id", type: "BIGSERIAL", pk: true },
+      { name: "deal_id", type: "INTEGER", fk: "deals.id" },
+      { name: "forecast_case_version_id", type: "INTEGER", fk: "forecast_case_versions.id" },
+      { name: "reporting_period_id", type: "INTEGER", fk: "deal_reporting_periods.id" },
+      { name: "line_key", type: "TEXT" },
+      { name: "value", type: "NUMERIC" },
+    ],
+  },
+  {
+    name: "forecast_case_periods",
+    label: "Forecast Periods (legacy)",
+    group: "Template 1",
+    description: "Legacy period-level scenario_metrics JSONB. Still populated for historical deals; new ingestion writes to forecast_period_items instead.",
     columns: [
       { name: "id", type: "SERIAL", pk: true },
       { name: "forecast_case_version_id", type: "INTEGER", fk: "forecast_case_versions.id" },
@@ -446,11 +463,14 @@ const RELATIONSHIPS: Relationship[] = [
   { from: "financial_periods", to: "deals", label: "deal_id", type: "1:N" },
   // Template 1 chains
   { from: "forecast_case_versions", to: "forecast_cases", label: "forecast_case_id", type: "1:N" },
+  { from: "forecast_period_items", to: "forecast_case_versions", label: "forecast_case_version_id", type: "1:N" },
   { from: "forecast_case_periods", to: "forecast_case_versions", label: "version_id", type: "1:N" },
   // Template 2
   { from: "deal_risk_register", to: "deals", label: "deal_id", type: "1:N" },
   { from: "deal_risk_register", to: "risk_taxonomy", label: "risk_id", type: "1:N" },
   { from: "deal_risk_register_history", to: "deals", label: "deal_id", type: "1:N" },
+  // KPI stress attribution — forecast_cases link back to the motivating risk
+  { from: "forecast_cases", to: "deal_risk_register", label: "driving_risk_id", type: "1:N" },
   // Analytics
   { from: "covenant_thresholds", to: "deals", label: "deal_id", type: "1:N" },
   { from: "covenant_tests", to: "deals", label: "deal_id", type: "1:N" },

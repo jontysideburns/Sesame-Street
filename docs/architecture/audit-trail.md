@@ -42,7 +42,7 @@ Indexed on `source_document_id` so you can pivot any way ("every field that came
 | Capital stack | `capital_structure_instruments`, `corporate_entities`, `deal_jurisdiction_splits` |
 | Covenants & tests | `covenant_thresholds`, `deal_distribution_conditions`, `deal_eod_register`, `deal_trigger_events` |
 | Counterparties & reserves | `deal_counterparties`, `deal_reserve_accounts`, `hedge_portfolio` |
-| Risk & KPIs | `deal_risk_register`, `deal_kpi_targets` |
+| Risk & KPIs | `deal_risk_register` (KPI scenario series live in `forecast_period_items` under `forecast_cases`; see [kpi-scenarios.md](kpi-scenarios.md)) |
 | Lifecycle & governance | `deal_amendments`, `deal_consent_mechanics`, `deal_development_phases`, `deal_obligation_register`, `deal_onboarding_snapshots` |
 
 Tables already carrying provenance (no change needed): `actual_periods`, `period_financial_items`, `deal_kpi_observations`, `financial_periods`, `forecast_model_metadata`, `ratio_reconciliations`, `risk_register_entries` (legacy), `deal_reporting_periods` (via `source_document_id`).

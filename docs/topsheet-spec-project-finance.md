@@ -453,21 +453,23 @@ Three-tier structure for each monitored ratio.
 
 ## F.7 Sector KPIs
 
-### F.7.1 KPI Targets (child table: `deal_kpi_targets`)
-Records IC memo / business plan expectations per KPI per scenario.
+### F.7.1 KPI Scenario Series (stored in `forecast_period_items` where `line_key LIKE 'sector_kpi_%'`)
+
+IC-memo KPI expectations are **time series**, one row per (scenario × period × KPI), under the same `forecast_cases` / `forecast_case_versions` machinery as financial forecasts. Management case = IC-memo baseline. Single-variant stresses link to a specific risk in `deal_risk_register` via `forecast_cases.driving_risk_id`. See [docs/architecture/kpi-scenarios.md](architecture/kpi-scenarios.md).
 
 | Field | Type | Required | Notes |
 |-------|------|----------|-------|
-| kpi_key | Text | Yes | Maps to sector_kpi_1, etc. |
-| kpi_label | Text | Yes | Human-readable name |
-| scenario | Enum | Yes | base_case, management_case, stress_case, ic_memo |
-| target_value | Decimal | | Expected value |
-| target_floor | Decimal | | Minimum acceptable |
-| target_ceiling | Decimal | | Maximum acceptable |
-| direction | Enum | Yes | higher_is_better, lower_is_better, range |
-| unit | Enum | Yes | percentage, currency, count, ratio, years |
-| source | Enum | | ic_memo, business_plan, management_presentation, lender_model |
-| source_date | Date | | When target was set |
+| kpi_key | Text | Yes | sector_kpi_1 … sector_kpi_10 |
+| kpi_label | Text | Yes | Per-deal in `deal_line_item_labels.display_label` |
+| scenario_kind | Enum | Yes | `management_case`, `combined_downside`, `single_variant_stress`, `credit_case`, `lender_case`, `custom` (on `forecast_cases`) |
+| stress_label | Text | Single-variant only | Human name (e.g. "Pandemic passenger shock") |
+| driving_risk_id | UUID | Single-variant only | FK to `deal_risk_register(id)` — the risk that motivated the stress |
+| period_flag | Text | Yes | e.g. FY2026 — resolves to `deal_reporting_periods` |
+| value | Decimal | Yes | The expected value at that scenario × period |
+| forecast_case_version.direction | Enum | Yes | higher_is_better, lower_is_better, range (unchanged) |
+| forecast_case_version.unit | Enum | Yes | percentage, currency, count, ratio, years (unchanged) |
+| forecast_model_metadata.source | Enum | | ic_memo, business_plan, management_presentation, lender_model |
+| forecast_model_metadata.approved_at | Timestamp | | IC-freeze timestamp |
 
 ### F.7.2 KPI Observations (child table: `deal_kpi_observations`)
 Actual KPI values per period with deviation-to-stress computation.
@@ -475,13 +477,15 @@ Actual KPI values per period with deviation-to-stress computation.
 | Field | Type | Required | Notes |
 |-------|------|----------|-------|
 | reporting_period_id | FK | Yes | Links to period |
-| kpi_key | Text | Yes | Same key as targets |
+| kpi_key | Text | Yes | Same key as the scenario series |
 | observed_value | Decimal | | Actual from borrower |
-| base_case_target | Decimal | | Denormalised from targets |
-| stress_case_target | Decimal | | Denormalised from targets |
+| base_case_target | Decimal | | Denormalised at write-time from the period-matched management_case `forecast_period_items` row (display cache) |
+| stress_case_target | Decimal | | Denormalised at write-time from the period-matched combined_downside `forecast_period_items` row |
+| base_forecast_item_id | FK | | Pointer to the exact `forecast_period_items` row used for the base value (audit trace) |
+| stress_forecast_item_id | FK | | Pointer to the `forecast_period_items` row used for the stress value (audit trace) |
 | variance_to_base | Decimal | | observed - base |
 | variance_to_base_pct | Decimal | | % deviation from base |
-| deviation_to_stress | Decimal | | 0% = at base, 100% = at stress, >100% = worse |
+| deviation_to_stress | Decimal | | 0% = at management case, 100% = at combined downside, >100% = worse |
 | status | Enum | | on_track, watch, approaching_stress, breached_stress |
 | source | Enum | | compliance_certificate, business_plan_update, management_presentation |
 
