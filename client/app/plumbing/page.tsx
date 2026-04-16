@@ -135,6 +135,64 @@ export default async function PlumbingPage() {
         </div>
       </section>
 
+      {/* TopSheet Template download */}
+      <section className="panel section-panel">
+        <header className="panel-heading">
+          <p className="panel-eyebrow">TopSheet</p>
+          <h2 className="panel-title">TopSheet data template (v9)</h2>
+        </header>
+        <div style={{ display: "flex", gap: 20, alignItems: "flex-start", flexWrap: "wrap" }}>
+          <div style={{ flex: "1 1 480px", minWidth: 0 }}>
+            <p style={{ margin: 0, lineHeight: 1.6, color: "var(--ink)" }}>
+              The v9 Excel template is the primary data-entry interface for onboarding a new deal.
+              26 tabs cover every field the platform stores per deal — identity, capital structure,
+              covenants, risk register, KPI scenario series, distribution conditions, onboarding
+              snapshot, and more. The importer (<code>server/topsheet_importer.py</code>) parses
+              each tab and populates the corresponding tables.
+            </p>
+            <p style={{ marginTop: 10, marginBottom: 0, fontSize: "0.88rem", color: "var(--ink-soft)", lineHeight: 1.55 }}>
+              Tab 9 (<strong>KPI Scenario Series</strong>) records IC-memo KPI expectations as time
+              series per scenario. Single-variant stresses link back to the risk register via{" "}
+              <code>driving_risk_ref</code>.
+            </p>
+          </div>
+          <div style={{ flex: "0 0 auto", display: "flex", flexDirection: "column", gap: 8, minWidth: 240 }}>
+            <a
+              className="button secondary"
+              href="/topsheet-data-template-v9.xlsx"
+              download
+              style={{
+                fontWeight: 700,
+                background: "var(--accent)",
+                color: "white",
+                border: "none",
+                textDecoration: "none",
+                padding: "10px 20px",
+                borderRadius: 10,
+                textAlign: "center",
+              }}
+            >
+              ↓ Download template (.xlsx)
+            </a>
+            <a
+              className="button secondary"
+              href="https://github.com/brodagroupsoftware/xsesamestreet/blob/claude/trusting-roentgen/docs/topsheet-template-instructions.md"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                textDecoration: "none",
+                padding: "8px 20px",
+                borderRadius: 10,
+                textAlign: "center",
+                fontWeight: 600,
+              }}
+            >
+              Template instructions ↗
+            </a>
+          </div>
+        </div>
+      </section>
+
       {/* Data Architecture */}
       <section className="panel section-panel">
         <header className="panel-heading">
