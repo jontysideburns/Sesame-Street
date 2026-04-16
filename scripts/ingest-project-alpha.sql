@@ -54,7 +54,8 @@ UPDATE deals SET
     borrower_registered_address = 'Port City, Spain',
     primary_business_country = 'ES',
     primary_business_country_name = 'Spain',
-    security_ranking = 'Senior Secured'
+    security_ranking = 'Senior Secured',
+    internal_credit_score = 'Ba1'
 WHERE id = v_deal_id;
 
 -- ─── 2. CAPITAL STRUCTURE ────────────────────────────────────────────────────

@@ -16,7 +16,8 @@ INSERT INTO deals (
   ownership_structure, revenue_risk_composite, contracted_revenue_pct, merchant_revenue_pct,
   concession_expiry_date,
   tail_anchor_type, tail_anchor_date, tail_anchor_label, tail_residual_value_treatment, tail_notes,
-  renewal_profile, debt_repayment_from_renewal_pct, renewal_notes
+  renewal_profile, debt_repayment_from_renewal_pct, renewal_notes,
+  moodys_rating, moodys_outlook, sp_rating, sp_outlook, fitch_rating, fitch_outlook
 ) VALUES (
   'getlink-eurotunnel',
   'Getlink SE (Eurotunnel Concession)',
@@ -59,8 +60,12 @@ INSERT INTO deals (
   'Asset reverts to the UK and French governments at concession end in 2086 for zero consideration. Debt must be fully repaid before concession expiry. Substantial positive tail (~36 years) from the 2050 Term Loan maturity to the 2086 concession end.',
   'hand_back_zero_value',
   0,
-  'Concession-based revenue model with hand-back at zero value. Debt is fully amortised within the concession life and has no reliance on post-2086 cashflows. The Group has diversified into ElecLink and Europorte to provide additional cashflow streams, but these are separate businesses with their own economics and do not change the Eurotunnel concession structure.'
+  'Concession-based revenue model with hand-back at zero value. Debt is fully amortised within the concession life and has no reliance on post-2086 cashflows. The Group has diversified into ElecLink and Europorte to provide additional cashflow streams, but these are separate businesses with their own economics and do not change the Eurotunnel concession structure.',
+  'Baa2', 'Stable', 'BBB', 'Stable', 'BBB', 'Stable'
 );
+
+-- Internal credit score (Baa2 — aligned with external Moody's)
+UPDATE deals SET internal_credit_score = 'Baa2' WHERE slug = 'getlink-eurotunnel' AND internal_credit_score IS NULL;
 
 -- Jurisdictions (cross-border: UK + France 50/50)
 INSERT INTO deal_jurisdiction_splits (deal_id, country_code, country_name, activity_pct, activity_type, is_primary)

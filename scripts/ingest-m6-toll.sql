@@ -15,7 +15,8 @@ INSERT INTO deals (
   origination_date, maturity_date, fiscal_year_end_month,
   security_ranking, governing_law, sponsor_name, parent_group,
   ownership_structure, revenue_risk_composite, contracted_revenue_pct, merchant_revenue_pct,
-  concession_expiry_date
+  concession_expiry_date,
+  internal_credit_score
 ) VALUES (
   'm6-toll',
   'M6 Toll (Midland Expressway)',
@@ -51,7 +52,8 @@ INSERT INTO deals (
   'P3-V5-D3',
   0,
   100,
-  '2054-01-25'
+  '2054-01-25',
+  'Baa2'
 );
 
 -- Use the id from the insert (next sequential should be 12)

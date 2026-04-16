@@ -216,7 +216,9 @@ export default async function DealPage({
   const pRow: any =
     portfolio?.deals?.find?.((d: any) => d.dealSlug === slug || d.slug === slug) ?? null;
 
-  const rating = assignedRating(deal.moodysRating, deal.spRating, deal.fitchRating);
+  const rating = assignedRating(deal.moodysRating, deal.spRating, deal.fitchRating)
+    ?? deal.internalCreditScore
+    ?? null;
   const headroom = deal.covenant?.headroomPct ?? pRow?.headroomPct ?? null;
   const dscr = pRow?.reportedDscr ?? deal.covenant?.currentValue ?? null;
   const ndEbitda = pRow?.ndEbitda ?? null;
