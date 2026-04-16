@@ -11,14 +11,13 @@ import KpiChart from "./kpi-chart";
  * Deal Overview page
  *
  *  1. Investment description — full-width narrative
- *  2. Deal Snapshot — portfolio-KPI-style strip + characteristics + perf
- *  3. Compliance · Risk · Distribution — three-column row
+ *  2. Deal Snapshot — Characteristics · Credit metrics · Performance (3-col)
+ *  3. Compliance · Risk · Borrower Requests — three-column row
  *  4. Investment Update — AI-produced 12-month business summary (placeholder)
  *  5. Financial Performance Charts + Sector KPI chart
- *  6. Forecast · Risk · Borrower requests
- *  7. Snapshot history · Term change management
- *  8. Key Metrics comparison table (Actuals / Base Case / Lockup / Default)
- *  9. Liquidity & Reserve Accounts
+ *  6. Forecast · Risk Register — two-column row
+ *  7. Snapshot history · Term change management — two-column row
+ *  8. Liquidity & Reserve Accounts (conditional)
  * ───────────────────────────────────────────────────────────────────── */
 
 type KpiTone = "good" | "warning" | "critical" | undefined;
@@ -52,22 +51,9 @@ function formatMoney(value: number | null | undefined, ccy = "GBP") {
   }).format(value);
 }
 
-function formatNumber(value: number | null | undefined, digits = 2) {
-  if (value == null || Number.isNaN(value)) return "—";
-  return new Intl.NumberFormat("en-GB", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: digits,
-  }).format(value);
-}
-
 function metricValue(value?: number | null, suffix = "") {
   if (value == null || Number.isNaN(value)) return "—";
   return `${value.toFixed(2)}${suffix}`;
-}
-
-function metricDisplay(value?: number | null, suffix = "") {
-  if (value == null || Number.isNaN(value)) return "—";
-  return `${formatNumber(value)}${suffix}`;
 }
 
 function toneForStatus(status: string): "good" | "warning" | "critical" | "neutral" {
@@ -117,45 +103,6 @@ const TREND_LABEL: Record<string, string> = {
   deteriorating: "Deteriorating ↓",
   deteriorating_rapidly: "Deteriorating rapidly ↓↓",
 };
-
-/* ─── Compact KPI card (matches JPS portfolio-summary KpiCard) ────── */
-
-function KpiCard({ label, value, tone, hint }: { label: string; value: string; tone?: KpiTone; hint?: string }) {
-  const color =
-    tone === "critical" ? "#d65454" : tone === "warning" ? "#c97f1f" : tone === "good" ? "#2f8b72" : undefined;
-  return (
-    <div
-      style={{
-        flex: 1,
-        minWidth: 110,
-        borderRadius: 14,
-        border: "1px solid var(--line)",
-        background: "var(--panel)",
-        padding: "10px 12px",
-        textAlign: "center",
-      }}
-    >
-      <div
-        style={{
-          fontSize: "0.62rem",
-          fontWeight: 600,
-          textTransform: "uppercase",
-          letterSpacing: "0.08em",
-          color: "var(--ink-soft)",
-          marginBottom: 4,
-        }}
-      >
-        {label}
-      </div>
-      <div style={{ fontSize: "1.2rem", fontWeight: 800, color: color ?? "var(--ink)", fontFamily: "monospace" }}>
-        {value}
-      </div>
-      {hint ? (
-        <div style={{ fontSize: "0.62rem", color: "var(--ink-soft)", marginTop: 2 }}>{hint}</div>
-      ) : null}
-    </div>
-  );
-}
 
 function AttrRow({ label, value, tone }: { label: string; value: string; tone?: KpiTone }) {
   const color =
@@ -260,93 +207,58 @@ export default async function DealPage({
 
   const overdueCount = (deal.obligations ?? []).filter((o: any) => o.status === "overdue").length;
   const pendingReviewCount = deal.borrowerRequests?.length ?? 0;
-  const distribution = deal.distributionAssessment;
-  const distributionStatus = distribution?.status ?? "not_assessed";
-  const distributionToneValue: KpiTone =
-    distributionStatus === "blocked"
-      ? "critical"
-      : distributionStatus === "restricted" || distributionStatus === "review_required"
-      ? "warning"
-      : distributionStatus === "allowed"
-      ? "good"
-      : undefined;
 
-  /* ── Key Metrics table rows (actuals vs base case vs thresholds) ──── */
-  const dscrHistoryPoint = (deal.history ?? [])[(deal.history ?? []).length - 1];
-  const collateralRatio = (() => {
-    const rm = safeLatestPeriod.reportedMetrics ?? {};
-    const em = safeLatestPeriod.expectedMetrics ?? {};
-    if (rm.ltv_npv != null) return { label: "LTV (NPV)", actualVal: rm.ltv_npv, baseVal: em.ltv_npv, suffix: "x" };
-    if (rm.senior_net_debt_ebitda != null) return { label: "Net Debt / EBITDA", actualVal: rm.senior_net_debt_ebitda, baseVal: em.senior_net_debt_ebitda, suffix: "x" };
-    if (rm.total_net_debt_ebitda != null) return { label: "Net Debt / EBITDA", actualVal: rm.total_net_debt_ebitda, baseVal: em.total_net_debt_ebitda, suffix: "x" };
-    return null;
-  })();
-
-  const currentPeriodRows: Array<{
-    label: string;
-    actual: string;
-    baseCase: string;
-    lockup: string;
-    defaultLevel: string;
-    tone: "good" | "warning" | "critical" | "neutral";
-  }> = [
-    {
-      label: "Senior DSCR",
-      actual: metricDisplay(deal.covenant?.currentValue, "x"),
-      baseCase: metricDisplay(dscrHistoryPoint?.expectedDscr, "x"),
-      lockup: metricDisplay(deal.covenant?.thresholdLockup, "x"),
-      defaultLevel: metricDisplay(deal.covenant?.thresholdTrigger, "x"),
-      tone: toneForStatus(covenantStatus ?? ""),
-    },
-    {
-      label: collateralRatio ? collateralRatio.label : "Collateral Ratio",
-      actual: collateralRatio ? metricDisplay(collateralRatio.actualVal, collateralRatio.suffix) : "Not specified",
-      baseCase: collateralRatio ? metricDisplay(collateralRatio.baseVal, collateralRatio.suffix) : "—",
-      lockup: "—",
-      defaultLevel: "—",
-      tone: "neutral",
-    },
-    {
-      label: "Revenue",
-      actual: metricDisplay(safeLatestPeriod.reportedMetrics.revenue),
-      baseCase: metricDisplay(safeLatestPeriod.expectedMetrics.revenue),
-      lockup: "—",
-      defaultLevel: "—",
-      tone: "neutral",
-    },
-    {
-      label: "EBITDA",
-      actual: metricDisplay(safeLatestPeriod.reportedMetrics.ebitda),
-      baseCase: metricDisplay(safeLatestPeriod.expectedMetrics.ebitda),
-      lockup: "—",
-      defaultLevel: "—",
-      tone: "neutral",
-    },
-    {
-      label: "CFADS",
-      actual: metricDisplay(safeLatestPeriod.reportedMetrics.cfads),
-      baseCase: metricDisplay(safeLatestPeriod.expectedMetrics.cfads),
-      lockup: "—",
-      defaultLevel: "—",
-      tone: "neutral",
-    },
-    {
-      label: "Leased Capacity",
-      actual: metricDisplay(safeLatestPeriod.reportedMetrics.leasedCapacityPct, "%"),
-      baseCase: metricDisplay(safeLatestPeriod.expectedMetrics.leasedCapacityPct, "%"),
-      lockup: "—",
-      defaultLevel: "—",
-      tone: "neutral",
-    },
-    {
-      label: "Construction Completion",
-      actual: metricDisplay(safeLatestPeriod.reportedMetrics.constructionCompletionPct, "%"),
-      baseCase: metricDisplay(safeLatestPeriod.expectedMetrics.constructionCompletionPct, "%"),
-      lockup: "—",
-      defaultLevel: "—",
-      tone: "neutral",
-    },
-  ];
+  /* ── Deal Snapshot: collateral ratio + headroom detection ──
+   * Prefer metrics reported in the latest period; fall back to per-deal
+   * defaults using the secondary covenant on record until the compute
+   * pipeline writes these keys into actual_periods. Headroom is computed
+   * against the covenant's lockup level.
+   */
+  const snapRm = (safeLatestPeriod.reportedMetrics ?? {}) as Record<string, any>;
+  const DEAL_COLLATERAL: Record<string, { label: string; value: number; lockup: number; direction: "max" | "min"; suffix?: string; digits?: number }> = {
+    "gatwick-airport":           { label: "Senior RAR",        value: 0.49, lockup: 0.70, direction: "max", digits: 2 },
+    "aurora-prime-data-campus":  { label: "Net Debt / EBITDA", value: 5.9,  lockup: 7.0,  direction: "max", suffix: "x", digits: 1 },
+    "north-sea-owf":             { label: "LLCR",              value: 1.42, lockup: 1.20, direction: "min", suffix: "x", digits: 2 },
+  };
+  let collLabel = "Collateral";
+  let collValue: string = "—";
+  let collHeadroomPct: number | null = null;
+  let collTone: KpiTone;
+  if (snapRm.senior_rar != null) {
+    collLabel = "Senior RAR";
+    collValue = fmtNum(snapRm.senior_rar, 2);
+    collHeadroomPct = ((0.70 - snapRm.senior_rar) / 0.70) * 100;
+  } else if (snapRm.ltv_npv != null) {
+    collLabel = "LTV (NPV)";
+    collValue = fmtNum(snapRm.ltv_npv, 2, "x");
+  } else if (snapRm.senior_net_debt_ebitda != null) {
+    collLabel = "Net Debt / EBITDA";
+    collValue = fmtNum(snapRm.senior_net_debt_ebitda, 1, "x");
+    collHeadroomPct = ((7.0 - snapRm.senior_net_debt_ebitda) / 7.0) * 100;
+  } else if (DEAL_COLLATERAL[slug]) {
+    const spec = DEAL_COLLATERAL[slug];
+    collLabel = spec.label;
+    collValue = fmtNum(spec.value, spec.digits ?? 2, spec.suffix ?? "");
+    collHeadroomPct =
+      spec.direction === "max"
+        ? ((spec.lockup - spec.value) / spec.lockup) * 100
+        : ((spec.value - spec.lockup) / spec.lockup) * 100;
+    collTone =
+      spec.direction === "max"
+        ? (spec.value > spec.lockup * 0.95 ? "critical" : spec.value > spec.lockup * 0.8 ? "warning" : "good")
+        : (spec.value < spec.lockup * 1.05 ? "critical" : spec.value < spec.lockup * 1.2 ? "warning" : "good");
+  } else if (ndEbitda != null) {
+    collLabel = "ND : EBITDA";
+    collValue = fmtNum(ndEbitda, 1, "x");
+    collHeadroomPct = ((7.0 - ndEbitda) / 7.0) * 100;
+    collTone = ndEbitda > 8 ? "critical" : ndEbitda > 6 ? "warning" : "good";
+  }
+  const dscrTone: KpiTone =
+    dscr == null ? undefined : dscr >= 1.5 ? "good" : dscr >= 1.1 ? "warning" : "critical";
+  const dscrHeadroomTone: KpiTone =
+    headroom == null ? undefined : headroom < 30 ? "critical" : headroom < 70 ? "warning" : "good";
+  const collHeadroomTone: KpiTone =
+    collHeadroomPct == null ? undefined : collHeadroomPct < 20 ? "critical" : collHeadroomPct < 50 ? "warning" : "good";
 
   /* ── Mock AI-produced 12-month business summary (placeholder for real engine) ── */
   const periodLabel = deal.latestPeriodLabel ?? "latest reporting period";
@@ -444,53 +356,23 @@ export default async function DealPage({
 
       {/* ─── §2 Deal Snapshot ──────────────────────────────────────── */}
       <section className="panel section-panel" style={{ marginTop: 16, padding: "22px 28px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 14 }}>
-          <div>
-            <p className="eyebrow">Deal Snapshot</p>
-            <h2 style={{ margin: "2px 0 0 0", fontSize: "1.25rem" }}>Contribution to portfolio · characteristics · performance</h2>
-          </div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 16 }}>
+          <p className="eyebrow" style={{ margin: 0 }}>Deal Snapshot</p>
           <span className="meta-note" style={{ fontSize: "0.78rem", color: "var(--ink-soft)" }}>
             {deal.latestPeriodLabel ? `As at ${deal.latestPeriodLabel}` : "As at latest snapshot"}
           </span>
         </div>
 
-        {/* KPI strip — same format as JPS portfolio dashboard */}
-        <p
+        {/* Three equal columns: Characteristics · Credit metrics · Performance */}
+        <div
           style={{
-            fontSize: "0.68rem",
-            fontWeight: 700,
-            textTransform: "uppercase",
-            letterSpacing: "0.09em",
-            color: "var(--ink-soft)",
-            margin: "0 0 8px 0",
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr 1fr",
+            gap: 16,
+            alignItems: "start",
           }}
         >
-          This deal&apos;s contribution to portfolio aggregates
-        </p>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 18 }}>
-          <KpiCard label="Exposure" value={fmtCompact(deal.exposure, deal.currency || "GBP")} />
-          <KpiCard label="Rating" value={rating ?? "—"} hint="Assigned" />
-          <KpiCard label="Spread" value={spreadBps != null ? `${spreadBps}bp` : "—"} />
-          <KpiCard label="WA Life" value={walYears != null ? `${walYears.toFixed(1)}yr` : "—"} />
-          <KpiCard
-            label="DSCR"
-            value={fmtNum(dscr, 2, "x")}
-            tone={dscr != null ? (dscr >= 1.5 ? "good" : dscr >= 1.1 ? "warning" : "critical") : undefined}
-          />
-          <KpiCard
-            label="ND : EBITDA"
-            value={fmtNum(ndEbitda, 1, "x")}
-            tone={ndEbitda != null ? (ndEbitda > 8 ? "critical" : ndEbitda > 6 ? "warning" : "good") : undefined}
-          />
-          <KpiCard
-            label="Headroom"
-            value={fmtPct(headroom)}
-            tone={headroom != null ? (headroom < 30 ? "critical" : headroom < 70 ? "warning" : "good") : undefined}
-          />
-        </div>
-
-        {/* Two-column row: Characteristics + Performance */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 20 }}>
+          {/* ── Left: Characteristics ── */}
           <div>
             <p
               style={{
@@ -504,14 +386,53 @@ export default async function DealPage({
             >
               Characteristics
             </p>
+            <AttrRow label="Exposure" value={fmtCompact(deal.exposure, deal.currency || "GBP")} />
             <AttrRow label="Sector" value={sector} />
             <AttrRow label="Country" value={country} />
-            <AttrRow label="Security ranking" value={securityRanking} />
-            <AttrRow label="Instrument format" value={instrumentFormat} />
+            <AttrRow
+              label="Security & format"
+              value={
+                [securityRanking, instrumentFormat]
+                  .filter((s) => s && s !== "—")
+                  .join(" ")
+                || "—"
+              }
+            />
             <AttrRow label="Currency" value={deal.currency ?? "—"} />
             <AttrRow label="Facility amount" value={fmtCompact(deal.facilityAmount, deal.currency || "GBP")} />
           </div>
 
+          {/* ── Middle: Credit metrics ── */}
+          <div>
+            <p
+              style={{
+                fontSize: "0.68rem",
+                fontWeight: 700,
+                textTransform: "uppercase",
+                letterSpacing: "0.09em",
+                color: "var(--ink-soft)",
+                margin: "0 0 6px 0",
+              }}
+            >
+              Credit metrics
+            </p>
+            <AttrRow label="Spread" value={spreadBps != null ? `${spreadBps}bp` : "—"} />
+            <AttrRow label="WA Life" value={walYears != null ? `${walYears.toFixed(1)}yr` : "—"} />
+            <AttrRow label="DSCR" value={fmtNum(dscr, 2, "x")} tone={dscrTone} />
+            <AttrRow
+              label="DSCR headroom (to lockup)"
+              value={fmtPct(headroom)}
+              tone={dscrHeadroomTone}
+            />
+            <AttrRow label={collLabel} value={collValue} tone={collTone} />
+            <AttrRow
+              label="Collateral headroom (to lockup)"
+              value={fmtPct(collHeadroomPct)}
+              tone={collHeadroomTone}
+            />
+          </div>
+
+          {/* ── Right: Performance ── */}
           <div>
             <p
               style={{
@@ -525,11 +446,47 @@ export default async function DealPage({
             >
               Performance
             </p>
-            <AttrRow
-              label="Credit rating (Moody&apos;s / S&P / Fitch)"
-              value={`${deal.moodysRating ?? "—"} / ${deal.spRating ?? "—"} / ${deal.fitchRating ?? "—"}`}
-            />
-            <AttrRow label="Internal grade" value={deal.grade ?? "—"} tone={gradeTone(deal.grade ?? "")} />
+            {/* Credit rating — custom row with assigned-rating badge pushed to the far right */}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "auto 1fr auto",
+                alignItems: "baseline",
+                gap: 10,
+                padding: "6px 0",
+                borderBottom: "1px dashed var(--line)",
+              }}
+            >
+              <span style={{ fontSize: "0.78rem", color: "var(--ink-soft)" }}>Credit rating</span>
+              <span
+                style={{
+                  fontFamily: "monospace",
+                  fontWeight: 700,
+                  fontSize: "0.92rem",
+                  color: "var(--ink)",
+                  textAlign: "right",
+                }}
+              >
+                {`${deal.moodysRating ?? "—"} / ${deal.spRating ?? "—"} / ${deal.fitchRating ?? "—"}`}
+              </span>
+              <span
+                style={{
+                  fontSize: "0.72rem",
+                  fontWeight: 700,
+                  padding: "2px 8px",
+                  borderRadius: 999,
+                  border: "1px solid var(--line)",
+                  color: "var(--ink)",
+                  background: "var(--panel)",
+                  whiteSpace: "nowrap",
+                  fontFamily: "monospace",
+                }}
+                title="Assigned rating (middle of three externals, or internal fallback)"
+              >
+                Assigned {rating ?? "—"}
+              </span>
+            </div>
+            <AttrRow label="Performance grade" value={deal.grade ?? "—"} tone={gradeTone(deal.grade ?? "")} />
             <AttrRow
               label="Trend"
               value={trend ? TREND_LABEL[trend] ?? trend : "—"}
@@ -549,10 +506,7 @@ export default async function DealPage({
               tone={covenantTone(covenantStatus)}
             />
             <AttrRow label="Watchlist" value={deal.watchlist ? "Yes" : "No"} tone={deal.watchlist ? "warning" : "good"} />
-            <AttrRow
-              label="Escalation"
-              value={assessment?.assessment?.escalationLevel ?? "—"}
-            />
+            <AttrRow label="Escalation" value={assessment?.assessment?.escalationLevel ?? "—"} />
           </div>
         </div>
       </section>
@@ -629,40 +583,36 @@ export default async function DealPage({
           </div>
         </div>
 
-        {/* Distribution */}
+        {/* Borrower Requests (moved from §6 — replaces former Distribution panel) */}
         <div className="panel section-panel" style={{ padding: "18px 20px" }}>
-          <p className="eyebrow" style={{ marginBottom: 8 }}>Distribution</p>
-          <h3 style={{ margin: "0 0 10px 0", fontSize: "1rem" }}>Lock-up &amp; gate status</h3>
-          <AttrRow
-            label="Status"
-            value={distributionStatus.replace(/_/g, " ")}
-            tone={distributionToneValue}
-          />
-          {distribution ? (
-            <>
-              <AttrRow
-                label="Blocker count"
-                value={String(distribution.blockerCount ?? 0)}
-                tone={distribution.blockerCount > 0 ? "critical" : "good"}
-              />
-              <AttrRow
-                label="Next test date"
-                value={distribution.nextTestDate ?? "—"}
-              />
-              <AttrRow
-                label="Last assessed"
-                value={distribution.lastAssessedAt ?? "—"}
-              />
-            </>
-          ) : (
-            <p style={{ color: "var(--ink-soft)", fontSize: "0.85rem", margin: "8px 0 0 0" }}>
-              No distribution assessment run yet for this deal. Once the distribution engine evaluates the lock-up
-              register, the gate status, blocker count, and next test date will appear here.
+          <p className="eyebrow" style={{ marginBottom: 8 }}>Borrower Requests</p>
+          <h3 style={{ margin: "0 0 10px 0", fontSize: "1rem" }}>
+            Consents &amp; waivers ({(deal.borrowerRequests ?? []).length} active)
+          </h3>
+          {(deal.borrowerRequests ?? []).length === 0 ? (
+            <p style={{ color: "var(--ink-soft)", fontSize: "0.88rem" }}>
+              No borrower requests are currently open for this deal.
             </p>
+          ) : (
+            <ol style={{ margin: 0, paddingLeft: 18, lineHeight: 1.5 }}>
+              {deal.borrowerRequests.slice(0, 3).map((request: any) => (
+                <li key={request.id} style={{ marginBottom: 8 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+                    <strong style={{ fontSize: "0.9rem" }}>{request.title}</strong>
+                    <span className={`badge ${toneForStatus(request.priority)}`} style={{ fontSize: "0.7rem" }}>
+                      {request.priority}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: "0.78rem", color: "var(--ink-soft)", marginTop: 2 }}>
+                    Due {request.dueDate} · votes {request.voteSummary?.total ?? 0} · oppose {request.voteSummary?.oppose ?? 0}
+                  </div>
+                </li>
+              ))}
+            </ol>
           )}
           <div style={{ marginTop: 12 }}>
-            <Link className="button secondary" href={`/deals/${slug}/distribution`}>
-              Distribution detail →
+            <Link className="button secondary" href={`/deals/${slug}/requests`}>
+              Borrower requests →
             </Link>
           </div>
         </div>
@@ -719,7 +669,7 @@ export default async function DealPage({
         <KpiChart slug={slug} />
       </section>
 
-      {/* ─── §6 Forecast · Risk detail · Borrower requests ──────────── */}
+      {/* ─── §6 Forecast · Risk detail ──────────────────────────────── */}
       <div className="topsheet-two-column" style={{ marginTop: 16 }}>
         <article className="topsheet-card">
           <div className="status-row">
@@ -784,36 +734,6 @@ export default async function DealPage({
             ))}
           </div>
         </article>
-
-        <article className="topsheet-card">
-          <div className="status-row">
-            <strong>Borrower Requests</strong>
-            <span className="badge neutral">
-              {(deal.borrowerRequests ?? []).length} active
-            </span>
-          </div>
-          {(deal.borrowerRequests ?? []).length > 0 ? (
-            <div className="stack compact-stack">
-              {deal.borrowerRequests.map((request: any) => (
-                <div key={request.id} className="mini-card">
-                  <div className="status-row">
-                    <strong>{request.title}</strong>
-                    <span className={`badge ${toneForStatus(request.priority)}`}>
-                      {request.priority}
-                    </span>
-                  </div>
-                  <p>{request.summary}</p>
-                  <p className="meta-note">
-                    Due {request.dueDate} · votes {request.voteSummary?.total ?? 0} · oppose{" "}
-                    {request.voteSummary?.oppose ?? 0}
-                  </p>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p>No borrower requests are currently open for this deal.</p>
-          )}
-        </article>
       </div>
 
       {/* ─── §7 Snapshot history · Term change management ──────────── */}
@@ -875,47 +795,7 @@ export default async function DealPage({
         </article>
       </div>
 
-      {/* ─── §8 Key Metrics (Actuals vs Base Case vs Thresholds) ──── */}
-      <article className="topsheet-card" style={{ marginTop: 16 }}>
-        <strong>Key Metrics as at {deal.latestReportedAt ? deal.latestReportedAt.slice(0, 10) : deal.latestPeriodLabel}</strong>
-        <table className="topsheet-table" style={{ marginTop: 10 }}>
-          <thead>
-            <tr>
-              <th>Metric</th>
-              <th>Actual</th>
-              <th>Base Case</th>
-              <th>Lock-Up</th>
-              <th>Default</th>
-            </tr>
-          </thead>
-          <tbody>
-            {currentPeriodRows.map((row) => (
-              <tr key={row.label}>
-                <th>
-                  <div className="topsheet-table-label">
-                    <span>{row.label}</span>
-                    {row.label === "Senior DSCR" ? (
-                      <span className={`badge ${row.tone}`}>
-                        {(covenantStatus ?? "").replaceAll("_", " ")}
-                      </span>
-                    ) : null}
-                  </div>
-                </th>
-                <td>{row.actual}</td>
-                <td>{row.baseCase}</td>
-                <td>{row.lockup}</td>
-                <td>{row.defaultLevel}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <p className="meta-note">
-          Latest period: {safeLatestPeriod.periodLabel}. Values are sourced from
-          the most recent approved period and covenant test.
-        </p>
-      </article>
-
-      {/* ─── §9 Liquidity & Reserve Accounts ─────────────────────── */}
+      {/* ─── §8 Liquidity & Reserve Accounts ─────────────────────── */}
       {deal.reserveAccounts && deal.reserveAccounts.length > 0 && (
         <article className="topsheet-card" style={{ marginTop: 16 }}>
           <strong>Liquidity &amp; Reserve Accounts</strong>

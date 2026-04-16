@@ -783,7 +783,7 @@ export function DashboardMonitor({
       ),
       tone: watchlistExposureStatus.tone,
       definition:
-        "Scoped exposure and deal count either on watchlist or carrying a weak internal grade.",
+        "Scoped exposure and deal count either on watchlist or carrying a weak performance grade.",
       healthSummary: watchlistExposureStatus.summary
     },
     {
