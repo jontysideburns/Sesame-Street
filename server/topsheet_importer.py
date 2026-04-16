@@ -746,6 +746,9 @@ def parse_capital_structure_sheet(ws) -> list[dict]:
     v8: also reads the capital-structure taxonomy columns R\u2013Y (entity_level
     through cashflow_priority_rank). These are optional — if the sheet was
     authored against an older template the new fields simply stay None.
+    v9: adds instrument-economics columns AB\u2013AH (coupon, base rate at
+    issuance, spread, benchmark spread, payment frequency, upfront fee,
+    commitment fee). Also optional.
     """
     col_map = {
         "instrument_name": 0, "instrument_type": 1, "waterfall_priority": 2,
@@ -759,6 +762,14 @@ def parse_capital_structure_sheet(ws) -> list[dict]:
         "structural_seniority": 21, "ratio_consolidation_level": 22,
         "intercompany_lender": 23, "subordination_agreement": 24,
         "cashflow_priority_rank": 25,
+        # v9: instrument economics
+        "coupon_bps": 26,
+        "base_rate_at_issuance_bps": 27,
+        "spread_bps": 28,
+        "benchmark_spread_bps": 29,
+        "payment_frequency": 30,
+        "upfront_fee_bps": 31,
+        "commitment_fee_pct_of_margin": 32,
     }
     rows = parse_table_sheet(ws, col_map)
     for r in rows:
@@ -776,7 +787,143 @@ def parse_capital_structure_sheet(ws) -> list[dict]:
         r["structural_seniority"] = int(_num(r["structural_seniority"])) if _num(r.get("structural_seniority")) is not None else None
         r["subordination_agreement"] = _bool(r.get("subordination_agreement"))
         r["cashflow_priority_rank"] = int(_num(r["cashflow_priority_rank"])) if _num(r.get("cashflow_priority_rank")) is not None else None
+        # v9 coercions — all optional
+        for int_col in ("coupon_bps", "base_rate_at_issuance_bps", "spread_bps",
+                        "benchmark_spread_bps", "upfront_fee_bps"):
+            v = _num(r.get(int_col))
+            r[int_col] = int(v) if v is not None else None
+        r["commitment_fee_pct_of_margin"] = _num(r.get("commitment_fee_pct_of_margin"))
+        pf = r.get("payment_frequency")
+        r["payment_frequency"] = str(pf).strip() if pf else None
     return rows
+
+
+def parse_margin_ratchets_sheet(ws) -> list[dict]:
+    """Parse Tab 2b: Margin Ratchets.
+
+    One row per tier. ratchet_kind=base_margin for absolute-margin tiers
+    (time- or covenant-triggered). ratchet_kind=esg_adjustment for signed
+    bps deltas applied on top of the active base tier when linked SPTs
+    are met or missed.
+
+    Rows are linked to the instrument on Tab 2 via instrument_ref which
+    must match the Tab 2 instrument_name exactly.
+    """
+    col_map = {
+        "instrument_ref": 0,
+        "step_order": 1,
+        "ratchet_kind": 2,
+        "trigger_type": 3,
+        "trigger_metric": 4,
+        "trigger_operator": 5,
+        "trigger_threshold": 6,
+        "trigger_threshold_upper": 7,
+        "effective_from": 8,
+        "effective_to": 9,
+        "adjustment_mode": 10,
+        "margin_bps": 11,
+        "pik_portion_bps": 12,
+        "step_type": 13,
+        "notes": 14,
+    }
+    rows: list[dict] = []
+    header_skipped = False
+    for row in ws.iter_rows(values_only=True):
+        if not row or not any(row):
+            continue
+        first = str(row[0] or "").strip().lower()
+        if not header_skipped:
+            if first in ("instrument_ref", "instrument") or "ref" in first:
+                header_skipped = True
+                continue
+            # Skip title / guidance rows until we hit the header
+            continue
+        if first in ("", "must match an instrument name on tab 2 exactly"):
+            continue  # guidance row
+        rec: dict = {}
+        for field, col_idx in col_map.items():
+            rec[field] = _val(row[col_idx]) if col_idx < len(row) else None
+        if not rec.get("instrument_ref") or not rec.get("ratchet_kind"):
+            continue
+
+        # Coercions
+        for int_col in ("step_order", "margin_bps", "pik_portion_bps"):
+            v = _num(rec.get(int_col))
+            rec[int_col] = int(v) if v is not None else None
+        for num_col in ("trigger_threshold", "trigger_threshold_upper"):
+            rec[num_col] = _num(rec.get(num_col))
+        for date_col in ("effective_from", "effective_to"):
+            rec[date_col] = _date(rec.get(date_col))
+        for txt_col in ("instrument_ref", "ratchet_kind", "trigger_type",
+                        "trigger_metric", "trigger_operator", "adjustment_mode",
+                        "step_type", "notes"):
+            v = rec.get(txt_col)
+            rec[txt_col] = str(v).strip() if v is not None else None
+        rows.append(rec)
+    return rows
+
+
+def _upsert_margin_ratchets(conn, deal_id: int, rows: list[dict], errors: list[str]) -> int:
+    """Write margin-ratchet rows into capital_structure_margin_ratchets.
+
+    Resolves each row's instrument_ref to a capital_structure_instruments.id
+    by matching on (deal_id, instrument_name). Replaces all existing ratchets
+    for instruments that appear in the sheet (cascading replace pattern to
+    keep the sheet authoritative).
+    """
+    if not rows:
+        return 0
+
+    # Look up all instruments for this deal
+    inst_rows = conn.execute(
+        "SELECT id, instrument_name FROM capital_structure_instruments WHERE deal_id = %s",
+        (deal_id,),
+    ).fetchall()
+    inst_by_name = {r["instrument_name"]: str(r["id"]) for r in inst_rows}
+
+    # Group input rows by instrument
+    by_instrument: dict[str, list[dict]] = {}
+    for row in rows:
+        ref = row["instrument_ref"]
+        if ref not in inst_by_name:
+            errors.append(
+                f"Margin ratchet references instrument '{ref}' but no matching row "
+                f"found on Tab 2 for this deal — skipping."
+            )
+            continue
+        by_instrument.setdefault(inst_by_name[ref], []).append(row)
+
+    written = 0
+    for instrument_id, instrument_rows in by_instrument.items():
+        # Replace existing ratchets for this instrument
+        conn.execute(
+            "DELETE FROM capital_structure_margin_ratchets WHERE instrument_id = %s",
+            (instrument_id,),
+        )
+        for row in instrument_rows:
+            # Default adjustment_mode if caller left it blank
+            adj_mode = row.get("adjustment_mode")
+            if not adj_mode:
+                adj_mode = "additive" if row.get("ratchet_kind") == "esg_adjustment" else "absolute"
+            conn.execute(
+                """INSERT INTO capital_structure_margin_ratchets
+                     (instrument_id, step_order, ratchet_kind, trigger_type,
+                      trigger_metric, trigger_operator, trigger_threshold,
+                      trigger_threshold_upper, effective_from, effective_to,
+                      adjustment_mode, margin_bps, pik_portion_bps, step_type, notes)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                (
+                    instrument_id, row["step_order"], row["ratchet_kind"],
+                    row["trigger_type"], row.get("trigger_metric"),
+                    row.get("trigger_operator"), row.get("trigger_threshold"),
+                    row.get("trigger_threshold_upper"),
+                    row.get("effective_from"), row.get("effective_to"),
+                    adj_mode, row["margin_bps"], row.get("pik_portion_bps"),
+                    row.get("step_type") or "initial", row.get("notes"),
+                ),
+            )
+            written += 1
+    return written
 
 
 def parse_enforcement_classes_sheet(ws) -> list[dict]:
@@ -1678,12 +1825,21 @@ def import_topsheet(conn, deal_slug: str, file_bytes: bytes) -> dict:
 
     # ── Template 3: Table-format child sheets ──
 
-    # Capital Structure (Sheet 3)
-    for sn in ("3. Capital Structure", "Capital Structure"):
+    # Capital Structure (Tab 2 in v9, Sheet 3 legacy)
+    for sn in ("2. Capital Structure", "3. Capital Structure", "Capital Structure"):
         if sn in sheet_names:
             rows = parse_capital_structure_sheet(wb[sn])
             n = _replace_child_table(conn, deal_id, "capital_structure_instruments", rows, errors)
             counts["capital_structure"] = n
+            break
+
+    # Margin Ratchets (Tab 2b) — must run AFTER capital_structure so instrument
+    # IDs exist for the instrument_ref lookup
+    for sn in ("2b. Margin Ratchets", "Margin Ratchets"):
+        if sn in sheet_names:
+            ratchet_rows = parse_margin_ratchets_sheet(wb[sn])
+            n = _upsert_margin_ratchets(conn, deal_id, ratchet_rows, errors)
+            counts["margin_ratchets"] = n
             break
 
     # Enforcement Classes (Sheet 4)

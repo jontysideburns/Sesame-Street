@@ -259,8 +259,8 @@ add_field(ws, r, "Headroom %", computed=True, guidance="Computed: (actual-defaul
 # TAB 2: Capital Structure
 # ═══════════════════════════════════════════════════════════════════
 ws2 = wb.create_sheet("2. Capital Structure")
-ws2.merge_cells("A1:AA1")
-ws2["A1"] = "CAPITAL STRUCTURE INSTRUMENTS — One row per debt instrument. Cols R\u2013Y capture the entity level and priority-of-claim ranking used by the consolidation and ratio engines. Cols Z\u2013AA (v9) capture shareholder-level pledges for the capital stack engine."
+ws2.merge_cells("A1:AH1")
+ws2["A1"] = "CAPITAL STRUCTURE INSTRUMENTS — One row per debt instrument. Cols R\u2013Y capture the entity level and priority-of-claim ranking used by the consolidation and ratio engines. Cols Z\u2013AA (v9) capture shareholder-level pledges for the capital stack engine. Cols AB\u2013AH (v9) capture the instrument economics (coupon, base rate, spread, benchmark, fees). Time-varying / ESG ratchets live in Tab 2b."
 ws2["A1"].font = version_font
 ws2["A1"].alignment = Alignment(wrap_text=True)
 
@@ -273,7 +273,12 @@ headers_cs = ["Instrument Name", "Type", "Format", "Security Ranking", "Pari-Pas
               "Ratio Consolidation Level", "Intercompany Lender", "Subordination Agreement",
               "Cashflow Priority Rank",
               # Shareholder-level pledge (v9) — for capital-stack gross-up
-              "Pledged Share Entity", "Pledged Share %"]
+              "Pledged Share Entity", "Pledged Share %",
+              # Instrument economics (v9) — pricing components + key loan fees.
+              # Detailed ratchets live in Tab 2b; all optional.
+              "Coupon (bps)", "Base Rate at Issuance (bps)", "Spread (bps)",
+              "Benchmark Spread (bps)", "Payment Frequency",
+              "Upfront Fee (bps)", "Commitment Fee (% of Margin)"]
 add_table_headers(ws2, 2, headers_cs)
 
 # Row 3: guidance strip so users understand the v8+v9 columns at a glance
@@ -292,6 +297,14 @@ guidance_cs = [
     "Priority of claim: 1 = first claim. Blank for shareholder loans / intercompany.",
     "v9: shareholder entity in Tab 7 whose stake secures this debt (blank for normal debt)",
     "v9: ownership % pledged \u2014 drives the grossed-up leverage factor (1 / pct)",
+    # Instrument economics guidance
+    "Fixed bonds/notes: full coupon at issuance (e.g. 612 for a 6.125% bond). Floating: blank.",
+    "Risk-free / benchmark rate at pricing. Fixed: gilt/bund yield. Floating: typically 0.",
+    "Credit spread at issuance. Fixed: coupon \u2212 base rate. Floating: = margin. Canonical for WA Spread.",
+    "IC memo author's view of the comparable new-issue spread at pricing. Drives private-debt premium = spread \u2212 benchmark.",
+    "monthly | quarterly | semi_annual | annual",
+    "Arrangement / OID fee paid at drawdown (bps of committed amount).",
+    "Fee on undrawn, expressed as % of margin (e.g. 35.00 = 35% of margin).",
 ]
 for i, g in enumerate(guidance_cs, 1):
     if g:
@@ -309,11 +322,13 @@ dv_repay = DataValidation(type="list", formula1='"bullet,amortising,sculpted,cas
 dv_status = DataValidation(type="list", formula1='"active,repaid,cancelled,restructured"')
 dv_entity_level = DataValidation(type="list", formula1='"opco,midco,holdco,topco,issuer,bidco,majority_holdco,minority_holdco"')
 dv_ratio_consol = DataValidation(type="list", formula1='"opco_standalone,consolidated,proportional_consolidated"')
+dv_pay_freq = DataValidation(type="list", formula1='"monthly,quarterly,semi_annual,annual"')
 
 # Data rows now start at row 4 (row 3 is guidance strip)
 add_table_rows(ws2, 4, 8, len(headers_cs), {
     2: dv_inst_type, 3: dv_format, 11: dv_int_type, 13: dv_repay, 17: dv_status,
     18: dv_entity_level, 22: dv_ratio_consol, 24: dv_yesno,
+    32: dv_pay_freq,
 })
 cs_widths = {
     18: 18, 19: 22, 20: 12, 21: 14, 22: 28, 23: 22, 24: 12, 25: 14,
@@ -323,6 +338,89 @@ for c in range(1, len(headers_cs) + 1):
     width = cs_widths.get(c, max(14, len(headers_cs[c-1]) + 2))
     ws2.column_dimensions[get_column_letter(c)].width = width
 ws2.freeze_panes = "A4"
+
+
+# ═══════════════════════════════════════════════════════════════════
+# TAB 2b: Margin Ratchets (base margin + ESG adjustments)
+# ═══════════════════════════════════════════════════════════════════
+ws2b = wb.create_sheet("2b. Margin Ratchets")
+ws2b.merge_cells("A1:N1")
+ws2b["A1"] = (
+    "MARGIN RATCHETS \u2014 One row per tier. ratchet_kind=base_margin holds absolute-margin "
+    "tiers (time- or covenant-triggered step-downs/step-ups). ratchet_kind=esg_adjustment holds "
+    "signed bps deltas applied on top of the active base tier when linked sustainability SPTs "
+    "are met/missed. Leave blank if the instrument has no ratchet."
+)
+ws2b["A1"].font = version_font
+ws2b["A1"].alignment = Alignment(wrap_text=True)
+ws2b.row_dimensions[1].height = 55
+
+headers_ratchet = [
+    "instrument_ref",       # matches instrument_name from Tab 2
+    "step_order",           # ordinal within instrument
+    "ratchet_kind",         # base_margin | esg_adjustment
+    "trigger_type",         # time_based | leverage | dscr | icr | coverage_ratio | event_based | esg_kpi | pik_toggle
+    "trigger_metric",       # net_leverage | senior_dscr | COD | sector_kpi_3 | carbon_intensity_tco2_per_pax | ...
+    "trigger_operator",     # < | <= | = | >= | > | between
+    "trigger_threshold",    # numeric — e.g. 5.0 for '< 5.0x'
+    "trigger_threshold_upper",  # for 'between'
+    "effective_from",       # date
+    "effective_to",         # date
+    "adjustment_mode",      # absolute (base_margin) | additive (esg_adjustment)
+    "margin_bps",           # new total for absolute; signed delta for additive
+    "pik_portion_bps",      # PIK split within tier
+    "step_type",            # initial | step_up | ratchet_down | pik_toggle | default_margin | esg_reward | esg_penalty
+    "notes",
+]
+add_table_headers(ws2b, 2, headers_ratchet)
+
+ratchet_guidance = [
+    "Must match an Instrument Name on Tab 2 exactly",
+    "Integer 1, 2, 3... within this instrument. Unique per instrument.",
+    "base_margin = absolute margin tier. esg_adjustment = signed delta vs. active base tier.",
+    "time_based | leverage | dscr | icr | coverage_ratio | event_based | esg_kpi | pik_toggle",
+    "e.g. net_leverage | senior_dscr | COD | sector_kpi_3 (matches Tab 9 KPI slot) | carbon_intensity",
+    "< | <= | = | >= | > | between  \u2014 blank for time-only triggers",
+    "Numeric threshold (e.g. 5.0 for '< 5.0x'). Blank for time-only triggers.",
+    "Upper bound used with 'between' operator.",
+    "Optional. Blank if purely threshold-driven.",
+    "Optional. Blank if runs to maturity.",
+    "absolute = new total margin. additive = signed bps delta applied to active base tier (ESG).",
+    "e.g. 275 for absolute base margin; -10 for ESG reward; +10 for ESG penalty.",
+    "PIK portion (absolute mode). Leave blank for cash-pay-only tiers.",
+    "initial | step_up | ratchet_down | pik_toggle | default_margin | esg_reward | esg_penalty",
+    "Freeform notes (IC memo commentary, specific SPT description, etc.)",
+]
+for i, g in enumerate(ratchet_guidance, 1):
+    if g:
+        cell = ws2b.cell(row=3, column=i, value=g)
+        cell.font = note_font
+        cell.fill = PatternFill("solid", fgColor="F5F5F0")
+        cell.border = border
+        cell.alignment = Alignment(wrap_text=True, vertical="top")
+ws2b.row_dimensions[3].height = 60
+
+dv_ratchet_kind = DataValidation(type="list", formula1='"base_margin,esg_adjustment"')
+dv_trigger_type = DataValidation(
+    type="list",
+    formula1='"time_based,leverage,dscr,icr,coverage_ratio,event_based,esg_kpi,pik_toggle"',
+)
+dv_trigger_op = DataValidation(type="list", formula1='"<,<=,=,>=,>,between"')
+dv_adj_mode = DataValidation(type="list", formula1='"absolute,additive"')
+dv_step_type = DataValidation(
+    type="list",
+    formula1='"initial,step_up,ratchet_down,pik_toggle,default_margin,esg_reward,esg_penalty"',
+)
+
+add_table_rows(ws2b, 4, 30, len(headers_ratchet), {
+    3: dv_ratchet_kind, 4: dv_trigger_type, 6: dv_trigger_op,
+    11: dv_adj_mode, 14: dv_step_type,
+})
+
+widths_2b = [34, 11, 17, 16, 22, 14, 15, 16, 14, 14, 16, 13, 14, 17, 30]
+for c, w in enumerate(widths_2b, 1):
+    ws2b.column_dimensions[get_column_letter(c)].width = w
+ws2b.freeze_panes = "A4"
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -1413,8 +1511,15 @@ ws13.cell(row=next_row, column=3, value="At least 1 condition required. Ratio co
 ws13.cell(row=next_row, column=3).border = border
 
 
-# Save
+# Save — written to two locations so the download button on /plumbing and
+# the documentation copy stay in lock-step.
 import os
-out = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs", "topsheet-data-template-v9.xlsx")
-wb.save(out)
-print(f"Saved to {out}")
+repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+targets = [
+    os.path.join(repo_root, "docs", "topsheet-data-template-v9.xlsx"),
+    os.path.join(repo_root, "client", "public", "topsheet-data-template-v9.xlsx"),
+]
+for out in targets:
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    wb.save(out)
+    print(f"Saved to {out}")

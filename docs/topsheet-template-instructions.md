@@ -155,6 +155,61 @@ When these fields are populated, the Capital Stack engine computes a **grossed-u
 
 Leave both blank for normal debt instruments (debt at the OpCo, Issuer, or a common MidCo whose shares are 100%-owned within the group).
 
+**Instrument economics (new in v9 — columns AB–AH):** decompose pricing for accurate WA Spread, private-debt-premium computation, and loan-fee capture. All optional; populate wherever the information exists in the IC memo.
+
+| Column | Field | Populate for | Notes |
+|---|---|---|---|
+| AB | `Coupon (bps)` | Fixed-rate bonds and notes | Full coupon at issuance. E.g. 612 for a 6.125% bond. Leave blank for floating-rate. |
+| AC | `Base Rate at Issuance (bps)` | Fixed-rate | Snapshot of the gilt/treasury/swap rate at pricing. Used to derive the credit spread. |
+| AD | `Spread (bps)` | **All** | Credit spread at issuance = Coupon − Base Rate for fixed; = Margin for floating. Canonical field used for WA Spread. |
+| AE | `Benchmark Spread (bps)` | **All** | IC-memo author's view of a peer liquid-market new-issue credit spread at pricing. Drives **Private Debt Premium = Spread − Benchmark** (a generated column). Captures what the author earned above market for illiquidity/sourcing/structure. |
+| AF | `Payment Frequency` | All | `monthly` / `quarterly` / `semi_annual` / `annual`. |
+| AG | `Upfront Fee (bps)` | Loans | Arrangement / OID fee at drawdown (bps of committed). |
+| AH | `Commitment Fee (% of Margin)` | Loans | Fee on undrawn amount, expressed as **% of margin** (e.g. 35.00 = 35% of margin). |
+
+Time-varying margin (construction → post-COD step-down, leverage ratchets) and ESG SPT adjustments go in the separate **Tab 2b. Margin Ratchets** sheet.
+
+See [docs/architecture/instrument-economics.md](architecture/instrument-economics.md) for the full schema (including fields not exposed on Tab 2: utilisation fee tiers, prepayment schedules, yield-to-maturity, purchase price, PIK components, extension/ticking/agent/exit fees).
+
+### Tab 2b: Margin Ratchets
+
+One row per ratchet tier (child to Tab 2 via `instrument_ref`). Two kinds:
+
+- **`ratchet_kind = base_margin`** — absolute-margin tiers triggered by time or a covenant (construction → post-COD step-down, leverage-based ratchet down/up).
+- **`ratchet_kind = esg_adjustment`** — signed bps deltas applied on top of the active base-margin tier when a Sustainability-Linked SPT is met (reward, negative bps) or missed (penalty, positive bps). Classic SLL / SLB pattern.
+
+**Schema (15 columns):**
+
+| Column | Purpose |
+|---|---|
+| `instrument_ref` | Must exactly match an `Instrument Name` on Tab 2. |
+| `step_order` | Ordinal 1, 2, 3, … within the instrument. Unique per instrument. |
+| `ratchet_kind` | `base_margin` or `esg_adjustment`. |
+| `trigger_type` | `time_based` / `leverage` / `dscr` / `icr` / `coverage_ratio` / `event_based` / `esg_kpi` / `pik_toggle`. |
+| `trigger_metric` | Free-text reference — `net_leverage`, `senior_dscr`, `COD`, `sector_kpi_3` (matches a Tab 9 KPI slot), `carbon_intensity_tco2_per_pax`, etc. |
+| `trigger_operator` | `<` / `<=` / `=` / `>=` / `>` / `between`. Blank for time-only triggers. |
+| `trigger_threshold` | Numeric (e.g. `5.0` for "< 5.0x", `1.5` for "< 1.5 tCO2/pax"). |
+| `trigger_threshold_upper` | Upper bound for `between` operator. |
+| `effective_from` | Optional date. |
+| `effective_to` | Optional date. |
+| `adjustment_mode` | `absolute` (new total margin for the tier) or `additive` (signed delta on top of base). ESG rows are always `additive`; base-margin rows are always `absolute`. |
+| `margin_bps` | New total for `absolute`; signed delta for `additive` (e.g. −10 for an ESG reward, +10 for an ESG penalty). |
+| `pik_portion_bps` | PIK split within the tier (absolute mode only). |
+| `step_type` | `initial` / `step_up` / `ratchet_down` / `pik_toggle` / `default_margin` / `esg_reward` / `esg_penalty`. |
+| `notes` | IC memo commentary, SPT description, covenant reference, etc. |
+
+**Worked example — Gatwick SLB 3.625% 2033 Bond:**
+
+| step | ratchet_kind | trigger | bps | step_type |
+|---|---|---|---|---|
+| 1 | base_margin | time_based from 2024-10-16 | 137 | initial |
+| 2 | esg_adjustment | carbon_intensity ≤ 1.5 by 2027 | −10 | esg_reward |
+| 3 | esg_adjustment | carbon_intensity > 1.5 by 2027 | +10 | esg_penalty |
+| 4 | esg_adjustment | renewable_electricity ≥ 100% by 2030 | −5 | esg_reward |
+| 5 | esg_adjustment | renewable_electricity < 100% by 2030 | +5 | esg_penalty |
+
+**Effective margin at any time T** = latest active base-margin tier + SUM of currently-active ESG adjustments. The capital-stack API returns this as `effective_margin_bps` on each instrument.
+
 ### Tab 3: Reserve Accounts
 
 One row per reserve account or liquidity facility.

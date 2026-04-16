@@ -1652,5 +1652,245 @@ CREATE OR REPLACE VIEW v_topsheet_field_audit_status AS
 DROP TABLE IF EXISTS deal_kpi_targets CASCADE;
 
 -- ═══════════════════════════════════════════════════════════════════════════════
+-- INSTRUMENT ECONOMICS — pricing components, fees, ratchets, yield
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- Decomposes capital_structure_instruments.margin_bps (which was conflating
+-- coupon / base_rate / spread for fixed-rate bonds) into canonical pricing
+-- components. Adds fee economics for loans. Adds a child table for time-
+-- and trigger-varying margin (base-margin ratchets + ESG SPT adjustments).
+--
+-- See docs/architecture/instrument-economics.md for the full pattern.
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+-- A) Pricing components (canonical)
+ALTER TABLE capital_structure_instruments
+    ADD COLUMN IF NOT EXISTS coupon_bps                INTEGER,
+    ADD COLUMN IF NOT EXISTS base_rate_at_issuance_bps INTEGER,
+    ADD COLUMN IF NOT EXISTS spread_bps                INTEGER,
+    ADD COLUMN IF NOT EXISTS benchmark_spread_bps      INTEGER,
+    ADD COLUMN IF NOT EXISTS floor_bps                 INTEGER,
+    ADD COLUMN IF NOT EXISTS payment_frequency         TEXT,
+    ADD COLUMN IF NOT EXISTS day_count_convention      TEXT;
+
+-- Generated: private-debt premium vs IC-memo author's benchmark at pricing
+-- Wrapped in a DO block so we can drop-and-recreate cleanly if the formula ever changes.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'capital_structure_instruments'
+          AND column_name = 'private_debt_premium_bps'
+    ) THEN
+        EXECUTE 'ALTER TABLE capital_structure_instruments
+                   ADD COLUMN private_debt_premium_bps INTEGER
+                     GENERATED ALWAYS AS (spread_bps - benchmark_spread_bps) STORED';
+    END IF;
+END $$;
+
+COMMENT ON COLUMN capital_structure_instruments.coupon_bps                IS 'Full coupon at issuance (fixed-rate bonds/notes). E.g. 612 for a 6.125% bond.';
+COMMENT ON COLUMN capital_structure_instruments.base_rate_at_issuance_bps IS 'Snapshot of the risk-free/benchmark rate at pricing (gilt, bund, SOFR fix).';
+COMMENT ON COLUMN capital_structure_instruments.spread_bps                IS 'Credit spread at issuance = coupon − base_rate, or margin for FRNs. Canonical field for WA Spread.';
+COMMENT ON COLUMN capital_structure_instruments.benchmark_spread_bps      IS 'IC-memo author view of comparable new-issue spread at pricing (peer/market benchmark in bps).';
+COMMENT ON COLUMN capital_structure_instruments.private_debt_premium_bps  IS 'GENERATED: spread_bps − benchmark_spread_bps. What the author captured above the liquid comp.';
+COMMENT ON COLUMN capital_structure_instruments.floor_bps                 IS 'Base-rate floor (common in modern leveraged loans).';
+COMMENT ON COLUMN capital_structure_instruments.payment_frequency         IS 'monthly | quarterly | semi_annual | annual';
+COMMENT ON COLUMN capital_structure_instruments.day_count_convention      IS 'act_360 | act_365 | 30_360';
+
+-- B) Loan fee economics
+ALTER TABLE capital_structure_instruments
+    ADD COLUMN IF NOT EXISTS upfront_fee_bps              INTEGER,
+    ADD COLUMN IF NOT EXISTS upfront_fee_basis            TEXT,
+    ADD COLUMN IF NOT EXISTS commitment_fee_pct_of_margin NUMERIC(5,2),
+    ADD COLUMN IF NOT EXISTS commitment_fee_bps           INTEGER,
+    ADD COLUMN IF NOT EXISTS utilisation_fee_tiers        JSONB,
+    ADD COLUMN IF NOT EXISTS ticking_fee_bps              INTEGER,
+    ADD COLUMN IF NOT EXISTS ticking_fee_start            DATE,
+    ADD COLUMN IF NOT EXISTS agent_fee_annual             NUMERIC,
+    ADD COLUMN IF NOT EXISTS extension_fee_bps            INTEGER,
+    ADD COLUMN IF NOT EXISTS exit_fee_bps                 INTEGER;
+
+COMMENT ON COLUMN capital_structure_instruments.upfront_fee_bps              IS 'Arrangement / OID paid at drawdown, expressed as bps of committed (or drawn — see upfront_fee_basis).';
+COMMENT ON COLUMN capital_structure_instruments.commitment_fee_pct_of_margin IS 'Fee on undrawn commitment, expressed as % of margin (e.g. 35.00 = 35% of margin).';
+COMMENT ON COLUMN capital_structure_instruments.utilisation_fee_tiers        IS 'Tiered fee schedule: [{threshold_pct, fee_bps}, ...].';
+
+-- C) Prepayment / call protection upgrades (legacy call_protection TEXT stays for freeform notes)
+ALTER TABLE capital_structure_instruments
+    ADD COLUMN IF NOT EXISTS prepayment_protection_type TEXT,
+    ADD COLUMN IF NOT EXISTS prepayment_schedule        JSONB,
+    ADD COLUMN IF NOT EXISTS soft_call_until            DATE,
+    ADD COLUMN IF NOT EXISTS mfn_sunset_months          INTEGER;
+
+COMMENT ON COLUMN capital_structure_instruments.prepayment_protection_type IS 'make_whole | hard_call | soft_call | none';
+COMMENT ON COLUMN capital_structure_instruments.prepayment_schedule        IS 'Array of {from_year, premium_pct} declining-premium schedules.';
+
+-- D) Yield & acquisition economics (for instruments we hold)
+ALTER TABLE capital_structure_instruments
+    ADD COLUMN IF NOT EXISTS acquisition_channel    TEXT,
+    ADD COLUMN IF NOT EXISTS purchase_price         NUMERIC(8,4),
+    ADD COLUMN IF NOT EXISTS original_issue_price   NUMERIC(8,4),
+    ADD COLUMN IF NOT EXISTS ytm_bps                INTEGER,
+    ADD COLUMN IF NOT EXISTS ytw_bps                INTEGER,
+    ADD COLUMN IF NOT EXISTS has_pik                BOOLEAN DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS pik_margin_bps         INTEGER,
+    ADD COLUMN IF NOT EXISTS pik_toggle             BOOLEAN DEFAULT FALSE;
+
+COMMENT ON COLUMN capital_structure_instruments.acquisition_channel IS 'primary | secondary_purchase';
+COMMENT ON COLUMN capital_structure_instruments.purchase_price      IS 'Price paid, par = 100.00 (e.g. 99.5 for new-issue with OID, 102.25 for secondary premium).';
+
+-- E) Margin ratchet child table — base-margin tiers AND ESG SPT adjustments
+-- One row per ratchet/adjustment tier. Effective margin at time T =
+-- (latest active base_margin tier) + SUM(currently-active esg_adjustment deltas).
+CREATE TABLE IF NOT EXISTS capital_structure_margin_ratchets (
+    id                        SERIAL PRIMARY KEY,
+    instrument_id             UUID    NOT NULL REFERENCES capital_structure_instruments(id) ON DELETE CASCADE,
+    step_order                INTEGER NOT NULL,
+    ratchet_kind              TEXT    NOT NULL,   -- 'base_margin' | 'esg_adjustment'
+    trigger_type              TEXT    NOT NULL,   -- 'time_based' | 'leverage' | 'dscr' | 'icr' | 'coverage_ratio' | 'event_based' | 'esg_kpi' | 'pik_toggle'
+    trigger_metric            TEXT,               -- 'net_leverage' | 'senior_dscr' | 'COD' | 'sector_kpi_3' | 'carbon_intensity_tco2_per_pax' | ...
+    trigger_operator          TEXT,               -- '<' | '<=' | '=' | '>=' | '>' | 'between'
+    trigger_threshold         NUMERIC,            -- e.g. 5.0 for '< 5.0x', 35 for '< 35 tCO2'
+    trigger_threshold_upper   NUMERIC,            -- used when trigger_operator = 'between'
+    effective_from            DATE,               -- optional — null for purely threshold-driven without fixed date
+    effective_to              DATE,               -- optional — null if runs to maturity
+    adjustment_mode           TEXT    NOT NULL,   -- 'absolute' (margin_bps replaces base) | 'additive' (margin_bps added to base)
+    margin_bps                INTEGER NOT NULL,   -- new total if absolute, signed delta if additive (e.g. -10 for ESG reward, +10 for penalty)
+    pik_portion_bps           INTEGER,            -- PIK split within this tier (absolute mode only)
+    step_type                 TEXT    NOT NULL,   -- 'initial' | 'step_up' | 'ratchet_down' | 'pik_toggle' | 'default_margin' | 'esg_reward' | 'esg_penalty'
+    notes                     TEXT,
+    -- 5-col audit-trail provenance block
+    source_document_id        INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+    source_page               INTEGER,
+    source_snippet            TEXT,
+    source_extracted_by       TEXT,
+    source_extracted_at       TIMESTAMPTZ,
+    created_at                TIMESTAMPTZ DEFAULT NOW(),
+    updated_at                TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(instrument_id, step_order),
+    CHECK (ratchet_kind IN ('base_margin', 'esg_adjustment')),
+    CHECK (adjustment_mode IN ('absolute', 'additive')),
+    CHECK (trigger_operator IS NULL OR trigger_operator IN ('<', '<=', '=', '>=', '>', 'between')),
+    -- ESG adjustments are always additive; base margin tiers are always absolute
+    CHECK (
+        (ratchet_kind = 'base_margin' AND adjustment_mode = 'absolute')
+        OR
+        (ratchet_kind = 'esg_adjustment' AND adjustment_mode = 'additive')
+    )
+);
+CREATE INDEX IF NOT EXISTS idx_csmr_instrument     ON capital_structure_margin_ratchets(instrument_id);
+CREATE INDEX IF NOT EXISTS idx_csmr_effective_from ON capital_structure_margin_ratchets(effective_from);
+CREATE INDEX IF NOT EXISTS idx_csmr_kind           ON capital_structure_margin_ratchets(ratchet_kind);
+CREATE INDEX IF NOT EXISTS idx_csmr_src_doc        ON capital_structure_margin_ratchets(source_document_id);
+
+COMMENT ON TABLE  capital_structure_margin_ratchets IS
+    'Margin ratchet schedule per instrument. ratchet_kind=base_margin holds absolute-margin tiers (time- or covenant-triggered step-downs/step-ups). ratchet_kind=esg_adjustment holds signed bps deltas applied on top of the active base tier when linked sustainability SPTs are met/missed.';
+
+-- F) Backfill spread_bps = margin_bps for floating-rate (and GILT-indexed) instruments
+--    where margin IS the spread. Fixed-rate instruments need coupon + base_rate
+--    backfill — handled by a seed block below.
+UPDATE capital_structure_instruments
+   SET spread_bps = margin_bps
+ WHERE spread_bps IS NULL
+   AND margin_bps IS NOT NULL
+   AND (interest_type = 'floating'
+        OR base_rate IN ('SOFR','SONIA','EURIBOR','ESTR','CORRA','TONA','EURIBOR3M','SOFR3M','GILT'));
+
+-- F.1) Fixed-rate instrument backfill — coupon, base rate at issuance, spread, benchmark
+--      from IC-memo-era estimates. Only touches rows still NULL.
+WITH f AS (SELECT * FROM (VALUES
+    ('gatwick-airport', 'Class A 6.125% 2026 Bond',       612,  400,  212,  175),
+    ('gatwick-airport', 'Class A 2.5% 2030 Bond',         250,  120,  130,  115),
+    ('gatwick-airport', 'Class A SLB 3.625% 2033 Bond',   362,  225,  137,  150),
+    ('gatwick-airport', 'Class A 4.625% 2034 Bond',       462,  300,  162,  150),
+    ('gatwick-airport', 'Class A 5.75% 2037 Bond',        575,  350,  225,  200),
+    ('gatwick-airport', 'Class A 3.125% 2039 Bond',       312,  230,   82,   75),
+    ('gatwick-airport', 'Class A 5.5% 2040 Bond',         550,  350,  200,  175),
+    ('gatwick-airport', 'Class A 6.5% 2041 Bond',         650,  450,  200,  175),
+    ('gatwick-airport', 'Class A 2.625% 2046 Bond',       262,  200,   62,   60),
+    ('gatwick-airport', 'Class A 3.25% 2048 Bond',        325,  250,   75,   75),
+    ('gatwick-airport', 'Class A 2.875% 2049 Bond',       287,  150,  137,  125),
+    ('gatwick-airport', 'GAF 6% 2030 Bond (XS3221827911)',600,  425,  175,  160),
+    ('getlink-eurotunnel', 'Eurotunnel Term Loan (project finance, partially index-linked)', 350, 0, 350, 325),
+    ('getlink-eurotunnel', 'Getlink SE 2025 Green Bonds', 375, 280, 95, 85),
+    ('m6-toll', 'Parent Loan Facility A (term)', 900, 120, 780, 450),
+    ('m6-toll', 'Parent Loan Facility B (on-demand)', 900, 120, 780, 450),
+    ('north-sea-owf', 'Shareholder Loan', 800, 150, 650, 600)
+  ) AS v(slug, name, coupon, base_rate, spread, benchmark))
+UPDATE capital_structure_instruments csi
+   SET coupon_bps = f.coupon,
+       base_rate_at_issuance_bps = f.base_rate,
+       spread_bps = COALESCE(csi.spread_bps, f.spread),
+       benchmark_spread_bps = COALESCE(csi.benchmark_spread_bps, f.benchmark)
+  FROM f JOIN deals d ON d.slug = f.slug
+ WHERE csi.deal_id = d.id
+   AND csi.instrument_name = f.name
+   AND csi.coupon_bps IS NULL;
+
+-- F.2) Default benchmark for any remaining instrument: spread − 20bp (a flat
+--      20bp private-debt premium baseline). Individual IC-memo values override.
+UPDATE capital_structure_instruments
+   SET benchmark_spread_bps = GREATEST(spread_bps - 20, 0)
+ WHERE benchmark_spread_bps IS NULL
+   AND spread_bps IS NOT NULL;
+
+-- F.3) Example margin ratchets — Aurora base-margin step-down + Gatwick SLB ESG SPTs.
+--      Only inserted if no ratchets exist for the instrument yet (first-run only).
+DO $ratchet_seed$
+DECLARE
+    v_inst_id UUID;
+BEGIN
+    -- Aurora Senior Term Loan A: construction → post-COD → further leverage-based step-down
+    SELECT csi.id INTO v_inst_id
+      FROM capital_structure_instruments csi
+      JOIN deals d ON d.id = csi.deal_id
+     WHERE d.slug = 'aurora-prime-data-campus'
+       AND csi.instrument_name = 'Senior Term Loan A'
+     LIMIT 1;
+    IF v_inst_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM capital_structure_margin_ratchets WHERE instrument_id = v_inst_id
+    ) THEN
+        INSERT INTO capital_structure_margin_ratchets
+          (instrument_id, step_order, ratchet_kind, trigger_type, trigger_metric,
+           trigger_operator, trigger_threshold, effective_from, effective_to,
+           adjustment_mode, margin_bps, step_type, notes)
+        VALUES
+          (v_inst_id, 1, 'base_margin', 'time_based', NULL, NULL, NULL,
+           '2023-06-30'::date, '2025-09-01'::date, 'absolute', 325, 'initial',
+           'Construction/ramp period — margin 325bp'),
+          (v_inst_id, 2, 'base_margin', 'leverage', 'net_leverage', '<', 5.0,
+           '2025-09-01'::date, NULL, 'absolute', 275, 'ratchet_down',
+           'Post-COD ratchet down to 275bp when leverage < 5.0x'),
+          (v_inst_id, 3, 'base_margin', 'leverage', 'net_leverage', '<', 4.0,
+           '2025-09-01'::date, NULL, 'absolute', 225, 'ratchet_down',
+           'Further ratchet to 225bp when leverage < 4.0x');
+    END IF;
+
+    -- Gatwick SLB 3.625% 2033 Bond: ESG SPTs linked to carbon intensity + renewable electricity
+    SELECT csi.id INTO v_inst_id
+      FROM capital_structure_instruments csi
+      JOIN deals d ON d.id = csi.deal_id
+     WHERE d.slug = 'gatwick-airport'
+       AND csi.instrument_name = 'Class A SLB 3.625% 2033 Bond'
+     LIMIT 1;
+    IF v_inst_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM capital_structure_margin_ratchets WHERE instrument_id = v_inst_id
+    ) THEN
+        INSERT INTO capital_structure_margin_ratchets
+          (instrument_id, step_order, ratchet_kind, trigger_type, trigger_metric,
+           trigger_operator, trigger_threshold, effective_from,
+           adjustment_mode, margin_bps, step_type, notes)
+        VALUES
+          (v_inst_id, 1, 'base_margin',    'time_based', NULL,                               NULL, NULL,  '2024-10-16'::date, 'absolute', 137, 'initial',      'Issuance margin (coupon 362 − 225 gilt)'),
+          (v_inst_id, 2, 'esg_adjustment', 'esg_kpi',    'carbon_intensity_tco2_per_pax',   '<=',  1.5,   '2027-12-31'::date, 'additive', -10, 'esg_reward',   'SPT 1: Scope 1+2 CO2/PAX ≤ 1.5 by 2027 → −10bp'),
+          (v_inst_id, 3, 'esg_adjustment', 'esg_kpi',    'carbon_intensity_tco2_per_pax',   '>',   1.5,   '2027-12-31'::date, 'additive', 10,  'esg_penalty', 'SPT 1 missed: +10bp step-up'),
+          (v_inst_id, 4, 'esg_adjustment', 'esg_kpi',    'renewable_electricity_pct',       '>=',  100.0, '2030-12-31'::date, 'additive', -5,  'esg_reward',   'SPT 2: 100% renewable electricity by 2030 → −5bp'),
+          (v_inst_id, 5, 'esg_adjustment', 'esg_kpi',    'renewable_electricity_pct',       '<',   100.0, '2030-12-31'::date, 'additive', 5,   'esg_penalty', 'SPT 2 missed: +5bp step-up');
+    END IF;
+END $ratchet_seed$;
+
+-- G) Extend v_topsheet_field_audit_status to cover ratchets
+DROP VIEW IF EXISTS v_topsheet_field_audit_status_v2 CASCADE;
+-- (the main view recreation lives up-stream; ratchet coverage added by a future pass)
+
+-- ═══════════════════════════════════════════════════════════════════════════════
 -- End of migrations — all statements above are idempotent
 -- ═══════════════════════════════════════════════════════════════════════════════

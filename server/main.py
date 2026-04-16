@@ -11224,9 +11224,12 @@ def get_portfolio(
         with get_connection() as spread_conn:
             spread_rows = spread_conn.execute(
                 """SELECT deal_id,
-                          ROUND(SUM(drawn_amount * margin_bps) / NULLIF(SUM(drawn_amount), 0))::int AS wa_spread_bps
+                          ROUND(SUM(drawn_amount * COALESCE(spread_bps, margin_bps))
+                                / NULLIF(SUM(drawn_amount), 0))::int AS wa_spread_bps
                    FROM capital_structure_instruments
-                   WHERE status = 'active' AND margin_bps IS NOT NULL AND drawn_amount > 0
+                   WHERE status = 'active'
+                     AND COALESCE(spread_bps, margin_bps) IS NOT NULL
+                     AND drawn_amount > 0
                    GROUP BY deal_id"""
             ).fetchall()
             spread_by_deal = {int(r["deal_id"]): int(r["wa_spread_bps"]) for r in spread_rows if r["wa_spread_bps"] is not None}
@@ -12078,9 +12081,12 @@ def get_dashboard(
         with get_connection() as spread_conn:
             spread_rows = spread_conn.execute(
                 """SELECT deal_id,
-                          ROUND(SUM(drawn_amount * margin_bps) / NULLIF(SUM(drawn_amount), 0))::int AS wa_spread_bps
+                          ROUND(SUM(drawn_amount * COALESCE(spread_bps, margin_bps))
+                                / NULLIF(SUM(drawn_amount), 0))::int AS wa_spread_bps
                    FROM capital_structure_instruments
-                   WHERE status = 'active' AND margin_bps IS NOT NULL AND drawn_amount > 0
+                   WHERE status = 'active'
+                     AND COALESCE(spread_bps, margin_bps) IS NOT NULL
+                     AND drawn_amount > 0
                    GROUP BY deal_id"""
             ).fetchall()
             spread_by_deal = {int(r["deal_id"]): int(r["wa_spread_bps"]) for r in spread_rows if r["wa_spread_bps"] is not None}
@@ -18480,7 +18486,19 @@ def get_capital_stack(slug: str, reporting_currency: str | None = None):
                    structural_seniority, ratio_consolidation_level,
                    intercompany_lender, subordination_agreement,
                    cashflow_priority_rank,
-                   pledged_share_entity, pledged_share_pct
+                   pledged_share_entity, pledged_share_pct,
+                   -- Instrument economics (new)
+                   coupon_bps, base_rate_at_issuance_bps, spread_bps,
+                   benchmark_spread_bps, private_debt_premium_bps, floor_bps,
+                   payment_frequency, day_count_convention,
+                   upfront_fee_bps, upfront_fee_basis,
+                   commitment_fee_pct_of_margin, commitment_fee_bps,
+                   utilisation_fee_tiers, ticking_fee_bps, ticking_fee_start,
+                   agent_fee_annual, extension_fee_bps, exit_fee_bps,
+                   prepayment_protection_type, prepayment_schedule,
+                   soft_call_until, mfn_sunset_months,
+                   acquisition_channel, purchase_price, original_issue_price,
+                   ytm_bps, ytw_bps, has_pik, pik_margin_bps, pik_toggle
             FROM capital_structure_instruments
             WHERE deal_id = %s
             ORDER BY cashflow_priority_rank NULLS LAST, maturity_date
@@ -18495,14 +18513,93 @@ def get_capital_stack(slug: str, reporting_currency: str | None = None):
             for k in (
                 "drawn_amount", "committed_amount", "our_holding", "our_holding_pct",
                 "ownership_pct", "pledged_share_pct",
+                "commitment_fee_pct_of_margin", "purchase_price", "original_issue_price",
+                "agent_fee_annual",
             ):
                 if inst.get(k) is not None:
                     inst[k] = float(inst[k])
             if inst.get("maturity_date") is not None:
                 inst["maturity_date"] = inst["maturity_date"].isoformat()
+            if inst.get("ticking_fee_start") is not None:
+                inst["ticking_fee_start"] = inst["ticking_fee_start"].isoformat()
+            if inst.get("soft_call_until") is not None:
+                inst["soft_call_until"] = inst["soft_call_until"].isoformat()
             if inst.get("id") is not None:
                 inst["id"] = str(inst["id"])
             instruments.append(inst)
+
+        # Fetch margin ratchets for all instruments on this deal
+        ratchet_rows = conn.execute(
+            """
+            SELECT csmr.instrument_id, csmr.step_order, csmr.ratchet_kind,
+                   csmr.trigger_type, csmr.trigger_metric, csmr.trigger_operator,
+                   csmr.trigger_threshold, csmr.trigger_threshold_upper,
+                   csmr.effective_from, csmr.effective_to,
+                   csmr.adjustment_mode, csmr.margin_bps,
+                   csmr.pik_portion_bps, csmr.step_type, csmr.notes
+            FROM capital_structure_margin_ratchets csmr
+            JOIN capital_structure_instruments csi ON csi.id = csmr.instrument_id
+            WHERE csi.deal_id = %s
+            ORDER BY csmr.instrument_id, csmr.step_order
+            """,
+            (deal["id"],),
+        ).fetchall()
+
+        from collections import defaultdict as _dd
+        ratchets_by_instrument: dict[str, list[dict]] = _dd(list)
+        for r in ratchet_rows:
+            d = dict(r)
+            if d.get("trigger_threshold") is not None:
+                d["trigger_threshold"] = float(d["trigger_threshold"])
+            if d.get("trigger_threshold_upper") is not None:
+                d["trigger_threshold_upper"] = float(d["trigger_threshold_upper"])
+            if d.get("effective_from") is not None:
+                d["effective_from"] = d["effective_from"].isoformat()
+            if d.get("effective_to") is not None:
+                d["effective_to"] = d["effective_to"].isoformat()
+            instrument_id = str(d.pop("instrument_id"))
+            ratchets_by_instrument[instrument_id].append(d)
+
+        # Attach ratchets + compute effective margin per instrument (as-at today)
+        from datetime import date as _date
+        today = _date.today().isoformat()
+        for inst in instruments:
+            iid = inst.get("id")
+            schedule = ratchets_by_instrument.get(iid, [])
+            inst["margin_ratchet_schedule"] = schedule
+
+            # Effective margin = latest active base_margin tier + SUM of active ESG adjustments.
+            # "Active" = effective_from is null or <= today AND (effective_to is null or > today).
+            def _is_active(r):
+                ef = r.get("effective_from")
+                et = r.get("effective_to")
+                if ef is not None and ef > today:
+                    return False
+                if et is not None and et <= today:
+                    return False
+                return True
+
+            active = [r for r in schedule if _is_active(r)]
+            base_tiers = [r for r in active if r["ratchet_kind"] == "base_margin"]
+            esg_adj = [r for r in active if r["ratchet_kind"] == "esg_adjustment"]
+
+            if base_tiers:
+                # Use the latest-effective base tier
+                latest_base = max(
+                    base_tiers,
+                    key=lambda r: (r.get("effective_from") or "", r["step_order"]),
+                )
+                base_margin_bps = latest_base["margin_bps"]
+            else:
+                # Fall back to the instrument's pricing fields
+                base_margin_bps = inst.get("spread_bps") or inst.get("margin_bps")
+
+            esg_delta_bps = sum(r["margin_bps"] for r in esg_adj)
+            effective = (base_margin_bps or 0) + esg_delta_bps if base_margin_bps is not None else None
+
+            inst["effective_margin_bps"] = effective
+            inst["effective_margin_base_bps"] = base_margin_bps
+            inst["effective_margin_esg_adjustment_bps"] = esg_delta_bps if esg_adj else 0
 
         entities_raw = conn.execute(
             """
